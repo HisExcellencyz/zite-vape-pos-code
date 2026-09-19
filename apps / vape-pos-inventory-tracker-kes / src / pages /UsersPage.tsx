@@ -1,0 +1,435 @@
+import { useState, useEffect } from 'react';
+import { getUsers, getRoles, saveRole, inviteUser, assignRole, deleteRecord, exportCsv } from 'zitejs/api';
+import { Card, CardContent } from '@project/components/ui/card';
+import { Button } from '@project/components/ui/button';
+import { Input } from '@project/components/ui/input';
+import { Label } from '@project/components/ui/label';
+import { Badge } from '@project/components/ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@project/components/ui/tabs';
+import { Switch } from '@project/components/ui/switch';
+import { Textarea } from '@project/components/ui/textarea';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
+import { Search, Plus, UserPlus, Shield, Mail, Pencil, Trash2, Download, Check, X } from 'lucide-react';
+import { toast } from 'sonner';
+import { downloadCsv } from '../lib/exportHelper';
+
+const AREAS = ['pos', 'customers', 'inventory', 'purchases', 'suppliers', 'expenses', 'reports', 'users', 'settings'] as const;
+const ACTIONS = ['view', 'create', 'edit', 'delete', 'export', 'import', 'approve', 'backdate'] as const;
+type Area = typeof AREAS[number];
+type Action = typeof ACTIONS[number];
+type PermMatrix = Record<Area, Record<Action, boolean>>;
+
+function emptyPerms(): PermMatrix {
+  const p: any = {};
+  AREAS.forEach(a => { p[a] = {}; ACTIONS.forEach(ac => { p[a][ac] = false; }); });
+  return p;
+}
+
+interface AppUser {
+  id: string;
+  name?: string;
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  emailVerified?: boolean;
+  roleId?: string | null;
+  roleName?: string;
+  status?: string;
+  invitedBy?: string;
+  invitedAt?: string;
+}
+interface Role {
+  id: string;
+  roleName?: string;
+  description?: string;
+  permissions?: string;
+  isDefault?: boolean;
+  active?: boolean;
+}
+
+export default function UsersPage() {
+  const [users, setUsers] = useState<AppUser[]>([]);
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+
+  // Invite state
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [invEmail, setInvEmail] = useState('');
+  const [invFirst, setInvFirst] = useState('');
+  const [invLast, setInvLast] = useState('');
+  const [invRole, setInvRole] = useState('');
+  const [inviting, setInviting] = useState(false);
+
+  // Role editor
+  const [roleOpen, setRoleOpen] = useState(false);
+  const [editRole, setEditRole] = useState<Role | null>(null);
+  const [roleName, setRoleName] = useState('');
+  const [roleDesc, setRoleDesc] = useState('');
+  const [rolePerms, setRolePerms] = useState<PermMatrix>(emptyPerms());
+  const [roleDefault, setRoleDefault] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const res = await getUsers({ search: search || undefined });
+      setUsers(res.users);
+      setRoles(res.roles);
+    } catch { toast.error('Failed to load users'); }
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleInvite = async () => {
+    if (!invEmail.trim()) { toast.error('Email required'); return; }
+    setInviting(true);
+    try {
+      const res = await inviteUser({
+        email: invEmail.trim(),
+        firstName: invFirst.trim() || undefined,
+        lastName: invLast.trim() || undefined,
+        roleId: invRole || undefined,
+      });
+      toast.success(res.message);
+      setInviteOpen(false);
+      setInvEmail(''); setInvFirst(''); setInvLast(''); setInvRole('');
+      load();
+    } catch (err: any) { toast.error(err.message || 'Invite failed'); }
+    setInviting(false);
+  };
+
+  const handleAssignRole = async (userId: string, roleId: string) => {
+    try {
+      await assignRole({ userId, roleId });
+      toast.success('Role assigned');
+      load();
+    } catch { toast.error('Failed to assign role'); }
+  };
+
+  // Role CRUD
+  const openNewRole = () => {
+    setEditRole(null);
+    setRoleName('');
+    setRoleDesc('');
+    setRolePerms(emptyPerms());
+    setRoleDefault(false);
+    setRoleOpen(true);
+  };
+
+  const openEditRole = (r: Role) => {
+    setEditRole(r);
+    setRoleName(r.roleName || '');
+    setRoleDesc(r.description || '');
+    setRoleDefault(r.isDefault || false);
+    try {
+      setRolePerms(r.permissions ? JSON.parse(r.permissions) : emptyPerms());
+    } catch { setRolePerms(emptyPerms()); }
+    setRoleOpen(true);
+  };
+
+  const togglePerm = (area: Area, action: Action) => {
+    setRolePerms(prev => ({
+      ...prev,
+      [area]: { ...prev[area], [action]: !prev[area][action] },
+    }));
+  };
+
+  const handleSaveRole = async () => {
+    if (!roleName.trim()) { toast.error('Role name required'); return; }
+    try {
+      await saveRole({
+        id: editRole?.id,
+        roleName: roleName.trim(),
+        description: roleDesc.trim() || undefined,
+        permissions: JSON.stringify(rolePerms),
+        isDefault: roleDefault,
+        active: true,
+      });
+      toast.success(editRole ? 'Role updated' : 'Role created');
+      setRoleOpen(false);
+      load();
+    } catch (err: any) { toast.error(err.message || 'Save failed'); }
+  };
+
+  const handleDeleteRole = async (id: string) => {
+    try {
+      await deleteRecord({ table: 'roles', id });
+      toast.success('Role deleted');
+      load();
+    } catch { toast.error('Delete failed'); }
+  };
+
+  const handleExportUsers = () => {
+    const csv = ['Name,Email,Role'].concat(
+      users.map(u => `"${u.name || ''}","${u.email}","${u.roleName || ''}"`)
+    ).join('\n');
+    downloadCsv(csv, 'users_export.csv');
+    toast.success('Exported');
+  };
+
+  const filtered = users.filter(u =>
+    !search || u.email?.toLowerCase().includes(search.toLowerCase()) || u.name?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Users & Roles</h1>
+          <p className="text-sm text-muted-foreground">Manage team access and permissions</p>
+        </div>
+      </div>
+
+      <Tabs defaultValue="users" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="users">Users</TabsTrigger>
+          <TabsTrigger value="roles">Roles & Permissions</TabsTrigger>
+        </TabsList>
+
+        {/* USERS TAB */}
+        <TabsContent value="users" className="space-y-4">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="relative flex-1 min-w-[200px] max-w-sm">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input placeholder="Search users..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+            </div>
+            <div className="flex gap-2 ml-auto">
+              <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExportUsers}>
+                <Download className="w-4 h-4 mr-1" /> Export
+              </Button>
+              <Button size="sm" onClick={() => setInviteOpen(true)}>
+                <UserPlus className="w-4 h-4 mr-1" /> Invite User
+              </Button>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="flex justify-center py-16"><div className="w-8 h-8 border-3 border-primary border-t-transparent rounded-full animate-spin" /></div>
+          ) : filtered.length === 0 ? (
+            <Card><CardContent className="py-12 text-center text-muted-foreground">No users found</CardContent></Card>
+          ) : (
+            <Card>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className="border-b border-border text-left text-muted-foreground">
+                      <th className="p-3 font-medium">User</th>
+                      <th className="p-3 font-medium">Email</th>
+                      <th className="p-3 font-medium">Status</th>
+                      <th className="p-3 font-medium">Role</th>
+                      <th className="p-3 font-medium w-[140px]">Actions</th>
+                    </tr></thead>
+                    <tbody>
+                      {filtered.map(u => (
+                        <tr key={u.id} className="border-b border-border/50 hover:bg-muted/30">
+                          <td className="p-3 font-medium text-foreground">{u.name || u.firstName || '—'}</td>
+                          <td className="p-3 text-muted-foreground">{u.email}</td>
+                          <td className="p-3">
+                            <Badge
+                              variant="secondary"
+                              className={`text-xs ${u.status === 'Verified' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-pink-500/10 text-pink-400 border-pink-500/20'}`}
+                            >
+                              {u.status === 'Verified' ? 'Verified' : 'Unverified'}
+                            </Badge>
+                          </td>
+                          <td className="p-3">
+                            <Select
+                              value={u.roleId || 'none'}
+                              onValueChange={val => val !== 'none' && handleAssignRole(u.id, val)}
+                            >
+                              <SelectTrigger className="w-[140px] h-8 text-xs">
+                                <SelectValue placeholder="Assign role" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">Unassigned</SelectItem>
+                                {roles.map(r => (
+                                  <SelectItem key={r.id} value={r.id}>{r.roleName}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </td>
+                          <td className="p-3">
+                            <Button variant="ghost" size="sm" onClick={() => {
+                              toast.info(`${u.email} — ${u.roleName || 'No role'}`);
+                            }}>
+                              <Mail className="w-3.5 h-3.5" />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        {/* ROLES TAB */}
+        <TabsContent value="roles" className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">Define roles and their permission matrices</p>
+            <Button size="sm" onClick={openNewRole}>
+              <Plus className="w-4 h-4 mr-1" /> Add Role
+            </Button>
+          </div>
+
+          {roles.length === 0 ? (
+            <Card><CardContent className="py-12 text-center text-muted-foreground">No roles defined yet. Create one to start assigning permissions.</CardContent></Card>
+          ) : (
+            <div className="space-y-4">
+              {roles.map(r => {
+                let perms: PermMatrix | null = null;
+                try { perms = r.permissions ? JSON.parse(r.permissions) : null; } catch {}
+                return (
+                  <Card key={r.id}>
+                    <CardContent className="p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <Shield className="w-5 h-5 text-primary" />
+                          <div>
+                            <h3 className="font-semibold text-foreground">{r.roleName}</h3>
+                            {r.description && <p className="text-xs text-muted-foreground">{r.description}</p>}
+                          </div>
+                          {r.isDefault && <Badge variant="outline" className="text-xs">Default</Badge>}
+                        </div>
+                        <div className="flex gap-1">
+                          <Button variant="ghost" size="sm" onClick={() => openEditRole(r)}><Pencil className="w-3.5 h-3.5" /></Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild><Button variant="ghost" size="sm" className="text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button></AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader><AlertDialogTitle>Delete role?</AlertDialogTitle><AlertDialogDescription>This will remove "{r.roleName}" and unassign users from it.</AlertDialogDescription></AlertDialogHeader>
+                              <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleDeleteRole(r.id)}>Delete</AlertDialogAction></AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
+                      </div>
+                      {perms && <PermissionsGrid perms={perms} />}
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
+
+      {/* Invite Dialog */}
+      <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>Invite User</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div><Label>Email *</Label><Input value={invEmail} onChange={e => setInvEmail(e.target.value)} placeholder="user@example.com" type="email" /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>First Name</Label><Input value={invFirst} onChange={e => setInvFirst(e.target.value)} /></div>
+              <div><Label>Last Name</Label><Input value={invLast} onChange={e => setInvLast(e.target.value)} /></div>
+            </div>
+            <div>
+              <Label>Role</Label>
+              <Select value={invRole} onValueChange={setInvRole}>
+                <SelectTrigger><SelectValue placeholder="Select a role" /></SelectTrigger>
+                <SelectContent>
+                  {roles.map(r => <SelectItem key={r.id} value={r.id}>{r.roleName}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <p className="text-xs text-muted-foreground">An invite email will be sent. The user will appear as unverified until they sign in.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setInviteOpen(false)}>Cancel</Button>
+            <Button onClick={handleInvite} disabled={inviting}>{inviting ? 'Sending...' : 'Send Invite'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Role Editor Dialog */}
+      <Dialog open={roleOpen} onOpenChange={setRoleOpen}>
+        <DialogContent className="sm:max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>{editRole ? 'Edit Role' : 'Create Role'}</DialogTitle></DialogHeader>
+          <div className="space-y-5">
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Role Name *</Label><Input value={roleName} onChange={e => setRoleName(e.target.value)} placeholder="e.g. Cashier" /></div>
+              <div><Label>Description</Label><Input value={roleDesc} onChange={e => setRoleDesc(e.target.value)} placeholder="Brief description" /></div>
+            </div>
+            <div className="flex items-center gap-3">
+              <Switch checked={roleDefault} onCheckedChange={setRoleDefault} />
+              <Label className="text-sm">Set as default role for new users</Label>
+            </div>
+            <div>
+              <Label className="mb-2 block">Permissions Matrix</Label>
+              <div className="overflow-x-auto rounded-lg border border-border">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-muted/50 text-muted-foreground">
+                      <th className="p-2 text-left font-medium">Area</th>
+                      {ACTIONS.map(a => (
+                        <th key={a} className="p-2 text-center font-medium capitalize">{a}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {AREAS.map(area => (
+                      <tr key={area} className="border-t border-border/50 hover:bg-muted/20">
+                        <td className="p-2 font-medium text-foreground capitalize">{area}</td>
+                        {ACTIONS.map(action => (
+                          <td key={action} className="p-2 text-center">
+                            <button
+                              onClick={() => togglePerm(area, action)}
+                              className={`w-7 h-7 rounded-md flex items-center justify-center transition-colors ${
+                                rolePerms[area]?.[action]
+                                  ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
+                                  : 'bg-muted/50 text-muted-foreground hover:bg-muted'
+                              }`}
+                            >
+                              {rolePerms[area]?.[action] ? <Check className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
+                            </button>
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRoleOpen(false)}>Cancel</Button>
+            <Button onClick={handleSaveRole}>{editRole ? 'Update Role' : 'Create Role'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function PermissionsGrid({ perms }: { perms: PermMatrix }) {
+  return (
+    <div className="overflow-x-auto rounded-lg border border-border">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="bg-muted/50 text-muted-foreground">
+            <th className="p-1.5 text-left font-medium">Area</th>
+            {ACTIONS.map(a => <th key={a} className="p-1.5 text-center font-medium capitalize">{a}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {AREAS.map(area => (
+            <tr key={area} className="border-t border-border/50">
+              <td className="p-1.5 font-medium text-foreground capitalize">{area}</td>
+              {ACTIONS.map(action => (
+                <td key={action} className="p-1.5 text-center">
+                  {perms[area]?.[action]
+                    ? <Check className="w-3.5 h-3.5 text-green-400 mx-auto" />
+                    : <span className="text-muted-foreground/40">—</span>}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
