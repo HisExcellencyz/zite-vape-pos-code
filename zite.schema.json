@@ -1,0 +1,2442 @@
+{
+  "tables": [
+    {
+      "id": "tug6uTcVNzZ",
+      "sdkName": "businessSettings",
+      "name": "Business Settings",
+      "primaryFieldId": "fprK6fr3jUg",
+      "fields": [
+        {
+          "id": "fprK6fr3jUg",
+          "sdkName": "businessName",
+          "definition": {
+            "name": "Business Name",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "f8sYavd8Erx",
+          "sdkName": "logo",
+          "definition": {
+            "name": "Logo",
+            "type": "attachments",
+            "template": {}
+          }
+        },
+        {
+          "id": "fbnExD7HCso",
+          "sdkName": "coverPhoto",
+          "definition": {
+            "name": "Cover Photo",
+            "type": "attachments",
+            "template": {}
+          }
+        },
+        {
+          "id": "fe5YZL7uMtY",
+          "sdkName": "address",
+          "definition": {
+            "name": "Address",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "fd2oUhtHVxg",
+          "sdkName": "phone",
+          "definition": {
+            "name": "Phone",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "f9jHLBeiLnd",
+          "sdkName": "email",
+          "definition": {
+            "name": "Email",
+            "type": "email",
+            "template": {}
+          }
+        },
+        {
+          "id": "fdfRb1qcfPq",
+          "sdkName": "taxId",
+          "definition": {
+            "name": "Tax ID",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "fsc3nuKbjD7",
+          "sdkName": "customFields",
+          "definition": {
+            "name": "Custom Fields",
+            "type": "long_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "fbjcKKpFyqZ",
+          "sdkName": "defaultCurrency",
+          "definition": {
+            "name": "Default Currency",
+            "type": "single_line_text",
+            "template": {
+              "defaultValue": "KES"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "toZ7EnqKNVM",
+      "sdkName": "branches",
+      "name": "Branches",
+      "primaryFieldId": "fgtAv1qRz9U",
+      "fields": [
+        {
+          "id": "fgtAv1qRz9U",
+          "sdkName": "branchName",
+          "definition": {
+            "name": "Branch Name",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "frRHXn4r9SE",
+          "sdkName": "address",
+          "definition": {
+            "name": "Address",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "fpNUhKBFoNs",
+          "sdkName": "phone",
+          "definition": {
+            "name": "Phone",
+            "type": "phone_number",
+            "template": {}
+          }
+        },
+        {
+          "id": "f3zD4g46Mw6",
+          "sdkName": "taxId",
+          "definition": {
+            "name": "Tax ID",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "f5kpCRzTLF7",
+          "sdkName": "customFields",
+          "definition": {
+            "name": "Custom Fields",
+            "type": "long_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "f4P1A5GG5Gr",
+          "sdkName": "isMainBranch",
+          "definition": {
+            "name": "Is Main Branch",
+            "type": "checkbox",
+            "template": {
+              "defaultValue": false
+            }
+          }
+        },
+        {
+          "id": "fqmdZi15bZM",
+          "sdkName": "active",
+          "definition": {
+            "name": "Active",
+            "type": "checkbox",
+            "template": {
+              "defaultValue": true
+            }
+          }
+        },
+        {
+          "id": "fgnPdqzxAVz",
+          "sdkName": "products",
+          "definition": {
+            "name": "Products",
+            "type": "linked_record",
+            "template": {
+              "tableId": "tihocaYVNvy",
+              "isInverse": true,
+              "allowMultiple": true,
+              "inverseFieldId": "fhKcGWDBy8T"
+            }
+          }
+        },
+        {
+          "id": "fqHngNDjNjw",
+          "sdkName": "supplierDeposits",
+          "definition": {
+            "name": "Supplier Deposits",
+            "type": "linked_record",
+            "template": {
+              "tableId": "tvvxvyxVMCb",
+              "isInverse": true,
+              "allowMultiple": true,
+              "inverseFieldId": "fwnmoQj9wLF"
+            }
+          }
+        },
+        {
+          "id": "fkbhWQFKwJd",
+          "sdkName": "sales",
+          "definition": {
+            "name": "Sales",
+            "type": "linked_record",
+            "template": {
+              "tableId": "teCFzvxmgiE",
+              "isInverse": true,
+              "allowMultiple": true,
+              "inverseFieldId": "foV5VkULAb8"
+            }
+          }
+        },
+        {
+          "id": "fiqcgoJGxRq",
+          "sdkName": "purchases",
+          "definition": {
+            "name": "Purchases",
+            "type": "linked_record",
+            "template": {
+              "tableId": "toYiEyT15kP",
+              "isInverse": true,
+              "allowMultiple": true,
+              "inverseFieldId": "fr2WRvPATSA"
+            }
+          }
+        },
+        {
+          "id": "feucWvvrpok",
+          "sdkName": "otherExpenses",
+          "definition": {
+            "name": "Other Expenses",
+            "type": "linked_record",
+            "template": {
+              "tableId": "t8QHTEswG7u",
+              "isInverse": true,
+              "allowMultiple": true,
+              "inverseFieldId": "ffKLiqd9RuQ"
+            }
+          }
+        },
+        {
+          "id": "fig8Fgtpfad",
+          "sdkName": "otherIncome",
+          "definition": {
+            "name": "Other Income",
+            "type": "linked_record",
+            "template": {
+              "tableId": "t3G4JS5fCGw",
+              "isInverse": true,
+              "allowMultiple": true,
+              "inverseFieldId": "f2TsrZ1aGn8"
+            }
+          }
+        },
+        {
+          "id": "ffdkEAk5Nsd",
+          "sdkName": "purchaseOrders",
+          "definition": {
+            "name": "Purchase Orders",
+            "type": "linked_record",
+            "template": {
+              "tableId": "teHDsuKNSLJ",
+              "isInverse": true,
+              "allowMultiple": true,
+              "inverseFieldId": "fn8eW3Bw9EQ"
+            }
+          }
+        },
+        {
+          "id": "fvxuJgANdHY",
+          "sdkName": "plusCode",
+          "definition": {
+            "name": "Plus Code",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "fgenTcivGWa",
+          "sdkName": "coordinates",
+          "definition": {
+            "name": "Coordinates",
+            "type": "single_line_text",
+            "template": {}
+          }
+        }
+      ]
+    },
+    {
+      "id": "tdW6GLwH9Dw",
+      "sdkName": "currencies",
+      "name": "Currencies",
+      "primaryFieldId": "fqGjb1tyoNC",
+      "fields": [
+        {
+          "id": "fqGjb1tyoNC",
+          "sdkName": "currencyCode",
+          "definition": {
+            "name": "Currency Code",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "f2sR19xT54L",
+          "sdkName": "symbol",
+          "definition": {
+            "name": "Symbol",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "frXJew2MDxX",
+          "sdkName": "exchangeRate",
+          "definition": {
+            "name": "Exchange Rate",
+            "type": "number",
+            "template": {
+              "defaultValue": 1,
+              "numberFormat": "local",
+              "decimalPlaces": 4
+            }
+          }
+        },
+        {
+          "id": "fbBpimjBxhw",
+          "sdkName": "isDefault",
+          "definition": {
+            "name": "Is Default",
+            "type": "checkbox",
+            "template": {
+              "defaultValue": false
+            }
+          }
+        },
+        {
+          "id": "f3kB74CgZmv",
+          "sdkName": "active",
+          "definition": {
+            "name": "Active",
+            "type": "checkbox",
+            "template": {
+              "defaultValue": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "tvPRbhCVzRZ",
+      "sdkName": "categories",
+      "name": "Categories",
+      "primaryFieldId": "f731iqyH9bx",
+      "fields": [
+        {
+          "id": "f731iqyH9bx",
+          "sdkName": "categoryName",
+          "definition": {
+            "name": "Category Name",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "f4Sbt8CnQME",
+          "sdkName": "description",
+          "definition": {
+            "name": "Description",
+            "type": "long_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "fcfdxvQrbrZ",
+          "sdkName": "image",
+          "definition": {
+            "name": "Image",
+            "type": "attachments",
+            "template": {}
+          }
+        },
+        {
+          "id": "fvCgZhFep2G",
+          "sdkName": "active",
+          "definition": {
+            "name": "Active",
+            "type": "checkbox",
+            "template": {
+              "defaultValue": true
+            }
+          }
+        },
+        {
+          "id": "f5kmPYwd9N9",
+          "sdkName": "products",
+          "definition": {
+            "name": "Products",
+            "type": "linked_record",
+            "template": {
+              "tableId": "tihocaYVNvy",
+              "isInverse": true,
+              "allowMultiple": true,
+              "inverseFieldId": "fpad8iBni2e"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "tihocaYVNvy",
+      "sdkName": "products",
+      "name": "Products",
+      "primaryFieldId": "f8p44YrfrL1",
+      "fields": [
+        {
+          "id": "f8p44YrfrL1",
+          "sdkName": "productName",
+          "definition": {
+            "name": "Product Name",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "fpQNcd1ESTg",
+          "sdkName": "sku",
+          "definition": {
+            "name": "SKU",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "f5ofS3wwgas",
+          "sdkName": "costPrice",
+          "definition": {
+            "name": "Cost Price",
+            "type": "number",
+            "template": {
+              "numberFormat": "local",
+              "decimalPlaces": 2
+            }
+          }
+        },
+        {
+          "id": "fw7UQhVwV6U",
+          "sdkName": "sellingPrice",
+          "definition": {
+            "name": "Selling Price",
+            "type": "number",
+            "template": {
+              "numberFormat": "local",
+              "decimalPlaces": 2
+            }
+          }
+        },
+        {
+          "id": "fpad8iBni2e",
+          "sdkName": "category",
+          "definition": {
+            "name": "Category",
+            "type": "linked_record",
+            "template": {
+              "tableId": "tvPRbhCVzRZ",
+              "isInverse": false,
+              "allowMultiple": true,
+              "inverseFieldId": "f5kmPYwd9N9"
+            }
+          }
+        },
+        {
+          "id": "f9XHoUTaTNa",
+          "sdkName": "images",
+          "definition": {
+            "name": "Images",
+            "type": "attachments",
+            "template": {}
+          }
+        },
+        {
+          "id": "fmbDsMSTczo",
+          "sdkName": "status",
+          "definition": {
+            "name": "Status",
+            "type": "single_select",
+            "template": {
+              "options": [
+                {
+                  "value": "i2Pb",
+                  "label": "Active",
+                  "color": "green"
+                },
+                {
+                  "value": "bEeP",
+                  "label": "Inactive",
+                  "color": "red"
+                }
+              ],
+              "defaultValue": "i2Pb",
+              "disableColors": false
+            }
+          }
+        },
+        {
+          "id": "f1Tm4PQJS9W",
+          "sdkName": "stockQuantity",
+          "definition": {
+            "name": "Stock Quantity",
+            "type": "number",
+            "template": {
+              "defaultValue": 0,
+              "numberFormat": "local",
+              "decimalPlaces": 0
+            }
+          }
+        },
+        {
+          "id": "f7RvFAgjzTF",
+          "sdkName": "reorderLevel",
+          "definition": {
+            "name": "Reorder Level",
+            "type": "number",
+            "template": {
+              "defaultValue": 5,
+              "numberFormat": "local",
+              "decimalPlaces": 0
+            }
+          }
+        },
+        {
+          "id": "fgLCB7jnpdt",
+          "sdkName": "taxRate",
+          "definition": {
+            "name": "Tax Rate",
+            "type": "number",
+            "template": {
+              "defaultValue": 0,
+              "numberFormat": "local",
+              "decimalPlaces": 2
+            }
+          }
+        },
+        {
+          "id": "fpLumd3wXts",
+          "sdkName": "description",
+          "definition": {
+            "name": "Description",
+            "type": "long_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "fhKcGWDBy8T",
+          "sdkName": "branch",
+          "definition": {
+            "name": "Branch",
+            "type": "linked_record",
+            "template": {
+              "tableId": "toZ7EnqKNVM",
+              "isInverse": false,
+              "allowMultiple": true,
+              "inverseFieldId": "fgnPdqzxAVz"
+            }
+          }
+        },
+        {
+          "id": "f8UxtGVyHpo",
+          "sdkName": "productVariations",
+          "definition": {
+            "name": "Product Variations",
+            "type": "linked_record",
+            "template": {
+              "tableId": "tqVcWfeJy3d",
+              "isInverse": true,
+              "allowMultiple": true,
+              "inverseFieldId": "fanCFzpAQ1V"
+            }
+          }
+        },
+        {
+          "id": "fioW6mZc59F",
+          "sdkName": "productSuppliers",
+          "definition": {
+            "name": "Product Suppliers",
+            "type": "linked_record",
+            "template": {
+              "tableId": "t7vjaJ5YRAL",
+              "isInverse": true,
+              "allowMultiple": true,
+              "inverseFieldId": "fpBFxET1tTt"
+            }
+          }
+        },
+        {
+          "id": "f5JffSqi7Gg",
+          "sdkName": "saleItems",
+          "definition": {
+            "name": "Sale Items",
+            "type": "linked_record",
+            "template": {
+              "tableId": "tqYvMyyrePS",
+              "isInverse": true,
+              "allowMultiple": true,
+              "inverseFieldId": "fjAcKFhiYj9"
+            }
+          }
+        },
+        {
+          "id": "fpnLCjWRcL4",
+          "sdkName": "purchaseItems",
+          "definition": {
+            "name": "Purchase Items",
+            "type": "linked_record",
+            "template": {
+              "tableId": "thURVtQxrMA",
+              "isInverse": true,
+              "allowMultiple": true,
+              "inverseFieldId": "fo5L4V26aBd"
+            }
+          }
+        },
+        {
+          "id": "frYDXq2ov8Y",
+          "sdkName": "supplierTransactions",
+          "definition": {
+            "name": "Supplier Transactions",
+            "type": "linked_record",
+            "template": {
+              "tableId": "thoYN5eRQxa",
+              "isInverse": true,
+              "allowMultiple": true,
+              "inverseFieldId": "fj29cozJbSb"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "tqVcWfeJy3d",
+      "sdkName": "productVariations",
+      "name": "Product Variations",
+      "primaryFieldId": "f8JmDpC71m3",
+      "fields": [
+        {
+          "id": "f8JmDpC71m3",
+          "sdkName": "variationName",
+          "definition": {
+            "name": "Variation Name",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "fsLYQwr68Zz",
+          "sdkName": "sku",
+          "definition": {
+            "name": "SKU",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "fbsyQrFKGyu",
+          "sdkName": "costPrice",
+          "definition": {
+            "name": "Cost Price",
+            "type": "number",
+            "template": {
+              "numberFormat": "local",
+              "decimalPlaces": 2
+            }
+          }
+        },
+        {
+          "id": "f3suZyQYv7R",
+          "sdkName": "sellingPrice",
+          "definition": {
+            "name": "Selling Price",
+            "type": "number",
+            "template": {
+              "numberFormat": "local",
+              "decimalPlaces": 2
+            }
+          }
+        },
+        {
+          "id": "fkhRqJdoXf8",
+          "sdkName": "stockQuantity",
+          "definition": {
+            "name": "Stock Quantity",
+            "type": "number",
+            "template": {
+              "defaultValue": 0,
+              "numberFormat": "local",
+              "decimalPlaces": 0
+            }
+          }
+        },
+        {
+          "id": "fanCFzpAQ1V",
+          "sdkName": "product",
+          "definition": {
+            "name": "Product",
+            "type": "linked_record",
+            "template": {
+              "tableId": "tihocaYVNvy",
+              "isInverse": false,
+              "allowMultiple": true,
+              "inverseFieldId": "f8UxtGVyHpo"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "tgambjsvc4R",
+      "sdkName": "customers",
+      "name": "Customers",
+      "primaryFieldId": "fccP3Tn9XtQ",
+      "fields": [
+        {
+          "id": "fccP3Tn9XtQ",
+          "sdkName": "phoneNumber",
+          "definition": {
+            "name": "Phone Number",
+            "type": "phone_number",
+            "template": {}
+          }
+        },
+        {
+          "id": "f6Zc8hKNFwM",
+          "sdkName": "customerName",
+          "definition": {
+            "name": "Customer Name",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "fd2v4YKusBC",
+          "sdkName": "email",
+          "definition": {
+            "name": "Email",
+            "type": "email",
+            "template": {}
+          }
+        },
+        {
+          "id": "fiJZTYXPsDp",
+          "sdkName": "address",
+          "definition": {
+            "name": "Address",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "foMDBhPhonN",
+          "sdkName": "notes",
+          "definition": {
+            "name": "Notes",
+            "type": "long_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "f2XxWX4SRJR",
+          "sdkName": "sales",
+          "definition": {
+            "name": "Sales",
+            "type": "linked_record",
+            "template": {
+              "tableId": "teCFzvxmgiE",
+              "isInverse": true,
+              "allowMultiple": true,
+              "inverseFieldId": "fqkhDrW7nFg"
+            }
+          }
+        },
+        {
+          "id": "f6nGsT8Ef5K",
+          "sdkName": "location",
+          "definition": {
+            "name": "Location",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "fhCX9h1ft97",
+          "sdkName": "coordinates",
+          "definition": {
+            "name": "Coordinates",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "fdXQ9GMoQD3",
+          "sdkName": "plusCode",
+          "definition": {
+            "name": "Plus Code",
+            "type": "single_line_text",
+            "template": {}
+          }
+        }
+      ]
+    },
+    {
+      "id": "t8MqEUL33eJ",
+      "sdkName": "suppliers",
+      "name": "Suppliers",
+      "primaryFieldId": "f4FyUrgEE8k",
+      "fields": [
+        {
+          "id": "f4FyUrgEE8k",
+          "sdkName": "supplierName",
+          "definition": {
+            "name": "Supplier Name",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "f7iaCFY14iT",
+          "sdkName": "phone",
+          "definition": {
+            "name": "Phone",
+            "type": "phone_number",
+            "template": {}
+          }
+        },
+        {
+          "id": "febCbTX2Voj",
+          "sdkName": "email",
+          "definition": {
+            "name": "Email",
+            "type": "email",
+            "template": {}
+          }
+        },
+        {
+          "id": "f8SqKme2fBL",
+          "sdkName": "address",
+          "definition": {
+            "name": "Address",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "f122uYCeVm6",
+          "sdkName": "depositBalance",
+          "definition": {
+            "name": "Deposit Balance",
+            "type": "number",
+            "template": {
+              "defaultValue": 0,
+              "numberFormat": "local",
+              "decimalPlaces": 2
+            }
+          }
+        },
+        {
+          "id": "fsoiR1waYJj",
+          "sdkName": "notes",
+          "definition": {
+            "name": "Notes",
+            "type": "long_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "f7WoPFg4gxd",
+          "sdkName": "productSuppliers",
+          "definition": {
+            "name": "Product Suppliers",
+            "type": "linked_record",
+            "template": {
+              "tableId": "t7vjaJ5YRAL",
+              "isInverse": true,
+              "allowMultiple": true,
+              "inverseFieldId": "f4aBkvHGfWX"
+            }
+          }
+        },
+        {
+          "id": "fqmiE5V82ok",
+          "sdkName": "supplierDeposits",
+          "definition": {
+            "name": "Supplier Deposits",
+            "type": "linked_record",
+            "template": {
+              "tableId": "tvvxvyxVMCb",
+              "isInverse": true,
+              "allowMultiple": true,
+              "inverseFieldId": "fsnxqWffMgQ"
+            }
+          }
+        },
+        {
+          "id": "fsso8rzKKHf",
+          "sdkName": "purchases",
+          "definition": {
+            "name": "Purchases",
+            "type": "linked_record",
+            "template": {
+              "tableId": "toYiEyT15kP",
+              "isInverse": true,
+              "allowMultiple": true,
+              "inverseFieldId": "frBHuNX79sc"
+            }
+          }
+        },
+        {
+          "id": "f4AsgmthrSH",
+          "sdkName": "supplierTransactions",
+          "definition": {
+            "name": "Supplier Transactions",
+            "type": "linked_record",
+            "template": {
+              "tableId": "thoYN5eRQxa",
+              "isInverse": true,
+              "allowMultiple": true,
+              "inverseFieldId": "ffaE3AeucH4"
+            }
+          }
+        },
+        {
+          "id": "fpqruHEK2u8",
+          "sdkName": "purchaseOrders",
+          "definition": {
+            "name": "Purchase Orders",
+            "type": "linked_record",
+            "template": {
+              "tableId": "teHDsuKNSLJ",
+              "isInverse": true,
+              "allowMultiple": true,
+              "inverseFieldId": "faEk42KugxD"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "t7vjaJ5YRAL",
+      "sdkName": "productSuppliers",
+      "name": "Product Suppliers",
+      "primaryFieldId": "fnAhE2685RC",
+      "fields": [
+        {
+          "id": "fnAhE2685RC",
+          "sdkName": "id2",
+          "definition": {
+            "name": "ID",
+            "type": "autonumber",
+            "template": {}
+          }
+        },
+        {
+          "id": "fpBFxET1tTt",
+          "sdkName": "product",
+          "definition": {
+            "name": "Product",
+            "type": "linked_record",
+            "template": {
+              "tableId": "tihocaYVNvy",
+              "isInverse": false,
+              "allowMultiple": true,
+              "inverseFieldId": "fioW6mZc59F"
+            }
+          }
+        },
+        {
+          "id": "f4aBkvHGfWX",
+          "sdkName": "supplier",
+          "definition": {
+            "name": "Supplier",
+            "type": "linked_record",
+            "template": {
+              "tableId": "t8MqEUL33eJ",
+              "isInverse": false,
+              "allowMultiple": true,
+              "inverseFieldId": "f7WoPFg4gxd"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "tvvxvyxVMCb",
+      "sdkName": "supplierDeposits",
+      "name": "Supplier Deposits",
+      "primaryFieldId": "foqBjworM5r",
+      "fields": [
+        {
+          "id": "foqBjworM5r",
+          "sdkName": "depositNumber",
+          "definition": {
+            "name": "Deposit Number",
+            "type": "autonumber",
+            "template": {}
+          }
+        },
+        {
+          "id": "fsnxqWffMgQ",
+          "sdkName": "supplier",
+          "definition": {
+            "name": "Supplier",
+            "type": "linked_record",
+            "template": {
+              "tableId": "t8MqEUL33eJ",
+              "isInverse": false,
+              "allowMultiple": true,
+              "inverseFieldId": "fqmiE5V82ok"
+            }
+          }
+        },
+        {
+          "id": "fvxfKTyo1uU",
+          "sdkName": "amount",
+          "definition": {
+            "name": "Amount",
+            "type": "number",
+            "template": {
+              "numberFormat": "local",
+              "decimalPlaces": 2
+            }
+          }
+        },
+        {
+          "id": "f18Zb2hN4f1",
+          "sdkName": "date",
+          "definition": {
+            "name": "Date",
+            "type": "date",
+            "template": {
+              "dateFormat": "local"
+            }
+          }
+        },
+        {
+          "id": "fi9fsQ2EEnD",
+          "sdkName": "notes",
+          "definition": {
+            "name": "Notes",
+            "type": "long_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "fwnmoQj9wLF",
+          "sdkName": "branch",
+          "definition": {
+            "name": "Branch",
+            "type": "linked_record",
+            "template": {
+              "tableId": "toZ7EnqKNVM",
+              "isInverse": false,
+              "allowMultiple": true,
+              "inverseFieldId": "fqHngNDjNjw"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "teCFzvxmgiE",
+      "sdkName": "sales",
+      "name": "Sales",
+      "primaryFieldId": "fx2JP1RCxcU",
+      "fields": [
+        {
+          "id": "fx2JP1RCxcU",
+          "sdkName": "saleNumber",
+          "definition": {
+            "name": "Sale Number",
+            "type": "autonumber",
+            "template": {}
+          }
+        },
+        {
+          "id": "fjQvWX7hqP3",
+          "sdkName": "saleDate",
+          "definition": {
+            "name": "Sale Date",
+            "type": "datetime",
+            "template": {
+              "timezone": "",
+              "dateFormat": "local",
+              "timeFormat": "12h",
+              "displayTimeZone": false
+            }
+          }
+        },
+        {
+          "id": "fqkhDrW7nFg",
+          "sdkName": "customer",
+          "definition": {
+            "name": "Customer",
+            "type": "linked_record",
+            "template": {
+              "tableId": "tgambjsvc4R",
+              "isInverse": false,
+              "allowMultiple": true,
+              "inverseFieldId": "f2XxWX4SRJR"
+            }
+          }
+        },
+        {
+          "id": "foV5VkULAb8",
+          "sdkName": "branch",
+          "definition": {
+            "name": "Branch",
+            "type": "linked_record",
+            "template": {
+              "tableId": "toZ7EnqKNVM",
+              "isInverse": false,
+              "allowMultiple": true,
+              "inverseFieldId": "fkbhWQFKwJd"
+            }
+          }
+        },
+        {
+          "id": "fhCaKYfK9BY",
+          "sdkName": "paymentMethod",
+          "definition": {
+            "name": "Payment Method",
+            "type": "single_select",
+            "template": {
+              "options": [
+                {
+                  "value": "vPs9",
+                  "label": "Cash",
+                  "color": "green"
+                },
+                {
+                  "value": "j2Kn",
+                  "label": "M-Pesa",
+                  "color": "blue"
+                },
+                {
+                  "value": "6qeB",
+                  "label": "Card",
+                  "color": "purple"
+                },
+                {
+                  "value": "qVmq",
+                  "label": "Bank Transfer",
+                  "color": "orange"
+                }
+              ],
+              "disableColors": false
+            }
+          }
+        },
+        {
+          "id": "fhnZLVtpeVN",
+          "sdkName": "subtotal",
+          "definition": {
+            "name": "Subtotal",
+            "type": "number",
+            "template": {
+              "numberFormat": "local",
+              "decimalPlaces": 2
+            }
+          }
+        },
+        {
+          "id": "ffNN6bYXQwk",
+          "sdkName": "taxAmount",
+          "definition": {
+            "name": "Tax Amount",
+            "type": "number",
+            "template": {
+              "numberFormat": "local",
+              "decimalPlaces": 2
+            }
+          }
+        },
+        {
+          "id": "fh3QkzwECj8",
+          "sdkName": "discount",
+          "definition": {
+            "name": "Discount",
+            "type": "number",
+            "template": {
+              "defaultValue": 0,
+              "numberFormat": "local",
+              "decimalPlaces": 2
+            }
+          }
+        },
+        {
+          "id": "fajH1gS2nFY",
+          "sdkName": "total",
+          "definition": {
+            "name": "Total",
+            "type": "number",
+            "template": {
+              "numberFormat": "local",
+              "decimalPlaces": 2
+            }
+          }
+        },
+        {
+          "id": "fstnY9ZXw53",
+          "sdkName": "status",
+          "definition": {
+            "name": "Status",
+            "type": "single_select",
+            "template": {
+              "options": [
+                {
+                  "value": "ccKa",
+                  "label": "Completed",
+                  "color": "green"
+                },
+                {
+                  "value": "suhg",
+                  "label": "Pending",
+                  "color": "yellow"
+                },
+                {
+                  "value": "eeMr",
+                  "label": "Voided",
+                  "color": "red"
+                }
+              ],
+              "disableColors": false
+            }
+          }
+        },
+        {
+          "id": "f2bbB5aRUSX",
+          "sdkName": "notes",
+          "definition": {
+            "name": "Notes",
+            "type": "long_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "fjTLW4JQ47m",
+          "sdkName": "createdBy",
+          "definition": {
+            "name": "Created By",
+            "type": "user",
+            "template": {
+              "internalOnly": false,
+              "allowMultiple": false,
+              "deleteRowWhenUserDeleted": false
+            }
+          }
+        },
+        {
+          "id": "ftG2PRQH1Xa",
+          "sdkName": "saleItems",
+          "definition": {
+            "name": "Sale Items",
+            "type": "linked_record",
+            "template": {
+              "tableId": "tqYvMyyrePS",
+              "isInverse": true,
+              "allowMultiple": true,
+              "inverseFieldId": "fwQJXMMNXMR"
+            }
+          }
+        },
+        {
+          "id": "fkKfpfrHc7a",
+          "sdkName": "pickupPoint",
+          "definition": {
+            "name": "Pickup Point",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "f9qEdYoooVH",
+          "sdkName": "deliveryAddress",
+          "definition": {
+            "name": "Delivery Address",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "fqvvLdTqCsJ",
+          "sdkName": "deliveryCoordinates",
+          "definition": {
+            "name": "Delivery Coordinates",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "f3c7CpnRYMB",
+          "sdkName": "stops",
+          "definition": {
+            "name": "Stops",
+            "type": "long_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "ff3N9mRSh4p",
+          "sdkName": "deliveryDistanceKm",
+          "definition": {
+            "name": "Delivery Distance Km",
+            "type": "number",
+            "template": {
+              "numberFormat": "local",
+              "decimalPlaces": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "tqYvMyyrePS",
+      "sdkName": "saleItems",
+      "name": "Sale Items",
+      "primaryFieldId": "f5oevjN6HNu",
+      "fields": [
+        {
+          "id": "f5oevjN6HNu",
+          "sdkName": "itemNumber",
+          "definition": {
+            "name": "Item Number",
+            "type": "autonumber",
+            "template": {}
+          }
+        },
+        {
+          "id": "fwQJXMMNXMR",
+          "sdkName": "sale",
+          "definition": {
+            "name": "Sale",
+            "type": "linked_record",
+            "template": {
+              "tableId": "teCFzvxmgiE",
+              "isInverse": false,
+              "allowMultiple": true,
+              "inverseFieldId": "ftG2PRQH1Xa"
+            }
+          }
+        },
+        {
+          "id": "fjAcKFhiYj9",
+          "sdkName": "product",
+          "definition": {
+            "name": "Product",
+            "type": "linked_record",
+            "template": {
+              "tableId": "tihocaYVNvy",
+              "isInverse": false,
+              "allowMultiple": true,
+              "inverseFieldId": "f5JffSqi7Gg"
+            }
+          }
+        },
+        {
+          "id": "fg5AhDwumPv",
+          "sdkName": "quantity",
+          "definition": {
+            "name": "Quantity",
+            "type": "number",
+            "template": {
+              "numberFormat": "local",
+              "decimalPlaces": 0
+            }
+          }
+        },
+        {
+          "id": "fwycbMDDjEV",
+          "sdkName": "unitPrice",
+          "definition": {
+            "name": "Unit Price",
+            "type": "number",
+            "template": {
+              "numberFormat": "local",
+              "decimalPlaces": 2
+            }
+          }
+        },
+        {
+          "id": "f96rT9JvTSE",
+          "sdkName": "taxAmount",
+          "definition": {
+            "name": "Tax Amount",
+            "type": "number",
+            "template": {
+              "numberFormat": "local",
+              "decimalPlaces": 2
+            }
+          }
+        },
+        {
+          "id": "faJbBKcAj8P",
+          "sdkName": "discount",
+          "definition": {
+            "name": "Discount",
+            "type": "number",
+            "template": {
+              "defaultValue": 0,
+              "numberFormat": "local",
+              "decimalPlaces": 2
+            }
+          }
+        },
+        {
+          "id": "f7LuF3MEj8e",
+          "sdkName": "lineTotal",
+          "definition": {
+            "name": "Line Total",
+            "type": "number",
+            "template": {
+              "numberFormat": "local",
+              "decimalPlaces": 2
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "tjtpcJ6Pui5",
+      "sdkName": "expenseCategories",
+      "name": "Expense Categories",
+      "primaryFieldId": "f4wnJEiYjvg",
+      "fields": [
+        {
+          "id": "f4wnJEiYjvg",
+          "sdkName": "categoryName",
+          "definition": {
+            "name": "Category Name",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "fqEcvrAgtbZ",
+          "sdkName": "type",
+          "definition": {
+            "name": "Type",
+            "type": "single_select",
+            "template": {
+              "options": [
+                {
+                  "value": "heq2",
+                  "label": "Purchase",
+                  "color": "blue"
+                },
+                {
+                  "value": "bJHy",
+                  "label": "Other Expense",
+                  "color": "orange"
+                }
+              ],
+              "disableColors": false
+            }
+          }
+        },
+        {
+          "id": "fbJZv4ncJh3",
+          "sdkName": "active",
+          "definition": {
+            "name": "Active",
+            "type": "checkbox",
+            "template": {
+              "defaultValue": true
+            }
+          }
+        },
+        {
+          "id": "f3ZjwVtHfNj",
+          "sdkName": "otherExpenses",
+          "definition": {
+            "name": "Other Expenses",
+            "type": "linked_record",
+            "template": {
+              "tableId": "t8QHTEswG7u",
+              "isInverse": true,
+              "allowMultiple": true,
+              "inverseFieldId": "fi247MqX6Nj"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "toYiEyT15kP",
+      "sdkName": "purchases",
+      "name": "Purchases",
+      "primaryFieldId": "f5h6efaZJw6",
+      "fields": [
+        {
+          "id": "f5h6efaZJw6",
+          "sdkName": "purchaseNumber",
+          "definition": {
+            "name": "Purchase Number",
+            "type": "autonumber",
+            "template": {}
+          }
+        },
+        {
+          "id": "fg7UWg6bRee",
+          "sdkName": "purchaseDate",
+          "definition": {
+            "name": "Purchase Date",
+            "type": "datetime",
+            "template": {
+              "timezone": "",
+              "dateFormat": "local",
+              "timeFormat": "12h",
+              "displayTimeZone": false
+            }
+          }
+        },
+        {
+          "id": "frBHuNX79sc",
+          "sdkName": "supplier",
+          "definition": {
+            "name": "Supplier",
+            "type": "linked_record",
+            "template": {
+              "tableId": "t8MqEUL33eJ",
+              "isInverse": false,
+              "allowMultiple": true,
+              "inverseFieldId": "fsso8rzKKHf"
+            }
+          }
+        },
+        {
+          "id": "fr2WRvPATSA",
+          "sdkName": "branch",
+          "definition": {
+            "name": "Branch",
+            "type": "linked_record",
+            "template": {
+              "tableId": "toZ7EnqKNVM",
+              "isInverse": false,
+              "allowMultiple": true,
+              "inverseFieldId": "fiqcgoJGxRq"
+            }
+          }
+        },
+        {
+          "id": "froaYegMQkC",
+          "sdkName": "total",
+          "definition": {
+            "name": "Total",
+            "type": "number",
+            "template": {
+              "numberFormat": "local",
+              "decimalPlaces": 2
+            }
+          }
+        },
+        {
+          "id": "fnoidqstL2L",
+          "sdkName": "paymentType",
+          "definition": {
+            "name": "Payment Type",
+            "type": "single_select",
+            "template": {
+              "options": [
+                {
+                  "value": "k4kR",
+                  "label": "Cash",
+                  "color": "green"
+                },
+                {
+                  "value": "r8C3",
+                  "label": "From Deposit",
+                  "color": "blue"
+                }
+              ],
+              "disableColors": false
+            }
+          }
+        },
+        {
+          "id": "fqCSLGtuuWp",
+          "sdkName": "notes",
+          "definition": {
+            "name": "Notes",
+            "type": "long_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "f8uUm5wmncm",
+          "sdkName": "createdBy",
+          "definition": {
+            "name": "Created By",
+            "type": "user",
+            "template": {
+              "internalOnly": false,
+              "allowMultiple": false,
+              "deleteRowWhenUserDeleted": false
+            }
+          }
+        },
+        {
+          "id": "fk7fC73u7i9",
+          "sdkName": "purchaseItems",
+          "definition": {
+            "name": "Purchase Items",
+            "type": "linked_record",
+            "template": {
+              "tableId": "thURVtQxrMA",
+              "isInverse": true,
+              "allowMultiple": true,
+              "inverseFieldId": "f7Kf48Vdg3z"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "thURVtQxrMA",
+      "sdkName": "purchaseItems",
+      "name": "Purchase Items",
+      "primaryFieldId": "fnp418mRsfH",
+      "fields": [
+        {
+          "id": "fnp418mRsfH",
+          "sdkName": "itemNumber",
+          "definition": {
+            "name": "Item Number",
+            "type": "autonumber",
+            "template": {}
+          }
+        },
+        {
+          "id": "f7Kf48Vdg3z",
+          "sdkName": "purchase",
+          "definition": {
+            "name": "Purchase",
+            "type": "linked_record",
+            "template": {
+              "tableId": "toYiEyT15kP",
+              "isInverse": false,
+              "allowMultiple": true,
+              "inverseFieldId": "fk7fC73u7i9"
+            }
+          }
+        },
+        {
+          "id": "fo5L4V26aBd",
+          "sdkName": "product",
+          "definition": {
+            "name": "Product",
+            "type": "linked_record",
+            "template": {
+              "tableId": "tihocaYVNvy",
+              "isInverse": false,
+              "allowMultiple": true,
+              "inverseFieldId": "fpnLCjWRcL4"
+            }
+          }
+        },
+        {
+          "id": "fn4eA5zXPz5",
+          "sdkName": "quantity",
+          "definition": {
+            "name": "Quantity",
+            "type": "number",
+            "template": {
+              "numberFormat": "local",
+              "decimalPlaces": 0
+            }
+          }
+        },
+        {
+          "id": "fqjaNxwGtxP",
+          "sdkName": "unitPrice",
+          "definition": {
+            "name": "Unit Price",
+            "type": "number",
+            "template": {
+              "numberFormat": "local",
+              "decimalPlaces": 2
+            }
+          }
+        },
+        {
+          "id": "fxxBpVwdmyR",
+          "sdkName": "lineTotal",
+          "definition": {
+            "name": "Line Total",
+            "type": "number",
+            "template": {
+              "numberFormat": "local",
+              "decimalPlaces": 2
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "t8QHTEswG7u",
+      "sdkName": "otherExpenses",
+      "name": "Other Expenses",
+      "primaryFieldId": "f5ydz7EMN7N",
+      "fields": [
+        {
+          "id": "f5ydz7EMN7N",
+          "sdkName": "expenseNumber",
+          "definition": {
+            "name": "Expense Number",
+            "type": "autonumber",
+            "template": {}
+          }
+        },
+        {
+          "id": "fnq7N7CXywU",
+          "sdkName": "expenseDate",
+          "definition": {
+            "name": "Expense Date",
+            "type": "datetime",
+            "template": {
+              "timezone": "",
+              "dateFormat": "local",
+              "timeFormat": "12h",
+              "displayTimeZone": false
+            }
+          }
+        },
+        {
+          "id": "fiXPkeGDsyM",
+          "sdkName": "description",
+          "definition": {
+            "name": "Description",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "f5aRiJ3PQSm",
+          "sdkName": "amount",
+          "definition": {
+            "name": "Amount",
+            "type": "number",
+            "template": {
+              "numberFormat": "local",
+              "decimalPlaces": 2
+            }
+          }
+        },
+        {
+          "id": "fi247MqX6Nj",
+          "sdkName": "category",
+          "definition": {
+            "name": "Category",
+            "type": "linked_record",
+            "template": {
+              "tableId": "tjtpcJ6Pui5",
+              "isInverse": false,
+              "allowMultiple": true,
+              "inverseFieldId": "f3ZjwVtHfNj"
+            }
+          }
+        },
+        {
+          "id": "ffKLiqd9RuQ",
+          "sdkName": "branch",
+          "definition": {
+            "name": "Branch",
+            "type": "linked_record",
+            "template": {
+              "tableId": "toZ7EnqKNVM",
+              "isInverse": false,
+              "allowMultiple": true,
+              "inverseFieldId": "feucWvvrpok"
+            }
+          }
+        },
+        {
+          "id": "fm8s2DFdbgE",
+          "sdkName": "notes",
+          "definition": {
+            "name": "Notes",
+            "type": "long_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "ftWszyrfKao",
+          "sdkName": "createdBy",
+          "definition": {
+            "name": "Created By",
+            "type": "user",
+            "template": {
+              "internalOnly": false,
+              "allowMultiple": false,
+              "deleteRowWhenUserDeleted": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "t3G4JS5fCGw",
+      "sdkName": "otherIncome",
+      "name": "Other Income",
+      "primaryFieldId": "fu2vDM41k8e",
+      "fields": [
+        {
+          "id": "fu2vDM41k8e",
+          "sdkName": "incomeNumber",
+          "definition": {
+            "name": "Income Number",
+            "type": "autonumber",
+            "template": {}
+          }
+        },
+        {
+          "id": "ffsqAWvvTbM",
+          "sdkName": "incomeDate",
+          "definition": {
+            "name": "Income Date",
+            "type": "datetime",
+            "template": {
+              "timezone": "",
+              "dateFormat": "local",
+              "timeFormat": "12h",
+              "displayTimeZone": false
+            }
+          }
+        },
+        {
+          "id": "f5Lf75udWqn",
+          "sdkName": "description",
+          "definition": {
+            "name": "Description",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "fe5mdDc1wmD",
+          "sdkName": "amount",
+          "definition": {
+            "name": "Amount",
+            "type": "number",
+            "template": {
+              "numberFormat": "local",
+              "decimalPlaces": 2
+            }
+          }
+        },
+        {
+          "id": "f2TsrZ1aGn8",
+          "sdkName": "branch",
+          "definition": {
+            "name": "Branch",
+            "type": "linked_record",
+            "template": {
+              "tableId": "toZ7EnqKNVM",
+              "isInverse": false,
+              "allowMultiple": true,
+              "inverseFieldId": "fig8Fgtpfad"
+            }
+          }
+        },
+        {
+          "id": "fdVjDYRHSke",
+          "sdkName": "notes",
+          "definition": {
+            "name": "Notes",
+            "type": "long_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "f7ug1FzBLQE",
+          "sdkName": "createdBy",
+          "definition": {
+            "name": "Created By",
+            "type": "user",
+            "template": {
+              "internalOnly": false,
+              "allowMultiple": false,
+              "deleteRowWhenUserDeleted": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "t49EMRedDka",
+      "sdkName": "taxes",
+      "name": "Taxes",
+      "primaryFieldId": "fsuLaKRB519",
+      "fields": [
+        {
+          "id": "fsuLaKRB519",
+          "sdkName": "taxName",
+          "definition": {
+            "name": "Tax Name",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "f5QievQQMU4",
+          "sdkName": "rate",
+          "definition": {
+            "name": "Rate",
+            "type": "number",
+            "template": {
+              "numberFormat": "local",
+              "decimalPlaces": 2
+            }
+          }
+        },
+        {
+          "id": "ffh4U4jmpZU",
+          "sdkName": "inclusive",
+          "definition": {
+            "name": "Inclusive",
+            "type": "checkbox",
+            "template": {
+              "defaultValue": true
+            }
+          }
+        },
+        {
+          "id": "fdRTBopCDjo",
+          "sdkName": "active",
+          "definition": {
+            "name": "Active",
+            "type": "checkbox",
+            "template": {
+              "defaultValue": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "tcov1NewUXW",
+      "sdkName": "commissions",
+      "name": "Commissions",
+      "primaryFieldId": "f6fKxP5TvkX",
+      "fields": [
+        {
+          "id": "f6fKxP5TvkX",
+          "sdkName": "commissionName",
+          "definition": {
+            "name": "Commission Name",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "fcdwpVByW7n",
+          "sdkName": "rate",
+          "definition": {
+            "name": "Rate",
+            "type": "number",
+            "template": {
+              "numberFormat": "local",
+              "decimalPlaces": 2
+            }
+          }
+        },
+        {
+          "id": "fwDQBUidb9Q",
+          "sdkName": "active",
+          "definition": {
+            "name": "Active",
+            "type": "checkbox",
+            "template": {
+              "defaultValue": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "thoYN5eRQxa",
+      "sdkName": "supplierTransactions",
+      "name": "Supplier Transactions",
+      "primaryFieldId": "faTyEHYwsd9",
+      "fields": [
+        {
+          "id": "faTyEHYwsd9",
+          "sdkName": "transactionNumber",
+          "definition": {
+            "name": "Transaction Number",
+            "type": "autonumber",
+            "template": {}
+          }
+        },
+        {
+          "id": "ffaE3AeucH4",
+          "sdkName": "supplier",
+          "definition": {
+            "name": "Supplier",
+            "type": "linked_record",
+            "template": {
+              "tableId": "t8MqEUL33eJ",
+              "isInverse": false,
+              "allowMultiple": true,
+              "inverseFieldId": "f4AsgmthrSH"
+            }
+          }
+        },
+        {
+          "id": "fj29cozJbSb",
+          "sdkName": "product",
+          "definition": {
+            "name": "Product",
+            "type": "linked_record",
+            "template": {
+              "tableId": "tihocaYVNvy",
+              "isInverse": false,
+              "allowMultiple": true,
+              "inverseFieldId": "frYDXq2ov8Y"
+            }
+          }
+        },
+        {
+          "id": "frZJuhYCH26",
+          "sdkName": "type",
+          "definition": {
+            "name": "Type",
+            "type": "single_select",
+            "template": {
+              "options": [
+                {
+                  "value": "hQCR",
+                  "label": "Deposit",
+                  "color": "green"
+                },
+                {
+                  "value": "o2b4",
+                  "label": "Purchase Deduction",
+                  "color": "red"
+                }
+              ],
+              "disableColors": false
+            }
+          }
+        },
+        {
+          "id": "f4vZvZQ3Lyh",
+          "sdkName": "amount",
+          "definition": {
+            "name": "Amount",
+            "type": "number",
+            "template": {
+              "numberFormat": "local",
+              "decimalPlaces": 2
+            }
+          }
+        },
+        {
+          "id": "fcU2xHeNNdc",
+          "sdkName": "runningBalance",
+          "definition": {
+            "name": "Running Balance",
+            "type": "number",
+            "template": {
+              "numberFormat": "local",
+              "decimalPlaces": 2
+            }
+          }
+        },
+        {
+          "id": "fvvaCh1Vmh1",
+          "sdkName": "transactionDate",
+          "definition": {
+            "name": "Transaction Date",
+            "type": "datetime",
+            "template": {
+              "timezone": "",
+              "dateFormat": "local",
+              "timeFormat": "12h",
+              "displayTimeZone": false
+            }
+          }
+        },
+        {
+          "id": "f6WnPDSjuzP",
+          "sdkName": "notes",
+          "definition": {
+            "name": "Notes",
+            "type": "long_text",
+            "template": {}
+          }
+        }
+      ]
+    },
+    {
+      "id": "teAqxVsKCju",
+      "sdkName": "roles",
+      "name": "Roles",
+      "primaryFieldId": "fvE99XfNDFv",
+      "fields": [
+        {
+          "id": "fvE99XfNDFv",
+          "sdkName": "roleName",
+          "definition": {
+            "name": "Role Name",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "f2iwJ9hZdkT",
+          "sdkName": "description",
+          "definition": {
+            "name": "Description",
+            "type": "long_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "f9aK8XbEmiG",
+          "sdkName": "permissions",
+          "definition": {
+            "name": "Permissions",
+            "type": "long_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "f5GNMuxxBmj",
+          "sdkName": "isDefault",
+          "definition": {
+            "name": "Is Default",
+            "type": "checkbox",
+            "template": {
+              "defaultValue": false
+            }
+          }
+        },
+        {
+          "id": "fmA9AP3ackS",
+          "sdkName": "active",
+          "definition": {
+            "name": "Active",
+            "type": "checkbox",
+            "template": {
+              "defaultValue": true
+            }
+          }
+        },
+        {
+          "id": "frDvXzrnAMf",
+          "sdkName": "createdAt",
+          "definition": {
+            "name": "Created At",
+            "type": "created_at",
+            "template": {
+              "timezone": "",
+              "dateFormat": "local",
+              "timeFormat": "12h",
+              "displayTimeZone": false
+            }
+          }
+        },
+        {
+          "id": "fpETciev1Yq",
+          "sdkName": "updatedAt",
+          "definition": {
+            "name": "Updated At",
+            "type": "updated_at",
+            "template": {
+              "timezone": "",
+              "dateFormat": "local",
+              "timeFormat": "12h",
+              "displayTimeZone": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "teHDsuKNSLJ",
+      "sdkName": "purchaseOrders",
+      "name": "Purchase Orders",
+      "primaryFieldId": "ftTc655rSR3",
+      "fields": [
+        {
+          "id": "ftTc655rSR3",
+          "sdkName": "lpoNumber",
+          "definition": {
+            "name": "LPO Number",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "faEk42KugxD",
+          "sdkName": "supplier",
+          "definition": {
+            "name": "Supplier",
+            "type": "linked_record",
+            "template": {
+              "tableId": "t8MqEUL33eJ",
+              "isInverse": false,
+              "allowMultiple": true,
+              "inverseFieldId": "fpqruHEK2u8"
+            }
+          }
+        },
+        {
+          "id": "fn8eW3Bw9EQ",
+          "sdkName": "branch",
+          "definition": {
+            "name": "Branch",
+            "type": "linked_record",
+            "template": {
+              "tableId": "toZ7EnqKNVM",
+              "isInverse": false,
+              "allowMultiple": true,
+              "inverseFieldId": "ffdkEAk5Nsd"
+            }
+          }
+        },
+        {
+          "id": "f6NXYnG8atp",
+          "sdkName": "orderDate",
+          "definition": {
+            "name": "Order Date",
+            "type": "date",
+            "template": {
+              "dateFormat": "local"
+            }
+          }
+        },
+        {
+          "id": "fs9NnRKaD3F",
+          "sdkName": "expectedDeliveryDate",
+          "definition": {
+            "name": "Expected Delivery Date",
+            "type": "date",
+            "template": {
+              "dateFormat": "local"
+            }
+          }
+        },
+        {
+          "id": "fjHrEmYi91t",
+          "sdkName": "status",
+          "definition": {
+            "name": "Status",
+            "type": "single_select",
+            "template": {
+              "options": [
+                {
+                  "value": "rU6D",
+                  "label": "Draft",
+                  "color": "gray"
+                },
+                {
+                  "value": "hsEK",
+                  "label": "Sent",
+                  "color": "blue"
+                },
+                {
+                  "value": "kRyk",
+                  "label": "Partially Verified",
+                  "color": "yellow"
+                },
+                {
+                  "value": "ncDa",
+                  "label": "Verified",
+                  "color": "green"
+                },
+                {
+                  "value": "3ShP",
+                  "label": "Cancelled",
+                  "color": "red"
+                }
+              ],
+              "disableColors": false
+            }
+          }
+        },
+        {
+          "id": "fnKHEyM6sdg",
+          "sdkName": "totalAmount",
+          "definition": {
+            "name": "Total Amount",
+            "type": "currency",
+            "template": {
+              "numberFormat": "local",
+              "decimalPlaces": 2,
+              "currencySymbol": "KES"
+            }
+          }
+        },
+        {
+          "id": "fgsivr1eiNN",
+          "sdkName": "notes",
+          "definition": {
+            "name": "Notes",
+            "type": "long_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "f9jMqWiHbaq",
+          "sdkName": "itemsJson",
+          "definition": {
+            "name": "Items JSON",
+            "type": "long_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "fczdrj5GUt5",
+          "sdkName": "createdAt",
+          "definition": {
+            "name": "Created At",
+            "type": "created_at",
+            "template": {
+              "timezone": "",
+              "dateFormat": "local",
+              "timeFormat": "12h",
+              "displayTimeZone": false
+            }
+          }
+        },
+        {
+          "id": "fcbrDJZgefF",
+          "sdkName": "updatedAt",
+          "definition": {
+            "name": "Updated At",
+            "type": "updated_at",
+            "template": {
+              "timezone": "",
+              "dateFormat": "local",
+              "timeFormat": "12h",
+              "displayTimeZone": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "teA9f9nTzQu",
+      "sdkName": "addresses",
+      "name": "Addresses",
+      "primaryFieldId": "f2SZZFN7xXQ",
+      "fields": [
+        {
+          "id": "f2SZZFN7xXQ",
+          "sdkName": "addressName",
+          "definition": {
+            "name": "Address Name",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "f8TvFmm7SZ3",
+          "sdkName": "type",
+          "definition": {
+            "name": "Type",
+            "type": "single_select",
+            "template": {
+              "options": [
+                {
+                  "value": "ewqs",
+                  "label": "Pickup Point",
+                  "color": "blue"
+                },
+                {
+                  "value": "6PJe",
+                  "label": "Delivery Address",
+                  "color": "green"
+                },
+                {
+                  "value": "3QQE",
+                  "label": "Branch",
+                  "color": "purple"
+                },
+                {
+                  "value": "pDPy",
+                  "label": "Other",
+                  "color": "gray"
+                }
+              ],
+              "disableColors": false
+            }
+          }
+        },
+        {
+          "id": "f3jW2vG5ZQN",
+          "sdkName": "fullAddress",
+          "definition": {
+            "name": "Full Address",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "ftukJQzac2s",
+          "sdkName": "plusCode",
+          "definition": {
+            "name": "Plus Code",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "fdpy7cpH7hu",
+          "sdkName": "coordinates",
+          "definition": {
+            "name": "Coordinates",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "fv8asnCLdnj",
+          "sdkName": "notes",
+          "definition": {
+            "name": "Notes",
+            "type": "long_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "fj5RB5paSWp",
+          "sdkName": "active",
+          "definition": {
+            "name": "Active",
+            "type": "checkbox",
+            "template": {
+              "defaultValue": true
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
