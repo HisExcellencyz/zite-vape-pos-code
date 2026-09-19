@@ -1,0 +1,28 @@
+{
+  "id": "6hepsbbapu",
+  "authentication": {
+    "signup": "disabled",
+    "authenticationMethods": {
+      "magicLink": true,
+      "googleSignIn": true
+    },
+    "sessionDays": 7
+  },
+  "integrations": {
+    "email": {
+      "type": "email",
+      "connectionId": "svc_518034",
+      "provider": "gmail"
+    },
+    "googlemaps": {
+      "type": "googlemaps",
+      "connectionId": "svc_532552"
+    }
+  },
+  "seoSettings": {
+    "title": "Uptown Vapes POS",
+    "description": "Point of Sale & Inventory Management System for Uptown Vapes",
+    "thumbnailUrl": "https://images.fillout.com/orgid-811092/flowpublicid-6hepsbbapu/widgetid-default/bkTX9KzLg7aEnqi9UjFEps/pasted-image-1788367385641-4k68git5.png",
+    "faviconUrl": "https://images.fillout.com/orgid-811092/flowpublicid-6hepsbbapu/widgetid-default/xmArbfbmsBwLWSE2d2Et7u/pasted-image-1788367385543-n4ulma8b.png"
+  }
+}
