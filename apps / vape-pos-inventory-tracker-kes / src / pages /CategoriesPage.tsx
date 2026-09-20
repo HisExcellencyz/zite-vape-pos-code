@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getCategories, saveCategory, deleteRecord } from 'zitejs/api';
+import { getCategories, saveCategory, deleteRecord, bulkUpdateCategories, bulkDeleteRecords } from 'zitejs/api';
 import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
@@ -7,9 +7,10 @@ import { Label } from '@project/components/ui/label';
 import { Badge } from '@project/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@project/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { Switch } from '@project/components/ui/switch';
 import { Textarea } from '@project/components/ui/textarea';
-import { Search, Plus, Pencil, Trash2, FolderTree } from 'lucide-react';
+import { Search, Plus, Pencil, Trash2, FolderTree, CheckSquare } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Category {
@@ -34,6 +35,11 @@ export default function CategoriesPage() {
   // Bulk create
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkText, setBulkText] = useState('');
+
+  // Bulk selection / actions
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showBulkCat, setShowBulkCat] = useState(false);
+  const [bulkCatAction, setBulkCatAction] = useState('');
 
   const load = async () => {
     setLoading(true);
@@ -100,6 +106,38 @@ export default function CategoriesPage() {
     !search || c.categoryName?.toLowerCase().includes(search.toLowerCase())
   );
 
+  const toggleSelect = (id: string) => {
+    const next = new Set(selectedIds);
+    next.has(id) ? next.delete(id) : next.add(id);
+    setSelectedIds(next);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filtered.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filtered.map(c => c.id)));
+    }
+  };
+
+  const handleBulkCatAction = async () => {
+    if (selectedIds.size === 0) return toast.error('Select categories first');
+    if (!bulkCatAction) return toast.error('Select an action');
+    try {
+      if (bulkCatAction === 'delete') {
+        const res = await bulkDeleteRecords({ table: 'categories', ids: Array.from(selectedIds) });
+        toast.success(`Deleted ${res.deleted} categories`);
+      } else {
+        await bulkUpdateCategories({ categoryIds: Array.from(selectedIds), action: bulkCatAction as 'activate' | 'deactivate' });
+        toast.success(`Updated ${selectedIds.size} categories`);
+      }
+      setSelectedIds(new Set());
+      setShowBulkCat(false);
+      setBulkCatAction('');
+      load();
+    } catch (err: any) { toast.error(err.message || 'Failed'); }
+  };
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -108,6 +146,11 @@ export default function CategoriesPage() {
           <p className="text-sm text-muted-foreground">Manage product categories</p>
         </div>
         <div className="flex items-center gap-2">
+          {selectedIds.size > 0 && (
+            <Button variant="outline" size="sm" onClick={() => setShowBulkCat(true)}>
+              <CheckSquare className="w-4 h-4 mr-1" /> Bulk Actions ({selectedIds.size})
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={() => setBulkOpen(true)}>
             <FolderTree className="w-4 h-4 mr-1" /> Bulk Create
           </Button>
@@ -122,6 +165,13 @@ export default function CategoriesPage() {
         <Input placeholder="Search categories..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
       </div>
 
+      {filtered.length > 0 && (
+        <label className="flex items-center gap-2 text-xs text-muted-foreground select-none w-fit cursor-pointer">
+          <input type="checkbox" checked={selectedIds.size === filtered.length} onChange={toggleSelectAll} className="rounded" />
+          Select all
+        </label>
+      )}
+
       {loading ? (
         <div className="flex justify-center py-16"><div className="w-8 h-8 border-3 border-primary border-t-transparent rounded-full animate-spin" /></div>
       ) : filtered.length === 0 ? (
@@ -129,12 +179,15 @@ export default function CategoriesPage() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {filtered.map(c => (
-            <Card key={c.id} className="hover:border-primary/30 transition-colors">
+            <Card key={c.id} className={`hover:border-primary/30 transition-colors ${selectedIds.has(c.id) ? 'border-primary' : ''}`}>
               <CardContent className="p-4">
                 <div className="flex items-start justify-between">
-                  <div className="min-w-0 flex-1">
-                    <h3 className="font-semibold text-foreground truncate">{c.categoryName}</h3>
-                    {c.description && <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{c.description}</p>}
+                  <div className="min-w-0 flex-1 flex items-start gap-2">
+                    <input type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} className="mt-1 rounded shrink-0" />
+                    <div className="min-w-0">
+                      <h3 className="font-semibold text-foreground truncate">{c.categoryName}</h3>
+                      {c.description && <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{c.description}</p>}
+                    </div>
                   </div>
                   <Badge variant={c.active !== false ? 'default' : 'secondary'} className="ml-2 shrink-0">
                     {c.active !== false ? 'Active' : 'Inactive'}
@@ -186,6 +239,46 @@ export default function CategoriesPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setBulkOpen(false)}>Cancel</Button>
             <Button onClick={handleBulkCreate}>Create All</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Category Actions Dialog */}
+      <Dialog open={showBulkCat} onOpenChange={setShowBulkCat}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle>Bulk Actions ({selectedIds.size} categories)</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <Select value={bulkCatAction} onValueChange={setBulkCatAction}>
+              <SelectTrigger><SelectValue placeholder="Select action" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="activate">Set Active</SelectItem>
+                <SelectItem value="deactivate">Set Inactive</SelectItem>
+                <SelectItem value="delete">Delete Selected</SelectItem>
+              </SelectContent>
+            </Select>
+            {bulkCatAction === 'delete' && (
+              <p className="text-xs text-destructive">⚠ This will permanently delete {selectedIds.size} categor{selectedIds.size === 1 ? 'y' : 'ies'}.</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowBulkCat(false)}>Cancel</Button>
+            {bulkCatAction === 'delete' ? (
+              <AlertDialog>
+                <AlertDialogTrigger asChild><Button variant="destructive">Delete</Button></AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete {selectedIds.size} categories?</AlertDialogTitle>
+                    <AlertDialogDescription>This cannot be undone.</AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleBulkCatAction} className="bg-destructive">Delete</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            ) : (
+              <Button onClick={handleBulkCatAction}>Apply</Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
