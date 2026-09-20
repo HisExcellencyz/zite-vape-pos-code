@@ -1,5 +1,5 @@
 const IMPORT_TEMPLATES: Record<string, string[]> = {
-  products: ['Product Name', 'SKU', 'Cost Price', 'Selling Price', 'Stock Quantity'],
+  products: ['Product Name', 'SKU', 'Cost Price', 'Selling Price', 'Stock Quantity', 'Category'],
   customers: ['Customer Name', 'Phone Number', 'Email', 'Address'],
   suppliers: ['Supplier Name', 'Phone', 'Email', 'Address'],
 };
