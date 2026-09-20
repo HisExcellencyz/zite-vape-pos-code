@@ -14,6 +14,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Search, Plus, UserPlus, Shield, Mail, Pencil, Trash2, Download, Check, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { downloadCsv } from '../lib/exportHelper';
+import ViewToggle, { useViewMode } from '../components/ViewToggle';
 
 const AREAS = ['pos', 'customers', 'inventory', 'purchases', 'suppliers', 'expenses', 'reports', 'users', 'settings'] as const;
 const ACTIONS = ['view', 'create', 'edit', 'delete', 'export', 'import', 'approve', 'backdate'] as const;
@@ -49,11 +50,24 @@ interface Role {
   active?: boolean;
 }
 
+function countPerms(json?: string): number {
+  if (!json) return 0;
+  try {
+    const p = JSON.parse(json);
+    let n = 0;
+    Object.values(p || {}).forEach((area: any) => {
+      Object.values(area || {}).forEach(v => { if (v === true) n++; });
+    });
+    return n;
+  } catch { return 0; }
+}
+
 export default function UsersPage() {
   const [users, setUsers] = useState<AppUser[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [viewMode, setViewMode] = useViewMode('users', 'list');
 
   // Invite state
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -174,13 +188,53 @@ export default function UsersPage() {
     !search || u.email?.toLowerCase().includes(search.toLowerCase()) || u.name?.toLowerCase().includes(search.toLowerCase())
   );
 
+  const statusBadge = (u: AppUser) => (
+    <Badge
+      variant="secondary"
+      className={`text-xs ${u.status === 'Verified' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-pink-500/10 text-pink-400 border-pink-500/20'}`}
+    >
+      {u.status === 'Verified' ? 'Verified' : 'Unverified'}
+    </Badge>
+  );
+
+  const roleSelect = (u: AppUser, className: string) => (
+    <Select
+      value={u.roleId || 'none'}
+      onValueChange={val => val !== 'none' && handleAssignRole(u.id, val)}
+    >
+      <SelectTrigger className={className}>
+        <SelectValue placeholder="Assign role" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="none">Unassigned</SelectItem>
+        {roles.map(r => (
+          <SelectItem key={r.id} value={r.id}>{r.roleName}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+
+  const roleActions = (r: Role) => (
+    <div className="flex gap-1">
+      <Button variant="ghost" size="sm" onClick={() => openEditRole(r)}><Pencil className="w-3.5 h-3.5" /></Button>
+      <AlertDialog>
+        <AlertDialogTrigger asChild><Button variant="ghost" size="sm" className="text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button></AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader><AlertDialogTitle>Delete role?</AlertDialogTitle><AlertDialogDescription>This will remove "{r.roleName}" and unassign users from it.</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleDeleteRole(r.id)}>Delete</AlertDialogAction></AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Users & Roles</h1>
           <p className="text-sm text-muted-foreground">Manage team access and permissions</p>
         </div>
+        <ViewToggle value={viewMode} onChange={setViewMode} />
       </div>
 
       <Tabs defaultValue="users" className="space-y-4">
@@ -210,7 +264,7 @@ export default function UsersPage() {
             <div className="flex justify-center py-16"><div className="w-8 h-8 border-3 border-primary border-t-transparent rounded-full animate-spin" /></div>
           ) : filtered.length === 0 ? (
             <Card><CardContent className="py-12 text-center text-muted-foreground">No users found</CardContent></Card>
-          ) : (
+          ) : viewMode === 'list' ? (
             <Card>
               <CardContent className="p-0">
                 <div className="overflow-x-auto">
@@ -225,32 +279,10 @@ export default function UsersPage() {
                     <tbody>
                       {filtered.map(u => (
                         <tr key={u.id} className="border-b border-border/50 hover:bg-muted/30">
-                          <td className="p-3 font-medium text-foreground">{u.name || u.firstName || '—'}</td>
-                          <td className="p-3 text-muted-foreground">{u.email}</td>
-                          <td className="p-3">
-                            <Badge
-                              variant="secondary"
-                              className={`text-xs ${u.status === 'Verified' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-pink-500/10 text-pink-400 border-pink-500/20'}`}
-                            >
-                              {u.status === 'Verified' ? 'Verified' : 'Unverified'}
-                            </Badge>
-                          </td>
-                          <td className="p-3">
-                            <Select
-                              value={u.roleId || 'none'}
-                              onValueChange={val => val !== 'none' && handleAssignRole(u.id, val)}
-                            >
-                              <SelectTrigger className="w-[140px] h-8 text-xs">
-                                <SelectValue placeholder="Assign role" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="none">Unassigned</SelectItem>
-                                {roles.map(r => (
-                                  <SelectItem key={r.id} value={r.id}>{r.roleName}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </td>
+                          <td className="p-3 font-medium text-foreground break-words whitespace-normal">{u.name || u.firstName || '—'}</td>
+                          <td className="p-3 text-muted-foreground break-all">{u.email}</td>
+                          <td className="p-3">{statusBadge(u)}</td>
+                          <td className="p-3">{roleSelect(u, 'w-[140px] h-8 text-xs')}</td>
                           <td className="p-3">
                             <Button variant="ghost" size="sm" onClick={() => {
                               toast.info(`${u.email} — ${u.roleName || 'No role'}`);
@@ -265,6 +297,33 @@ export default function UsersPage() {
                 </div>
               </CardContent>
             </Card>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+              {filtered.map(u => (
+                <Card key={u.id} className="bg-card border-border">
+                  <CardContent className="p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-foreground break-words whitespace-normal leading-snug">{u.name || u.firstName || '—'}</p>
+                        <p className="text-xs text-muted-foreground break-all mt-0.5">{u.email}</p>
+                      </div>
+                      <div className="shrink-0">{statusBadge(u)}</div>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Role</p>
+                      {roleSelect(u, 'w-full h-8 text-xs')}
+                    </div>
+                    <div className="border-t border-border pt-2 flex justify-end">
+                      <Button variant="ghost" size="sm" onClick={() => {
+                        toast.info(`${u.email} — ${u.roleName || 'No role'}`);
+                      }}>
+                        <Mail className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
           )}
         </TabsContent>
 
@@ -279,7 +338,7 @@ export default function UsersPage() {
 
           {roles.length === 0 ? (
             <Card><CardContent className="py-12 text-center text-muted-foreground">No roles defined yet. Create one to start assigning permissions.</CardContent></Card>
-          ) : (
+          ) : viewMode === 'grid' ? (
             <div className="space-y-4">
               {roles.map(r => {
                 let perms: PermMatrix | null = null;
@@ -287,25 +346,16 @@ export default function UsersPage() {
                 return (
                   <Card key={r.id}>
                     <CardContent className="p-4 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <Shield className="w-5 h-5 text-primary" />
-                          <div>
-                            <h3 className="font-semibold text-foreground">{r.roleName}</h3>
-                            {r.description && <p className="text-xs text-muted-foreground">{r.description}</p>}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <Shield className="w-5 h-5 text-primary shrink-0" />
+                          <div className="min-w-0">
+                            <h3 className="font-semibold text-foreground break-words whitespace-normal">{r.roleName}</h3>
+                            {r.description && <p className="text-xs text-muted-foreground break-words whitespace-normal">{r.description}</p>}
                           </div>
-                          {r.isDefault && <Badge variant="outline" className="text-xs">Default</Badge>}
+                          {r.isDefault && <Badge variant="outline" className="text-xs shrink-0">Default</Badge>}
                         </div>
-                        <div className="flex gap-1">
-                          <Button variant="ghost" size="sm" onClick={() => openEditRole(r)}><Pencil className="w-3.5 h-3.5" /></Button>
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild><Button variant="ghost" size="sm" className="text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button></AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader><AlertDialogTitle>Delete role?</AlertDialogTitle><AlertDialogDescription>This will remove "{r.roleName}" and unassign users from it.</AlertDialogDescription></AlertDialogHeader>
-                              <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleDeleteRole(r.id)}>Delete</AlertDialogAction></AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        </div>
+                        {roleActions(r)}
                       </div>
                       {perms && <PermissionsGrid perms={perms} />}
                     </CardContent>
@@ -313,6 +363,35 @@ export default function UsersPage() {
                 );
               })}
             </div>
+          ) : (
+            <Card>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className="border-b border-border text-left text-muted-foreground">
+                      <th className="p-3 font-medium">Role</th>
+                      <th className="p-3 font-medium">Description</th>
+                      <th className="p-3 font-medium">Default</th>
+                      <th className="p-3 font-medium">Permissions granted</th>
+                      <th className="p-3 font-medium text-right">Actions</th>
+                    </tr></thead>
+                    <tbody>
+                      {roles.map(r => (
+                        <tr key={r.id} className="border-b border-border/50 hover:bg-muted/30">
+                          <td className="p-3 font-medium text-foreground break-words whitespace-normal">
+                            <span className="inline-flex items-center gap-2"><Shield className="w-4 h-4 text-primary shrink-0" />{r.roleName}</span>
+                          </td>
+                          <td className="p-3 text-muted-foreground break-words whitespace-normal max-w-md">{r.description || '-'}</td>
+                          <td className="p-3">{r.isDefault ? <Badge variant="outline" className="text-xs">Default</Badge> : '-'}</td>
+                          <td className="p-3 text-muted-foreground">{countPerms(r.permissions)} of {AREAS.length * ACTIONS.length}</td>
+                          <td className="p-3"><div className="flex justify-end">{roleActions(r)}</div></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
           )}
         </TabsContent>
       </Tabs>
