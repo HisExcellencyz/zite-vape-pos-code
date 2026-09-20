@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { getProducts, getCategories, saveProduct, deleteRecord, exportCsv, importCsv, bulkUpdateProducts } from 'zitejs/api';
+import { getProducts, getCategories, saveProduct, deleteRecord, exportCsv, importCsv, bulkUpdateProducts, bulkDeleteRecords } from 'zitejs/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
@@ -52,6 +52,7 @@ export default function InventoryPage() {
   const [bulkStock, setBulkStock] = useState('');
   const [bulkCost, setBulkCost] = useState('');
   const [bulkSelling, setBulkSelling] = useState('');
+  const [bulkCategory, setBulkCategory] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
@@ -151,17 +152,26 @@ export default function InventoryPage() {
   const handleBulkAction = async () => {
     if (selectedIds.size === 0) return toast.error('Select products first');
     if (!bulkAction) return toast.error('Select an action');
+    if (bulkAction === 'assignCategory' && !bulkCategory) return toast.error('Select a category');
     try {
-      await bulkUpdateProducts({
-        productIds: Array.from(selectedIds),
-        action: bulkAction as any,
-        stockQuantity: bulkAction === 'updateStock' ? Number(bulkStock) : undefined,
-        costPrice: bulkAction === 'updatePrices' ? Number(bulkCost) || undefined : undefined,
-        sellingPrice: bulkAction === 'updatePrices' ? Number(bulkSelling) || undefined : undefined,
-      });
-      toast.success(`Updated ${selectedIds.size} products`);
+      if (bulkAction === 'delete') {
+        const res = await bulkDeleteRecords({ table: 'products', ids: Array.from(selectedIds) });
+        toast.success(`Deleted ${res.deleted} products`);
+      } else {
+        await bulkUpdateProducts({
+          productIds: Array.from(selectedIds),
+          action: bulkAction as any,
+          stockQuantity: bulkAction === 'updateStock' ? Number(bulkStock) : undefined,
+          costPrice: bulkAction === 'updatePrices' ? Number(bulkCost) || undefined : undefined,
+          sellingPrice: bulkAction === 'updatePrices' ? Number(bulkSelling) || undefined : undefined,
+          categoryId: bulkAction === 'assignCategory' ? bulkCategory : undefined,
+        });
+        toast.success(`Updated ${selectedIds.size} products`);
+      }
       setSelectedIds(new Set());
       setShowBulk(false);
+      setBulkAction('');
+      setBulkCategory('');
       load();
     } catch (err: any) { toast.error(err.message || 'Failed'); }
   };
@@ -203,7 +213,7 @@ export default function InventoryPage() {
             <DialogContent className="sm:max-w-md">
               <DialogHeader><DialogTitle>Import Products</DialogTitle></DialogHeader>
               <div className="space-y-4">
-                <p className="text-sm text-muted-foreground">Upload a CSV file with columns: <span className="font-medium text-foreground">Product Name, SKU, Cost Price, Selling Price, Stock Quantity</span>. Existing products matched by SKU will be updated.</p>
+                <p className="text-sm text-muted-foreground">Upload a CSV file with columns: <span className="font-medium text-foreground">Product Name, SKU, Cost Price, Selling Price, Stock Quantity, Category (optional)</span>. Existing products matched by SKU will be updated. If a Category name doesn't exist yet, it will be created automatically.</p>
                 <Button variant="outline" size="sm" className="border-yellow-500 text-yellow-400 hover:bg-yellow-500/10" onClick={() => downloadTemplate('products')}><FileDown className="w-4 h-4 mr-1" /> Download Template</Button>
                 <div>
                   <Label className="text-sm mb-1 block">Select CSV file</Label>
@@ -378,6 +388,8 @@ export default function InventoryPage() {
                   <SelectItem value="deactivate">Set Inactive</SelectItem>
                   <SelectItem value="updateStock">Update Stock</SelectItem>
                   <SelectItem value="updatePrices">Update Prices</SelectItem>
+                  <SelectItem value="assignCategory">Assign Category</SelectItem>
+                  <SelectItem value="delete">Delete Selected</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -390,10 +402,42 @@ export default function InventoryPage() {
                 <div><Label>Selling Price</Label><Input type="number" value={bulkSelling} onChange={e => setBulkSelling(e.target.value)} placeholder="Leave empty to skip" /></div>
               </div>
             )}
+            {bulkAction === 'assignCategory' && (
+              <div>
+                <Label>Category</Label>
+                <Select value={bulkCategory} onValueChange={setBulkCategory}>
+                  <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
+                  <SelectContent>
+                    {categories.map(c => <SelectItem key={c.id} value={c.id}>{c.categoryName}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {bulkAction === 'delete' && (
+              <p className="text-xs text-destructive">⚠ This will permanently delete {selectedIds.size} product(s). This cannot be undone.</p>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowBulk(false)}>Cancel</Button>
-            <Button onClick={handleBulkAction}>Apply</Button>
+            {bulkAction === 'delete' ? (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive">Delete</Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete {selectedIds.size} products?</AlertDialogTitle>
+                    <AlertDialogDescription>This cannot be undone.</AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleBulkAction} className="bg-destructive">Delete</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            ) : (
+              <Button onClick={handleBulkAction}>Apply</Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
