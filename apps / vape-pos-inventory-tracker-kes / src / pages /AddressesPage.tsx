@@ -11,6 +11,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Plus, MapPin, Trash2, Edit } from 'lucide-react';
 import { toast } from 'sonner';
 import MapView from '../components/MapView';
+import ViewToggle, { useViewMode } from '../components/ViewToggle';
 
 interface Address {
   id: string;
@@ -30,11 +31,15 @@ const typeColors: Record<string, string> = {
   other: 'bg-gray-500/10 text-gray-400',
 };
 
+const typeLabel = (t?: string) =>
+  t === 'pickup' ? 'Pickup Point' : t === 'delivery' ? 'Delivery' : t === 'branch' ? 'Branch' : 'Other';
+
 export default function AddressesPage() {
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [viewMode, setViewMode] = useViewMode('addresses', 'grid');
 
   // Form
   const [editId, setEditId] = useState<string | undefined>();
@@ -106,7 +111,6 @@ export default function AddressesPage() {
     setPlusCode(val);
     // Plus codes look like "6GCRMQFG+R8" — at least 6 chars with a +
     if (val.length >= 6 && val.includes('+')) {
-      // Use the Google Maps geocoder via a small fetch to geocode the plus code
       const apiKey = import.meta.env.VITE_GOOGLEMAPS_API_KEY;
       if (apiKey) {
         fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(val)}&key=${apiKey}`)
@@ -160,6 +164,21 @@ export default function AddressesPage() {
     })
     .filter(p => p.lat !== 0 && p.lng !== 0);
 
+  const renderActions = (a: Address) => (
+    <div className="flex gap-1">
+      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(a)}><Edit className="w-3.5 h-3.5" /></Button>
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader><AlertDialogTitle>Delete this address?</AlertDialogTitle><AlertDialogDescription>This cannot be undone.</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleDelete(a.id)}>Delete</AlertDialogAction></AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -167,7 +186,10 @@ export default function AddressesPage() {
           <h1 className="text-2xl font-bold text-foreground">Addresses & Pickup Points</h1>
           <p className="text-sm text-muted-foreground">{addresses.length} addresses saved</p>
         </div>
-        <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" /> Add Address</Button>
+        <div className="flex items-center gap-2">
+          <ViewToggle value={viewMode} onChange={setViewMode} />
+          <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" /> Add Address</Button>
+        </div>
       </div>
 
       {/* Map overview */}
@@ -175,49 +197,88 @@ export default function AddressesPage() {
         <MapView pins={mapPins} className="h-[280px]" />
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {loading ? (
-          [...Array(3)].map((_, i) => (
-            <Card key={i} className="bg-card border-border"><CardContent className="p-4"><div className="h-16 bg-muted rounded animate-pulse" /></CardContent></Card>
-          ))
-        ) : addresses.length === 0 ? (
-          <Card className="col-span-full bg-card border-border">
-            <CardContent className="p-12 text-center text-muted-foreground">
-              <MapPin className="w-10 h-10 mx-auto mb-2 opacity-40" />
-              No addresses yet. Add your commonly used pickup points and delivery addresses.
-            </CardContent>
-          </Card>
-        ) : addresses.map(a => (
-          <Card key={a.id} className="bg-card border-border">
-            <CardContent className="p-4">
-              <div className="flex items-start justify-between">
-                <div className="min-w-0 flex-1">
-                  <h3 className="font-semibold text-foreground truncate">{a.addressName}</h3>
-                  <Badge variant="secondary" className={`text-xs mt-1 ${typeColors[a.type || 'other']}`}>
-                    {a.type === 'pickup' ? 'Pickup Point' : a.type === 'delivery' ? 'Delivery' : a.type === 'branch' ? 'Branch' : 'Other'}
-                  </Badge>
+      {viewMode === 'grid' ? (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {loading ? (
+            [...Array(3)].map((_, i) => (
+              <Card key={i} className="bg-card border-border"><CardContent className="p-4"><div className="h-16 bg-muted rounded animate-pulse" /></CardContent></Card>
+            ))
+          ) : addresses.length === 0 ? (
+            <Card className="col-span-full bg-card border-border">
+              <CardContent className="p-12 text-center text-muted-foreground">
+                <MapPin className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                No addresses yet. Add your commonly used pickup points and delivery addresses.
+              </CardContent>
+            </Card>
+          ) : addresses.map(a => (
+            <Card key={a.id} className="bg-card border-border">
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <h3 className="font-semibold text-foreground break-words whitespace-normal leading-snug">{a.addressName}</h3>
+                    <Badge variant="secondary" className={`text-xs mt-1 ${typeColors[a.type || 'other']}`}>
+                      {typeLabel(a.type)}
+                    </Badge>
+                  </div>
+                  {renderActions(a)}
                 </div>
-                <div className="flex gap-1">
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(a)}><Edit className="w-3.5 h-3.5" /></Button>
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader><AlertDialogTitle>Delete this address?</AlertDialogTitle><AlertDialogDescription>This cannot be undone.</AlertDialogDescription></AlertDialogHeader>
-                      <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleDelete(a.id)}>Delete</AlertDialogAction></AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                </div>
-              </div>
-              {a.fullAddress && <p className="text-xs text-muted-foreground mt-2">{a.fullAddress}</p>}
-              {a.plusCode && <p className="text-xs text-muted-foreground mt-1">Plus Code: {a.plusCode}</p>}
-              {a.coordinates && <p className="text-xs text-muted-foreground mt-1">📍 {a.coordinates}</p>}
-              {a.notes && <p className="text-xs text-muted-foreground mt-1 italic">{a.notes}</p>}
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+                {a.fullAddress && <p className="text-xs text-muted-foreground mt-2 break-words whitespace-normal">{a.fullAddress}</p>}
+                {a.plusCode && <p className="text-xs text-muted-foreground mt-1 break-all">Plus Code: {a.plusCode}</p>}
+                {a.coordinates && <p className="text-xs text-muted-foreground mt-1 break-all">📍 {a.coordinates}</p>}
+                {a.notes && <p className="text-xs text-muted-foreground mt-1 italic break-words whitespace-normal">{a.notes}</p>}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <Card className="bg-card border-border">
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-muted-foreground">
+                    <th className="text-left p-3 font-medium">Name</th>
+                    <th className="text-left p-3 font-medium">Type</th>
+                    <th className="text-left p-3 font-medium">Full Address</th>
+                    <th className="text-left p-3 font-medium">Plus Code</th>
+                    <th className="text-left p-3 font-medium">Coordinates</th>
+                    <th className="text-left p-3 font-medium">Notes</th>
+                    <th className="text-right p-3 font-medium">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    [...Array(4)].map((_, i) => (
+                      <tr key={i} className="border-b border-border">
+                        {[...Array(7)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}
+                      </tr>
+                    ))
+                  ) : addresses.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="text-center py-12 text-muted-foreground">
+                        <MapPin className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                        No addresses yet. Add your commonly used pickup points and delivery addresses.
+                      </td>
+                    </tr>
+                  ) : addresses.map(a => (
+                    <tr key={a.id} className="border-b border-border hover:bg-muted/30 align-top">
+                      <td className="p-3 font-medium text-foreground break-words whitespace-normal">{a.addressName}</td>
+                      <td className="p-3">
+                        <Badge variant="secondary" className={`text-xs ${typeColors[a.type || 'other']}`}>{typeLabel(a.type)}</Badge>
+                      </td>
+                      <td className="p-3 text-muted-foreground break-words whitespace-normal max-w-xs">{a.fullAddress || '-'}</td>
+                      <td className="p-3 text-muted-foreground break-all">{a.plusCode || '-'}</td>
+                      <td className="p-3 text-muted-foreground break-all">{a.coordinates || '-'}</td>
+                      <td className="p-3 text-muted-foreground break-words whitespace-normal max-w-xs">{a.notes || '-'}</td>
+                      <td className="p-3"><div className="flex justify-end">{renderActions(a)}</div></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Add/Edit Dialog */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
