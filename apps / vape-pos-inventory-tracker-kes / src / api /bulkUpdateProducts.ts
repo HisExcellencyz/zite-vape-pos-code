@@ -3,14 +3,15 @@ import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
 
 export default createEndpoint({
-  description: 'Bulk update products (stock, prices, status)',
+  description: 'Bulk update products (stock, prices, status, category)',
   authenticated: true,
   inputSchema: z.object({
     productIds: z.array(z.string()),
-    action: z.enum(['activate', 'deactivate', 'updateStock', 'updatePrices']),
+    action: z.enum(['activate', 'deactivate', 'updateStock', 'updatePrices', 'assignCategory']),
     stockQuantity: z.number().optional(),
     costPrice: z.number().optional(),
     sellingPrice: z.number().optional(),
+    categoryId: z.string().optional(),
   }),
   outputSchema: z.object({ success: z.boolean(), updated: z.number() }),
   execute: async ({ input }) => {
@@ -26,6 +27,9 @@ export default createEndpoint({
         case 'updatePrices':
           if (input.costPrice != null) record.costPrice = input.costPrice;
           if (input.sellingPrice != null) record.sellingPrice = input.sellingPrice;
+          break;
+        case 'assignCategory':
+          if (input.categoryId) record.category = input.categoryId;
           break;
       }
       if (Object.keys(record).length > 0) {
