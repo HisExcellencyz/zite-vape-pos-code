@@ -28,17 +28,46 @@ export default createEndpoint({
             const stockQuantity = Number(row['Stock Quantity'] || row['stockQuantity'] || row['stock'] || 0);
             const status = (costPrice === 0 || sellingPrice === 0) ? 'Inactive' : 'Active';
 
+            let categoryId: string | undefined;
+            const categoryName = (row['Category'] || row['category'] || '').trim();
+            if (categoryName) {
+              const existingCat = await zite.categories.findOne({ filters: { categoryName } });
+              if (existingCat) {
+                categoryId = existingCat.id;
+              } else {
+                const createdCat = await zite.categories.create({ record: { categoryName, active: true } });
+                categoryId = createdCat.id;
+              }
+            }
+
             // Check if SKU exists
             const existing = await zite.products.findOne({ filters: { sku } });
             if (existing) {
               await zite.products.update({
                 id: existing.id,
-                record: { productName: name, costPrice, sellingPrice, stockQuantity, status },
+                record: {
+                  productName: name,
+                  costPrice,
+                  sellingPrice,
+                  stockQuantity,
+                  status,
+                  ...(categoryId ? { category: categoryId } : {}),
+                },
               });
               updated++;
             } else {
               await zite.products.create({
-                record: { productName: name, sku, costPrice, sellingPrice, stockQuantity, status, reorderLevel: 5, taxRate: 0 },
+                record: {
+                  productName: name,
+                  sku,
+                  costPrice,
+                  sellingPrice,
+                  stockQuantity,
+                  status,
+                  reorderLevel: 5,
+                  taxRate: 0,
+                  ...(categoryId ? { category: categoryId } : {}),
+                },
               });
               imported++;
             }
