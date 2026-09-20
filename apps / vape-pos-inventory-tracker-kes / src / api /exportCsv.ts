@@ -17,16 +17,30 @@ export default createEndpoint({
     switch (input.table) {
       case 'products': {
         const { records } = await zite.products.findAll({ limit: 2000 });
-        headers = ['Product Name', 'SKU', 'Cost Price', 'Selling Price', 'Stock Quantity', 'Status', 'Tax Rate'];
-        rows = records.map(r => ({
-          'Product Name': r.productName || '',
-          'SKU': r.sku || '',
-          'Cost Price': r.costPrice || 0,
-          'Selling Price': r.sellingPrice || 0,
-          'Stock Quantity': r.stockQuantity || 0,
-          'Status': r.status || '',
-          'Tax Rate': r.taxRate || 0,
-        }));
+        const categoryIds = [...new Set(
+          records
+            .map(r => (Array.isArray(r.category) ? r.category[0] : r.category))
+            .filter((x): x is string => !!x)
+        )];
+        const categoryMap: Record<string, string> = {};
+        for (const cid of categoryIds) {
+          const cat = await zite.categories.findOne({ id: cid });
+          if (cat) categoryMap[cid] = cat.categoryName || '';
+        }
+        headers = ['Product Name', 'SKU', 'Cost Price', 'Selling Price', 'Stock Quantity', 'Status', 'Tax Rate', 'Category'];
+        rows = records.map(r => {
+          const catId = Array.isArray(r.category) ? r.category[0] : r.category;
+          return {
+            'Product Name': r.productName || '',
+            'SKU': r.sku || '',
+            'Cost Price': r.costPrice || 0,
+            'Selling Price': r.sellingPrice || 0,
+            'Stock Quantity': r.stockQuantity || 0,
+            'Status': r.status || '',
+            'Tax Rate': r.taxRate || 0,
+            'Category': catId ? (categoryMap[catId] || '') : '',
+          };
+        });
         filename = 'products_export.csv';
         break;
       }
