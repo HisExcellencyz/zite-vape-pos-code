@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
-import { getSuppliers, saveSupplier, deleteRecord, exportCsv, importCsv, recordDeposit, getSupplierDetails } from 'zitejs/api';
+import { getSuppliers, saveSupplier, deleteRecord, exportCsv, importCsv, recordDeposit, getSupplierDetails, bulkDeleteRecords } from 'zitejs/api';
 import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from '@project/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
-import { Search, Plus, Download, Upload, Truck, Pencil, Trash2, Eye, DollarSign, FileDown, MapPin } from 'lucide-react';
+import { Search, Plus, Download, Upload, Truck, Pencil, Trash2, Eye, DollarSign, FileDown, MapPin, CheckSquare } from 'lucide-react';
 import { toast } from 'sonner';
 import { downloadCsv, parseCsv, downloadTemplate } from '../lib/exportHelper';
 import { format } from 'date-fns';
@@ -41,6 +41,7 @@ export default function SuppliersPage() {
   const [transactions, setTransactions] = useState<any[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const load = async () => {
     setLoading(true);
@@ -139,6 +140,25 @@ export default function SuppliersPage() {
     } catch { toast.error('Failed to load'); }
   };
 
+  const toggleSelect = (id: string) => {
+    const next = new Set(selectedIds);
+    next.has(id) ? next.delete(id) : next.add(id);
+    setSelectedIds(next);
+  };
+
+  const toggleSelectAll = () => {
+    setSelectedIds(selectedIds.size === suppliers.length ? new Set() : new Set(suppliers.map(s => s.id)));
+  };
+
+  const handleBulkDelete = async () => {
+    try {
+      const res = await bulkDeleteRecords({ table: 'suppliers', ids: Array.from(selectedIds) });
+      toast.success(`Deleted ${res.deleted} suppliers`);
+      setSelectedIds(new Set());
+      load();
+    } catch { toast.error('Bulk delete failed'); }
+  };
+
   const fmt = (n?: number) => `KES ${(n || 0).toLocaleString()}`;
 
   return (
@@ -149,6 +169,25 @@ export default function SuppliersPage() {
           <p className="text-sm text-muted-foreground">{suppliers.length} suppliers</p>
         </div>
         <div className="flex items-center gap-2">
+          {selectedIds.size > 0 && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline" size="sm" className="border-destructive text-destructive hover:bg-destructive/10">
+                  <CheckSquare className="w-4 h-4 mr-1" /> Delete Selected ({selectedIds.size})
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete {selectedIds.size} suppliers?</AlertDialogTitle>
+                  <AlertDialogDescription>This cannot be undone.</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleBulkDelete} className="bg-destructive">Delete</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
           <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExport}><Download className="w-4 h-4 mr-1" /> Export</Button>
           <Dialog>
             <DialogTrigger asChild>
@@ -181,6 +220,7 @@ export default function SuppliersPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-muted-foreground">
+                  <th className="p-3 w-8"><input type="checkbox" checked={selectedIds.size === suppliers.length && suppliers.length > 0} onChange={toggleSelectAll} className="rounded" /></th>
                   <th className="text-left p-3 font-medium">Name</th>
                   <th className="text-left p-3 font-medium">Phone</th>
                   <th className="text-left p-3 font-medium">Email</th>
@@ -192,18 +232,20 @@ export default function SuppliersPage() {
                 {loading ? (
                   [...Array(5)].map((_, i) => (
                     <tr key={i} className="border-b border-border">
+                      <td className="p-3"></td>
                       {[...Array(5)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}
                     </tr>
                   ))
                 ) : suppliers.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="text-center py-12 text-muted-foreground">
+                    <td colSpan={6} className="text-center py-12 text-muted-foreground">
                       <Truck className="w-10 h-10 mx-auto mb-2 opacity-40" />
                       No suppliers found
                     </td>
                   </tr>
                 ) : suppliers.map(s => (
                   <tr key={s.id} className="border-b border-border hover:bg-muted/30">
+                    <td className="p-3"><input type="checkbox" checked={selectedIds.has(s.id)} onChange={() => toggleSelect(s.id)} className="rounded" /></td>
                     <td className="p-3 font-medium text-foreground">{s.supplierName}</td>
                     <td className="p-3 text-muted-foreground">{s.phone || '-'}</td>
                     <td className="p-3 text-muted-foreground">{s.email || '-'}</td>
