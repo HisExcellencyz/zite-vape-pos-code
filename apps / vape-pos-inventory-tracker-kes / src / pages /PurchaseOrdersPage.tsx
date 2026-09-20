@@ -22,6 +22,7 @@ import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { downloadCsv } from '../lib/exportHelper';
 import { DatePicker } from '@project/components/ui/date-picker';
+import ViewToggle, { useViewMode } from '../components/ViewToggle';
 
 interface LPOItem {
   productId: string;
@@ -65,6 +66,7 @@ export default function PurchaseOrdersPage() {
   const [showForm, setShowForm] = useState(false);
   const [showVerify, setShowVerify] = useState<PurchaseOrder | null>(null);
   const [showDetail, setShowDetail] = useState<PurchaseOrder | null>(null);
+  const [viewMode, setViewMode] = useViewMode('purchase-orders', 'list');
 
   // Form state
   const [editId, setEditId] = useState<string | undefined>();
@@ -225,6 +227,59 @@ export default function PurchaseOrdersPage() {
     } catch { toast.error('Failed'); }
   };
 
+  const renderActions = (o: PurchaseOrder) => (
+    <div className="flex items-center justify-end gap-1 flex-wrap">
+      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowDetail(o)} title="View">
+        <Eye className="w-3.5 h-3.5" />
+      </Button>
+      {o.status !== 'verified' && o.status !== 'cancelled' && (
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openVerify(o)} title="Verify">
+          <ClipboardCheck className="w-3.5 h-3.5" />
+        </Button>
+      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-7 w-7" title="Download PDF">
+            <FileText className="w-3.5 h-3.5" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={() => handleDownloadPdf(o, true)}>Branded PDF</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => handleDownloadPdf(o, false)}>Unbranded PDF</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDownloadExcel(o)} title="Excel">
+        <FileSpreadsheet className="w-3.5 h-3.5" />
+      </Button>
+      {o.status === 'draft' && (
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditForm(o)} title="Edit">
+          <Search className="w-3.5 h-3.5" />
+        </Button>
+      )}
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {o.lpoNumber}?</AlertDialogTitle>
+            <AlertDialogDescription>This cannot be undone.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => handleDelete(o.id)}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+
+  const statusBadge = (o: PurchaseOrder) => (
+    <Badge variant="secondary" className={statusColors[o.status || 'draft'] || statusColors.draft}>
+      {o.status || 'Draft'}
+    </Badge>
+  );
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -232,99 +287,95 @@ export default function PurchaseOrdersPage() {
           <h1 className="text-2xl font-bold text-foreground">Purchase Orders</h1>
           <p className="text-sm text-muted-foreground">{orders.length} LPOs</p>
         </div>
-        <Button size="sm" onClick={openNewForm}><Plus className="w-4 h-4 mr-1" /> New LPO</Button>
+        <div className="flex items-center gap-2">
+          <ViewToggle value={viewMode} onChange={setViewMode} />
+          <Button size="sm" onClick={openNewForm}><Plus className="w-4 h-4 mr-1" /> New LPO</Button>
+        </div>
       </div>
 
-      <Card className="bg-card border-border">
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-muted-foreground">
-                  <th className="text-left p-3 font-medium">LPO #</th>
-                  <th className="text-left p-3 font-medium">Supplier</th>
-                  <th className="text-left p-3 font-medium">Date</th>
-                  <th className="text-left p-3 font-medium">Status</th>
-                  <th className="text-right p-3 font-medium">Total</th>
-                  <th className="text-right p-3 font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  [...Array(4)].map((_, i) => (
-                    <tr key={i} className="border-b border-border">
-                      {[...Array(6)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}
-                    </tr>
-                  ))
-                ) : orders.length === 0 ? (
-                  <tr><td colSpan={6} className="text-center py-12 text-muted-foreground">
-                    <FileText className="w-10 h-10 mx-auto mb-2 opacity-40" />
-                    No purchase orders yet
-                  </td></tr>
-                ) : orders.map(o => (
-                  <tr key={o.id} className="border-b border-border hover:bg-muted/30">
-                    <td className="p-3 font-mono text-xs text-primary font-semibold">{o.lpoNumber}</td>
-                    <td className="p-3 text-foreground">{o.supplierName}</td>
-                    <td className="p-3 text-foreground">{o.orderDate ? format(new Date(o.orderDate), 'dd MMM yyyy') : '-'}</td>
-                    <td className="p-3">
-                      <Badge variant="secondary" className={statusColors[o.status || 'draft'] || statusColors.draft}>
-                        {o.status || 'Draft'}
-                      </Badge>
-                    </td>
-                    <td className="p-3 text-right font-semibold text-foreground">{fmt(o.totalAmount)}</td>
-                    <td className="p-3 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowDetail(o)} title="View">
-                          <Eye className="w-3.5 h-3.5" />
-                        </Button>
-                        {o.status !== 'verified' && o.status !== 'cancelled' && (
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openVerify(o)} title="Verify">
-                            <ClipboardCheck className="w-3.5 h-3.5" />
-                          </Button>
-                        )}
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-7 w-7" title="Download PDF">
-                              <FileText className="w-3.5 h-3.5" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => handleDownloadPdf(o, true)}>Branded PDF</DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleDownloadPdf(o, false)}>Unbranded PDF</DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDownloadExcel(o)} title="Excel">
-                          <FileSpreadsheet className="w-3.5 h-3.5" />
-                        </Button>
-                        {o.status === 'draft' && (
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditForm(o)} title="Edit">
-                            <Search className="w-3.5 h-3.5" />
-                          </Button>
-                        )}
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Delete {o.lpoNumber}?</AlertDialogTitle>
-                              <AlertDialogDescription>This cannot be undone.</AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => handleDelete(o.id)}>Delete</AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </div>
-                    </td>
+      {viewMode === 'list' ? (
+        <Card className="bg-card border-border">
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-muted-foreground">
+                    <th className="text-left p-3 font-medium">LPO #</th>
+                    <th className="text-left p-3 font-medium">Supplier</th>
+                    <th className="text-left p-3 font-medium">Date</th>
+                    <th className="text-left p-3 font-medium">Status</th>
+                    <th className="text-right p-3 font-medium">Total</th>
+                    <th className="text-right p-3 font-medium">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    [...Array(4)].map((_, i) => (
+                      <tr key={i} className="border-b border-border">
+                        {[...Array(6)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}
+                      </tr>
+                    ))
+                  ) : orders.length === 0 ? (
+                    <tr><td colSpan={6} className="text-center py-12 text-muted-foreground">
+                      <FileText className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                      No purchase orders yet
+                    </td></tr>
+                  ) : orders.map(o => (
+                    <tr key={o.id} className="border-b border-border hover:bg-muted/30">
+                      <td className="p-3 font-mono text-xs text-primary font-semibold">{o.lpoNumber}</td>
+                      <td className="p-3 text-foreground break-words whitespace-normal">{o.supplierName}</td>
+                      <td className="p-3 text-foreground whitespace-nowrap">{o.orderDate ? format(new Date(o.orderDate), 'dd MMM yyyy') : '-'}</td>
+                      <td className="p-3">{statusBadge(o)}</td>
+                      <td className="p-3 text-right font-semibold text-foreground whitespace-nowrap">{fmt(o.totalAmount)}</td>
+                      <td className="p-3 text-right">{renderActions(o)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {loading ? (
+            [...Array(3)].map((_, i) => (
+              <Card key={i} className="bg-card border-border"><CardContent className="p-4"><div className="h-28 bg-muted rounded animate-pulse" /></CardContent></Card>
+            ))
+          ) : orders.length === 0 ? (
+            <Card className="col-span-full bg-card border-border">
+              <CardContent className="py-12 text-center text-muted-foreground">
+                <FileText className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                No purchase orders yet
+              </CardContent>
+            </Card>
+          ) : orders.map(o => (
+            <Card key={o.id} className="bg-card border-border">
+              <CardContent className="p-4 space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="font-mono text-sm text-primary font-semibold break-all min-w-0">{o.lpoNumber}</p>
+                  <div className="shrink-0">{statusBadge(o)}</div>
+                </div>
+                <p className="text-sm font-medium text-foreground break-words whitespace-normal">{o.supplierName}</p>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="min-w-0">
+                    <p className="text-muted-foreground">Order Date</p>
+                    <p className="text-foreground">{o.orderDate ? format(new Date(o.orderDate), 'dd MMM yyyy') : '-'}</p>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-muted-foreground">Expected</p>
+                    <p className="text-foreground">{o.expectedDeliveryDate ? format(new Date(o.expectedDeliveryDate), 'dd MMM yyyy') : '-'}</p>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-muted-foreground">Total</span>
+                  <span className="text-lg font-bold text-primary break-words text-right">{fmt(o.totalAmount)}</span>
+                </div>
+                <div className="border-t border-border pt-2">{renderActions(o)}</div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
 
       {/* Create/Edit LPO Dialog */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
@@ -361,9 +412,9 @@ export default function PurchaseOrdersPage() {
               {productSearch && (
                 <div className="max-h-32 overflow-y-auto border border-border rounded-lg">
                   {filteredProducts.slice(0, 10).map(p => (
-                    <button key={p.id} onClick={() => addProduct(p)} className="w-full text-left p-2 hover:bg-muted text-sm flex justify-between">
-                      <span>{p.productName} <span className="text-muted-foreground text-xs">({p.sku})</span></span>
-                      <span className="text-muted-foreground">{fmt(p.costPrice)}</span>
+                    <button key={p.id} onClick={() => addProduct(p)} className="w-full text-left p-2 hover:bg-muted text-sm flex justify-between gap-2">
+                      <span className="break-words whitespace-normal min-w-0">{p.productName} <span className="text-muted-foreground text-xs">({p.sku})</span></span>
+                      <span className="text-muted-foreground shrink-0">{fmt(p.costPrice)}</span>
                     </button>
                   ))}
                 </div>
@@ -375,8 +426,8 @@ export default function PurchaseOrdersPage() {
                 {items.map((item, i) => (
                   <div key={item.productId} className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">{item.productName}</p>
-                      <p className="text-xs text-muted-foreground">{item.sku}</p>
+                      <p className="text-sm font-medium text-foreground break-words whitespace-normal">{item.productName}</p>
+                      <p className="text-xs text-muted-foreground break-all">{item.sku}</p>
                     </div>
                     <Input type="number" value={item.quantity} onChange={e => setItems(items.map((it, j) => j === i ? { ...it, quantity: Number(e.target.value) || 1 } : it))} className="w-16 h-8 text-center" />
                     <span className="text-xs text-muted-foreground">×</span>
@@ -416,7 +467,7 @@ export default function PurchaseOrdersPage() {
                   onCheckedChange={(checked) => setVerifyItems(verifyItems.map((it, j) => j === i ? { ...it, verified: !!checked } : it))}
                 />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground">{item.productName}</p>
+                  <p className="text-sm font-medium text-foreground break-words whitespace-normal">{item.productName}</p>
                   <p className="text-xs text-muted-foreground">Ordered: {item.quantity} @ {fmt(item.unitPrice)}</p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -453,7 +504,7 @@ export default function PurchaseOrdersPage() {
             return (
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div><span className="text-muted-foreground">Supplier:</span> <span className="font-medium">{showDetail.supplierName}</span></div>
+                  <div><span className="text-muted-foreground">Supplier:</span> <span className="font-medium break-words">{showDetail.supplierName}</span></div>
                   <div><span className="text-muted-foreground">Status:</span> <Badge variant="secondary" className={statusColors[showDetail.status || 'draft']}>{showDetail.status}</Badge></div>
                   <div><span className="text-muted-foreground">Date:</span> {showDetail.orderDate ? format(new Date(showDetail.orderDate), 'dd MMM yyyy') : '-'}</div>
                   <div><span className="text-muted-foreground">Expected:</span> {showDetail.expectedDeliveryDate ? format(new Date(showDetail.expectedDeliveryDate), 'dd MMM yyyy') : '-'}</div>
@@ -466,7 +517,7 @@ export default function PurchaseOrdersPage() {
                     <tbody>
                       {parsed.map(item => (
                         <tr key={item.productId} className="border-t border-border">
-                          <td className="p-2">{item.productName}</td>
+                          <td className="p-2 break-words whitespace-normal">{item.productName}</td>
                           <td className="p-2 text-right">{item.quantity}</td>
                           <td className="p-2 text-right">{fmt(item.unitPrice)}</td>
                           <td className="p-2 text-right">{fmt(item.unitPrice * item.quantity)}</td>
@@ -477,7 +528,7 @@ export default function PurchaseOrdersPage() {
                   </table>
                 </div>
                 <div className="text-right text-lg font-bold text-primary">{fmt(showDetail.totalAmount)}</div>
-                {showDetail.notes && <p className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-lg">{showDetail.notes}</p>}
+                {showDetail.notes && <p className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-lg break-words">{showDetail.notes}</p>}
                 <div className="flex gap-2 justify-end">
                   <Button variant="outline" size="sm" onClick={() => handleDownloadPdf(showDetail)}><FileText className="w-4 h-4 mr-1" /> PDF</Button>
                   <Button variant="outline" size="sm" onClick={() => handleDownloadExcel(showDetail)}><FileSpreadsheet className="w-4 h-4 mr-1" /> Excel</Button>
