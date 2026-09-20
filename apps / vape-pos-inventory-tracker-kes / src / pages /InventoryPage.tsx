@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Search, Plus, Download, Upload, Package, Pencil, Trash2, CheckSquare, FileDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { downloadCsv, parseCsv, downloadTemplate } from '../lib/exportHelper';
+import ViewToggle, { useViewMode } from '../components/ViewToggle';
 
 interface Product {
   id: string;
@@ -36,6 +37,7 @@ export default function InventoryPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
+  const [viewMode, setViewMode] = useViewMode('inventory', 'list');
 
   // Form state
   const [formName, setFormName] = useState('');
@@ -192,6 +194,31 @@ export default function InventoryPage() {
 
   const fmt = (n?: number) => n != null ? `KES ${n.toLocaleString()}` : 'KES 0';
 
+  const renderActions = (p: Product) => (
+    <div className="flex justify-end gap-1">
+      <Button variant="ghost" size="sm" onClick={() => openEdit(p)}><Pencil className="w-3.5 h-3.5" /></Button>
+      <AlertDialog>
+        <AlertDialogTrigger asChild><Button variant="ghost" size="sm" className="text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button></AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete product?</AlertDialogTitle>
+            <AlertDialogDescription>This will permanently delete {p.productName}.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => handleDelete(p.id)} className="bg-destructive">Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+
+  const statusBadge = (p: Product) => (
+    <Badge variant={p.status === 'Active' ? 'default' : 'secondary'} className={p.status === 'Active' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}>
+      {p.status}
+    </Badge>
+  );
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -199,7 +226,8 @@ export default function InventoryPage() {
           <h1 className="text-2xl font-bold text-foreground">Inventory</h1>
           <p className="text-sm text-muted-foreground">{products.length} products</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <ViewToggle value={viewMode} onChange={setViewMode} />
           {selectedIds.size > 0 && (
             <Button variant="outline" size="sm" onClick={() => setShowBulk(true)}>
               <CheckSquare className="w-4 h-4 mr-1" /> Bulk Actions ({selectedIds.size})
@@ -242,82 +270,114 @@ export default function InventoryPage() {
         </Select>
       </div>
 
-      {/* Products Table */}
-      <Card className="bg-card border-border">
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-muted-foreground">
-                  <th className="p-3 w-8"><input type="checkbox" checked={selectedIds.size === products.length && products.length > 0} onChange={toggleAll} className="rounded" /></th>
-                  <th className="text-left p-3 font-medium">Product</th>
-                  <th className="text-left p-3 font-medium">SKU</th>
-                  <th className="text-right p-3 font-medium">Cost</th>
-                  <th className="text-right p-3 font-medium">Selling</th>
-                  <th className="text-right p-3 font-medium">Stock</th>
-                  <th className="text-center p-3 font-medium">Status</th>
-                  <th className="text-right p-3 font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  [...Array(5)].map((_, i) => (
-                    <tr key={i} className="border-b border-border">
-                      <td className="p-3"></td>
-                      {[...Array(7)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}
-                    </tr>
-                  ))
-                ) : products.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="text-center py-12 text-muted-foreground">
-                      <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
-                      No products found
-                    </td>
+      {/* Products */}
+      {viewMode === 'list' ? (
+        <Card className="bg-card border-border">
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-muted-foreground">
+                    <th className="p-3 w-8"><input type="checkbox" checked={selectedIds.size === products.length && products.length > 0} onChange={toggleAll} className="rounded" /></th>
+                    <th className="text-left p-3 font-medium">Product</th>
+                    <th className="text-left p-3 font-medium">SKU</th>
+                    <th className="text-right p-3 font-medium">Cost</th>
+                    <th className="text-right p-3 font-medium">Selling</th>
+                    <th className="text-right p-3 font-medium">Stock</th>
+                    <th className="text-center p-3 font-medium">Status</th>
+                    <th className="text-right p-3 font-medium">Actions</th>
                   </tr>
-                ) : (
-                  products.map(p => (
-                    <tr key={p.id} className="border-b border-border hover:bg-muted/30 transition-colors">
-                      <td className="p-3"><input type="checkbox" checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} className="rounded" /></td>
-                      <td className="p-3 font-medium text-foreground">{p.productName}</td>
-                      <td className="p-3 text-muted-foreground font-mono text-xs">{p.sku}</td>
-                      <td className="p-3 text-right text-muted-foreground">{fmt(p.costPrice)}</td>
-                      <td className="p-3 text-right text-foreground">{fmt(p.sellingPrice)}</td>
-                      <td className="p-3 text-right">
-                        <span className={p.stockQuantity && p.stockQuantity > 0 ? 'text-emerald-400' : 'text-red-400'}>
-                          {p.stockQuantity || 0}
-                        </span>
-                      </td>
-                      <td className="p-3 text-center">
-                        <Badge variant={p.status === 'Active' ? 'default' : 'secondary'} className={p.status === 'Active' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}>
-                          {p.status}
-                        </Badge>
-                      </td>
-                      <td className="p-3 text-right">
-                        <div className="flex justify-end gap-1">
-                          <Button variant="ghost" size="sm" onClick={() => openEdit(p)}><Pencil className="w-3.5 h-3.5" /></Button>
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild><Button variant="ghost" size="sm" className="text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button></AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>Delete product?</AlertDialogTitle>
-                                <AlertDialogDescription>This will permanently delete {p.productName}.</AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction onClick={() => handleDelete(p.id)} className="bg-destructive">Delete</AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        </div>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    [...Array(5)].map((_, i) => (
+                      <tr key={i} className="border-b border-border">
+                        <td className="p-3"></td>
+                        {[...Array(7)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}
+                      </tr>
+                    ))
+                  ) : products.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="text-center py-12 text-muted-foreground">
+                        <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                        No products found
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    products.map(p => (
+                      <tr key={p.id} className="border-b border-border hover:bg-muted/30 transition-colors">
+                        <td className="p-3"><input type="checkbox" checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} className="rounded" /></td>
+                        <td className="p-3 font-medium text-foreground break-words whitespace-normal max-w-xs">{p.productName}</td>
+                        <td className="p-3 text-muted-foreground font-mono text-xs break-all">{p.sku}</td>
+                        <td className="p-3 text-right text-muted-foreground whitespace-nowrap">{fmt(p.costPrice)}</td>
+                        <td className="p-3 text-right text-foreground whitespace-nowrap">{fmt(p.sellingPrice)}</td>
+                        <td className="p-3 text-right">
+                          <span className={p.stockQuantity && p.stockQuantity > 0 ? 'text-emerald-400' : 'text-red-400'}>
+                            {p.stockQuantity || 0}
+                          </span>
+                        </td>
+                        <td className="p-3 text-center">{statusBadge(p)}</td>
+                        <td className="p-3 text-right">{renderActions(p)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {products.length > 0 && (
+            <label className="flex items-center gap-2 text-xs text-muted-foreground select-none w-fit cursor-pointer">
+              <input type="checkbox" checked={selectedIds.size === products.length} onChange={toggleAll} className="rounded" />
+              Select all
+            </label>
+          )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {loading ? (
+              [...Array(4)].map((_, i) => (
+                <Card key={i} className="bg-card border-border"><CardContent className="p-4"><div className="h-28 bg-muted rounded animate-pulse" /></CardContent></Card>
+              ))
+            ) : products.length === 0 ? (
+              <Card className="col-span-full bg-card border-border">
+                <CardContent className="py-12 text-center text-muted-foreground">
+                  <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                  No products found
+                </CardContent>
+              </Card>
+            ) : products.map(p => (
+              <Card key={p.id} className={`bg-card ${selectedIds.has(p.id) ? 'border-primary' : 'border-border'}`}>
+                <CardContent className="p-4 space-y-3">
+                  <div className="flex items-start gap-2">
+                    <input type="checkbox" checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} className="mt-1 rounded shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-foreground break-words whitespace-normal leading-snug">{p.productName}</p>
+                      <p className="text-xs text-muted-foreground font-mono break-all mt-0.5">{p.sku}</p>
+                    </div>
+                    <div className="shrink-0">{statusBadge(p)}</div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    <div className="min-w-0">
+                      <p className="text-muted-foreground">Cost</p>
+                      <p className="font-medium text-foreground break-words">{fmt(p.costPrice)}</p>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-muted-foreground">Selling</p>
+                      <p className="font-semibold text-primary break-words">{fmt(p.sellingPrice)}</p>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-muted-foreground">Stock</p>
+                      <p className={`font-semibold ${p.stockQuantity && p.stockQuantity > 0 ? 'text-emerald-400' : 'text-red-400'}`}>{p.stockQuantity || 0}</p>
+                    </div>
+                  </div>
+                  <div className="border-t border-border pt-2">{renderActions(p)}</div>
+                </CardContent>
+              </Card>
+            ))}
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      )}
 
       {/* Product Form Dialog */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
