@@ -11,6 +11,7 @@ import { Plus, Download, ShoppingBag, Trash2, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { downloadCsv } from '../lib/exportHelper';
+import ViewToggle, { useViewMode } from '../components/ViewToggle';
 
 interface Purchase {
   id: string;
@@ -38,6 +39,7 @@ export default function PurchasesPage() {
   const [notes, setNotes] = useState('');
   const [productSearch, setProductSearch] = useState('');
   const [saving, setSaving] = useState(false);
+  const [viewMode, setViewMode] = useViewMode('purchases', 'list');
 
   const load = async () => {
     setLoading(true);
@@ -104,6 +106,12 @@ export default function PurchasesPage() {
 
   const fmt = (n?: number) => `KES ${(n || 0).toLocaleString()}`;
 
+  const paymentBadge = (p: Purchase) => (
+    <Badge variant="secondary" className={p.paymentType === 'From Deposit' ? 'bg-primary/10 text-primary border-primary/20' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'}>
+      {p.paymentType}
+    </Badge>
+  );
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -112,54 +120,85 @@ export default function PurchasesPage() {
           <p className="text-sm text-muted-foreground">{purchases.length} purchase records</p>
         </div>
         <div className="flex items-center gap-2">
+          <ViewToggle value={viewMode} onChange={setViewMode} />
           <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExport}><Download className="w-4 h-4 mr-1" /> Export</Button>
           <Button size="sm" onClick={() => setShowForm(true)}><Plus className="w-4 h-4 mr-1" /> Add Purchase</Button>
         </div>
       </div>
 
-      <Card className="bg-card border-border">
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-muted-foreground">
-                  <th className="text-left p-3 font-medium">#</th>
-                  <th className="text-left p-3 font-medium">Date</th>
-                  <th className="text-left p-3 font-medium">Payment</th>
-                  <th className="text-right p-3 font-medium">Total</th>
-                  <th className="text-left p-3 font-medium">Notes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  [...Array(5)].map((_, i) => (
-                    <tr key={i} className="border-b border-border">
-                      {[...Array(5)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}
-                    </tr>
-                  ))
-                ) : purchases.length === 0 ? (
-                  <tr><td colSpan={5} className="text-center py-12 text-muted-foreground">
-                    <ShoppingBag className="w-10 h-10 mx-auto mb-2 opacity-40" />
-                    No purchases recorded yet
-                  </td></tr>
-                ) : purchases.map(p => (
-                  <tr key={p.id} className="border-b border-border hover:bg-muted/30">
-                    <td className="p-3 font-mono text-xs text-muted-foreground">#{p.purchaseNumber}</td>
-                    <td className="p-3 text-foreground">{p.purchaseDate ? format(new Date(p.purchaseDate), 'dd MMM yyyy HH:mm') : '-'}</td>
-                    <td className="p-3">
-                      <Badge variant="secondary" className={p.paymentType === 'From Deposit' ? 'bg-primary/10 text-primary border-primary/20' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'}>
-                        {p.paymentType}
-                      </Badge>
-                    </td>
-                    <td className="p-3 text-right font-semibold text-foreground">{fmt(p.total)}</td>
-                    <td className="p-3 text-muted-foreground text-xs">{p.notes || '-'}</td>
+      {viewMode === 'list' ? (
+        <Card className="bg-card border-border">
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-muted-foreground">
+                    <th className="text-left p-3 font-medium">#</th>
+                    <th className="text-left p-3 font-medium">Date</th>
+                    <th className="text-left p-3 font-medium">Payment</th>
+                    <th className="text-right p-3 font-medium">Total</th>
+                    <th className="text-left p-3 font-medium">Notes</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    [...Array(5)].map((_, i) => (
+                      <tr key={i} className="border-b border-border">
+                        {[...Array(5)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}
+                      </tr>
+                    ))
+                  ) : purchases.length === 0 ? (
+                    <tr><td colSpan={5} className="text-center py-12 text-muted-foreground">
+                      <ShoppingBag className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                      No purchases recorded yet
+                    </td></tr>
+                  ) : purchases.map(p => (
+                    <tr key={p.id} className="border-b border-border hover:bg-muted/30">
+                      <td className="p-3 font-mono text-xs text-muted-foreground">#{p.purchaseNumber}</td>
+                      <td className="p-3 text-foreground">{p.purchaseDate ? format(new Date(p.purchaseDate), 'dd MMM yyyy HH:mm') : '-'}</td>
+                      <td className="p-3">{paymentBadge(p)}</td>
+                      <td className="p-3 text-right font-semibold text-foreground whitespace-nowrap">{fmt(p.total)}</td>
+                      <td className="p-3 text-muted-foreground text-xs break-words whitespace-normal max-w-xs">{p.notes || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+          {loading ? (
+            [...Array(4)].map((_, i) => (
+              <Card key={i} className="bg-card border-border"><CardContent className="p-4"><div className="h-24 bg-muted rounded animate-pulse" /></CardContent></Card>
+            ))
+          ) : purchases.length === 0 ? (
+            <Card className="col-span-full bg-card border-border">
+              <CardContent className="py-12 text-center text-muted-foreground">
+                <ShoppingBag className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                No purchases recorded yet
+              </CardContent>
+            </Card>
+          ) : purchases.map(p => (
+            <Card key={p.id} className="bg-card border-border">
+              <CardContent className="p-4 space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-mono text-sm font-semibold text-foreground">#{p.purchaseNumber}</p>
+                    <p className="text-xs text-muted-foreground break-words">{p.purchaseDate ? format(new Date(p.purchaseDate), 'dd MMM yyyy HH:mm') : '-'}</p>
+                  </div>
+                  <div className="shrink-0">{paymentBadge(p)}</div>
+                </div>
+                {p.notes && <p className="text-xs text-muted-foreground break-words whitespace-normal">{p.notes}</p>}
+                <div className="border-t border-border pt-2 flex items-center justify-between gap-2">
+                  <span className="text-xs text-muted-foreground">Total</span>
+                  <span className="text-lg font-bold text-primary break-words text-right">{fmt(p.total)}</span>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
 
       {/* New Purchase Dialog */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
@@ -203,9 +242,9 @@ export default function PurchasesPage() {
               {productSearch && (
                 <div className="max-h-32 overflow-y-auto border border-border rounded-lg">
                   {filteredProducts.slice(0, 10).map(p => (
-                    <button key={p.id} onClick={() => { addToCart(p); setProductSearch(''); }} className="w-full text-left p-2 hover:bg-muted text-sm flex justify-between">
-                      <span>{p.productName} <span className="text-muted-foreground text-xs">({p.sku})</span></span>
-                      <span className="text-muted-foreground">{fmt(p.costPrice)}</span>
+                    <button key={p.id} onClick={() => { addToCart(p); setProductSearch(''); }} className="w-full text-left p-2 hover:bg-muted text-sm flex justify-between gap-2">
+                      <span className="break-words whitespace-normal min-w-0">{p.productName} <span className="text-muted-foreground text-xs">({p.sku})</span></span>
+                      <span className="text-muted-foreground shrink-0">{fmt(p.costPrice)}</span>
                     </button>
                   ))}
                 </div>
@@ -218,7 +257,7 @@ export default function PurchasesPage() {
                 {cart.map((item, i) => (
                   <div key={item.product.id} className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">{item.product.productName}</p>
+                      <p className="text-sm font-medium text-foreground break-words whitespace-normal">{item.product.productName}</p>
                     </div>
                     <Input type="number" value={item.quantity} onChange={e => setCart(cart.map((c, j) => j === i ? { ...c, quantity: Number(e.target.value) || 1 } : c))} className="w-16 h-8 text-center" />
                     <span className="text-xs text-muted-foreground">×</span>
