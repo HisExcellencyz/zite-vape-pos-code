@@ -5,13 +5,14 @@ import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
 import { Badge } from '@project/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@project/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { Switch } from '@project/components/ui/switch';
 import { Textarea } from '@project/components/ui/textarea';
 import { Search, Plus, Pencil, Trash2, FolderTree, CheckSquare } from 'lucide-react';
 import { toast } from 'sonner';
+import ViewToggle, { useViewMode } from '../components/ViewToggle';
 
 interface Category {
   id: string;
@@ -26,6 +27,7 @@ export default function CategoriesPage() {
   const [search, setSearch] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Category | null>(null);
+  const [viewMode, setViewMode] = useViewMode('categories', 'grid');
 
   // Form state
   const [name, setName] = useState('');
@@ -138,14 +140,28 @@ export default function CategoriesPage() {
     } catch (err: any) { toast.error(err.message || 'Failed'); }
   };
 
+  const renderActions = (c: Category) => (
+    <div className="flex items-center gap-1">
+      <Button variant="ghost" size="sm" onClick={() => openEdit(c)}><Pencil className="w-3.5 h-3.5" /></Button>
+      <AlertDialog>
+        <AlertDialogTrigger asChild><Button variant="ghost" size="sm" className="text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button></AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader><AlertDialogTitle>Delete category?</AlertDialogTitle><AlertDialogDescription>This will remove "{c.categoryName}" permanently.</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleDelete(c.id)}>Delete</AlertDialogAction></AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Categories</h1>
           <p className="text-sm text-muted-foreground">Manage product categories</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <ViewToggle value={viewMode} onChange={setViewMode} />
           {selectedIds.size > 0 && (
             <Button variant="outline" size="sm" onClick={() => setShowBulkCat(true)}>
               <CheckSquare className="w-4 h-4 mr-1" /> Bulk Actions ({selectedIds.size})
@@ -165,7 +181,7 @@ export default function CategoriesPage() {
         <Input placeholder="Search categories..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
       </div>
 
-      {filtered.length > 0 && (
+      {filtered.length > 0 && viewMode === 'grid' && (
         <label className="flex items-center gap-2 text-xs text-muted-foreground select-none w-fit cursor-pointer">
           <input type="checkbox" checked={selectedIds.size === filtered.length} onChange={toggleSelectAll} className="rounded" />
           Select all
@@ -176,37 +192,59 @@ export default function CategoriesPage() {
         <div className="flex justify-center py-16"><div className="w-8 h-8 border-3 border-primary border-t-transparent rounded-full animate-spin" /></div>
       ) : filtered.length === 0 ? (
         <Card><CardContent className="py-12 text-center text-muted-foreground">No categories found</CardContent></Card>
-      ) : (
+      ) : viewMode === 'grid' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {filtered.map(c => (
             <Card key={c.id} className={`hover:border-primary/30 transition-colors ${selectedIds.has(c.id) ? 'border-primary' : ''}`}>
               <CardContent className="p-4">
-                <div className="flex items-start justify-between">
+                <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1 flex items-start gap-2">
                     <input type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} className="mt-1 rounded shrink-0" />
                     <div className="min-w-0">
-                      <h3 className="font-semibold text-foreground truncate">{c.categoryName}</h3>
-                      {c.description && <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{c.description}</p>}
+                      <h3 className="font-semibold text-foreground break-words whitespace-normal leading-snug">{c.categoryName}</h3>
+                      {c.description && <p className="text-xs text-muted-foreground mt-1 break-words whitespace-normal">{c.description}</p>}
                     </div>
                   </div>
-                  <Badge variant={c.active !== false ? 'default' : 'secondary'} className="ml-2 shrink-0">
+                  <Badge variant={c.active !== false ? 'default' : 'secondary'} className="shrink-0">
                     {c.active !== false ? 'Active' : 'Inactive'}
                   </Badge>
                 </div>
-                <div className="flex items-center gap-1 mt-3 pt-3 border-t border-border">
-                  <Button variant="ghost" size="sm" onClick={() => openEdit(c)}><Pencil className="w-3.5 h-3.5" /></Button>
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild><Button variant="ghost" size="sm" className="text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button></AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader><AlertDialogTitle>Delete category?</AlertDialogTitle><AlertDialogDescription>This will remove "{c.categoryName}" permanently.</AlertDialogDescription></AlertDialogHeader>
-                      <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleDelete(c.id)}>Delete</AlertDialogAction></AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                </div>
+                <div className="mt-3 pt-3 border-t border-border">{renderActions(c)}</div>
               </CardContent>
             </Card>
           ))}
         </div>
+      ) : (
+        <Card className="bg-card border-border">
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-muted-foreground">
+                    <th className="p-3 w-8"><input type="checkbox" checked={selectedIds.size === filtered.length && filtered.length > 0} onChange={toggleSelectAll} className="rounded" /></th>
+                    <th className="text-left p-3 font-medium">Name</th>
+                    <th className="text-left p-3 font-medium">Description</th>
+                    <th className="text-center p-3 font-medium">Status</th>
+                    <th className="text-right p-3 font-medium">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(c => (
+                    <tr key={c.id} className="border-b border-border hover:bg-muted/30">
+                      <td className="p-3"><input type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} className="rounded" /></td>
+                      <td className="p-3 font-medium text-foreground break-words whitespace-normal">{c.categoryName}</td>
+                      <td className="p-3 text-muted-foreground break-words whitespace-normal max-w-md">{c.description || '-'}</td>
+                      <td className="p-3 text-center">
+                        <Badge variant={c.active !== false ? 'default' : 'secondary'}>{c.active !== false ? 'Active' : 'Inactive'}</Badge>
+                      </td>
+                      <td className="p-3"><div className="flex justify-end">{renderActions(c)}</div></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* Add/Edit Dialog */}
