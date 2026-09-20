@@ -7,10 +7,11 @@ import { Label } from '@project/components/ui/label';
 import { Badge } from '@project/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
-import { Search, Plus, Minus, ShoppingCart, Trash2, UserPlus, X, Receipt, DollarSign, MapPin, Route, LayoutGrid, List } from 'lucide-react';
+import { Search, Plus, Minus, ShoppingCart, Trash2, UserPlus, X, Receipt, DollarSign, MapPin, Route } from 'lucide-react';
 import { toast } from 'sonner';
 import DeliveryRouteMap from '../components/DeliveryRouteMap';
 import LocationPickerDialog from '../components/LocationPickerDialog';
+import ViewToggle, { useViewMode } from '../components/ViewToggle';
 
 interface Product {
   id: string;
@@ -58,7 +59,7 @@ export default function POSPage() {
   const [showCustLocationPicker, setShowCustLocationPicker] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [showOtherIncome, setShowOtherIncome] = useState(false);
-  const [catalogView, setCatalogView] = useState<'grid' | 'list'>('grid');
+  const [catalogView, setCatalogView] = useViewMode('pos', 'grid');
 
   // Delivery fields
   const [showDeliveryMap, setShowDeliveryMap] = useState(false);
@@ -165,26 +166,7 @@ export default function POSPage() {
         <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
           <h1 className="text-2xl font-bold text-foreground">Point of Sale</h1>
           <div className="flex items-center gap-2">
-            <div className="flex items-center border border-border rounded-md overflow-hidden shrink-0">
-              <Button
-                variant={catalogView === 'list' ? 'secondary' : 'ghost'}
-                size="sm"
-                className="rounded-none h-8 px-2"
-                onClick={() => setCatalogView('list')}
-                title="List view"
-              >
-                <List className="w-4 h-4" />
-              </Button>
-              <Button
-                variant={catalogView === 'grid' ? 'secondary' : 'ghost'}
-                size="sm"
-                className="rounded-none h-8 px-2"
-                onClick={() => setCatalogView('grid')}
-                title="Grid view"
-              >
-                <LayoutGrid className="w-4 h-4" />
-              </Button>
-            </div>
+            <ViewToggle value={catalogView} onChange={setCatalogView} />
             <Button variant="outline" size="sm" onClick={() => setShowOtherIncome(true)}>
               <DollarSign className="w-4 h-4 mr-1" /> Other Income
             </Button>
@@ -198,20 +180,20 @@ export default function POSPage() {
 
         <div className="flex-1 overflow-y-auto">
           {catalogView === 'grid' ? (
-            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3 items-stretch">
               {filtered.map(p => (
                 <button
                   key={p.id}
                   onClick={() => addToCart(p)}
-                  className="bg-card border border-border rounded-xl p-4 text-left hover:border-primary/50 hover:bg-muted/30 transition-all group flex flex-col"
+                  className="bg-card border border-border rounded-xl p-4 text-left hover:border-primary/50 hover:bg-muted/30 transition-all group flex flex-col min-w-0 h-full"
                 >
                   <div className="w-full aspect-square bg-muted rounded-lg mb-3 flex items-center justify-center shrink-0">
                     <ShoppingCart className="w-8 h-8 text-muted-foreground/30 group-hover:text-primary/40 transition-colors" />
                   </div>
-                  <p className="text-sm font-medium text-foreground break-words whitespace-normal leading-snug">{p.productName}</p>
-                  <p className="text-xs text-muted-foreground font-mono break-all mt-0.5">{p.sku}</p>
-                  <div className="flex items-center justify-between gap-2 mt-2 flex-wrap">
-                    <p className="text-sm font-bold text-primary">{fmt(p.sellingPrice || 0)}</p>
+                  <p className="text-sm font-medium text-foreground w-full break-words whitespace-normal leading-snug [overflow-wrap:anywhere]">{p.productName}</p>
+                  <p className="text-xs text-muted-foreground font-mono w-full break-all whitespace-normal mt-0.5">{p.sku}</p>
+                  <div className="flex items-center justify-between gap-2 mt-auto pt-2 flex-wrap">
+                    <p className="text-sm font-bold text-primary whitespace-normal break-words">{fmt(p.sellingPrice || 0)}</p>
                     <Badge variant="secondary" className="text-[10px] whitespace-nowrap">{p.stockQuantity || 0} left</Badge>
                   </div>
                 </button>
@@ -248,7 +230,7 @@ export default function POSPage() {
                       onClick={() => addToCart(p)}
                       className="border-b border-border last:border-0 hover:bg-muted/30 cursor-pointer transition-colors"
                     >
-                      <td className="p-3 font-medium text-foreground break-words whitespace-normal max-w-xs">{p.productName}</td>
+                      <td className="p-3 font-medium text-foreground break-words whitespace-normal max-w-xs [overflow-wrap:anywhere]">{p.productName}</td>
                       <td className="p-3 text-muted-foreground font-mono text-xs break-all">{p.sku}</td>
                       <td className="p-3 text-right font-semibold text-primary whitespace-nowrap">{fmt(p.sellingPrice || 0)}</td>
                       <td className="p-3 text-right"><Badge variant="secondary" className="text-[10px] whitespace-nowrap">{p.stockQuantity || 0} left</Badge></td>
@@ -274,12 +256,12 @@ export default function POSPage() {
           {/* Customer selector */}
           <div className="mt-3 flex items-center gap-2">
             {selectedCustomer ? (
-              <div className="flex-1 flex items-center justify-between bg-muted rounded-lg px-3 py-2">
-                <div>
-                  <p className="text-xs font-medium text-foreground">{selectedCustomer.customerName}</p>
-                  <p className="text-[10px] text-muted-foreground">{selectedCustomer.phoneNumber}</p>
+              <div className="flex-1 flex items-center justify-between bg-muted rounded-lg px-3 py-2 gap-2">
+                <div className="min-w-0">
+                  <p className="text-xs font-medium text-foreground break-words whitespace-normal">{selectedCustomer.customerName}</p>
+                  <p className="text-[10px] text-muted-foreground break-all">{selectedCustomer.phoneNumber}</p>
                 </div>
-                <button onClick={() => setSelectedCustomer(null)}><X className="w-3.5 h-3.5 text-muted-foreground" /></button>
+                <button onClick={() => setSelectedCustomer(null)} className="shrink-0"><X className="w-3.5 h-3.5 text-muted-foreground" /></button>
               </div>
             ) : (
               <>
@@ -308,10 +290,10 @@ export default function POSPage() {
           ) : cart.map(item => (
             <div key={item.product.id} className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-foreground break-words whitespace-normal">{item.product.productName}</p>
+                <p className="text-sm font-medium text-foreground break-words whitespace-normal [overflow-wrap:anywhere]">{item.product.productName}</p>
                 <p className="text-xs text-muted-foreground">{fmt(item.unitPrice)} each</p>
               </div>
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 shrink-0">
                 <button onClick={() => updateQty(item.product.id, -1)} className="w-6 h-6 rounded bg-muted flex items-center justify-center hover:bg-border">
                   <Minus className="w-3 h-3" />
                 </button>
@@ -320,8 +302,8 @@ export default function POSPage() {
                   <Plus className="w-3 h-3" />
                 </button>
               </div>
-              <p className="text-sm font-semibold text-foreground w-20 text-right">{fmt(item.unitPrice * item.quantity)}</p>
-              <button onClick={() => removeFromCart(item.product.id)} className="text-destructive hover:text-red-300">
+              <p className="text-sm font-semibold text-foreground w-20 text-right shrink-0 break-words">{fmt(item.unitPrice * item.quantity)}</p>
+              <button onClick={() => removeFromCart(item.product.id)} className="text-destructive hover:text-red-300 shrink-0">
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -358,12 +340,12 @@ export default function POSPage() {
               </Button>
             </div>
             {routePoints.length > 0 && (
-              <div className="bg-muted/50 rounded-lg p-2 space-y-1">
+              <div className="bg-muted/50 rounded-lg p-2 space-y-1 max-h-40 overflow-y-auto">
                 {routePoints.map((pt: any, i: number) => (
-                  <div key={pt.id} className="text-[10px] text-muted-foreground flex gap-1">
-                    <span className="font-bold text-foreground">{i + 1}.</span>
-                    <span className="capitalize font-medium" style={{ color: pt.tag === 'start' ? '#22c55e' : pt.tag === 'pickup' ? '#3b82f6' : pt.tag === 'dropoff' ? '#ef4444' : pt.tag === 'end' ? '#a855f7' : '#6b7280' }}>{pt.tag || 'pin'}</span>
-                    <span className="truncate">{pt.label}</span>
+                  <div key={pt.id} className="text-[10px] text-muted-foreground flex gap-1 items-start">
+                    <span className="font-bold text-foreground shrink-0">{i + 1}.</span>
+                    <span className="capitalize font-medium shrink-0" style={{ color: pt.tag === 'start' ? '#22c55e' : pt.tag === 'pickup' ? '#3b82f6' : pt.tag === 'dropoff' ? '#ef4444' : pt.tag === 'end' ? '#a855f7' : '#6b7280' }}>{pt.tag || 'pin'}</span>
+                    <span className="min-w-0 break-words whitespace-normal">{pt.label}</span>
                   </div>
                 ))}
                 {distanceKm > 0 && (
