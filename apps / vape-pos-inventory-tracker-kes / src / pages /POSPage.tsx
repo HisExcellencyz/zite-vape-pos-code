@@ -7,9 +7,10 @@ import { Label } from '@project/components/ui/label';
 import { Badge } from '@project/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
-import { Search, Plus, Minus, ShoppingCart, Trash2, UserPlus, X, Receipt, DollarSign, MapPin, Route } from 'lucide-react';
+import { Search, Plus, Minus, ShoppingCart, Trash2, UserPlus, X, Receipt, DollarSign, MapPin, Route, LayoutGrid, List } from 'lucide-react';
 import { toast } from 'sonner';
 import DeliveryRouteMap from '../components/DeliveryRouteMap';
+import LocationPickerDialog from '../components/LocationPickerDialog';
 
 interface Product {
   id: string;
@@ -53,8 +54,11 @@ export default function POSPage() {
   const [showCustomerDialog, setShowCustomerDialog] = useState(false);
   const [newCustName, setNewCustName] = useState('');
   const [newCustPhone, setNewCustPhone] = useState('');
+  const [newCustAddress, setNewCustAddress] = useState('');
+  const [showCustLocationPicker, setShowCustLocationPicker] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [showOtherIncome, setShowOtherIncome] = useState(false);
+  const [catalogView, setCatalogView] = useState<'grid' | 'list'>('grid');
 
   // Delivery fields
   const [showDeliveryMap, setShowDeliveryMap] = useState(false);
@@ -109,7 +113,7 @@ export default function POSPage() {
       const pickups = routePoints.filter((p: any) => p.tag === 'pickup');
       const dropoffs = routePoints.filter((p: any) => p.tag === 'dropoff');
       const otherStops = routePoints.filter((p: any) => !p.tag || (p.tag !== 'start' && p.tag !== 'end' && p.tag !== 'pickup' && p.tag !== 'dropoff'));
-      
+
       await createSale({
         items: cart.map(c => ({
           productId: c.product.id,
@@ -141,11 +145,11 @@ export default function POSPage() {
   const handleCreateCustomer = async () => {
     if (!newCustName || !newCustPhone) return toast.error('Name and phone are required');
     try {
-      const res = await saveCustomer({ customerName: newCustName, phoneNumber: newCustPhone });
+      const res = await saveCustomer({ customerName: newCustName, phoneNumber: newCustPhone, address: newCustAddress || undefined });
       setCustomers(prev => [...prev, res.customer as Customer]);
       setSelectedCustomer(res.customer as Customer);
       setShowCustomerDialog(false);
-      setNewCustName(''); setNewCustPhone('');
+      setNewCustName(''); setNewCustPhone(''); setNewCustAddress('');
       toast.success('Customer created');
     } catch (e: any) {
       toast.error(e.message || 'Failed');
@@ -158,11 +162,33 @@ export default function POSPage() {
     <div className="p-6 h-[calc(100vh-0px)] flex gap-6">
       {/* Left: Product Catalog */}
       <div className="flex-1 flex flex-col min-w-0">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
           <h1 className="text-2xl font-bold text-foreground">Point of Sale</h1>
-          <Button variant="outline" size="sm" onClick={() => setShowOtherIncome(true)}>
-            <DollarSign className="w-4 h-4 mr-1" /> Other Income
-          </Button>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center border border-border rounded-md overflow-hidden shrink-0">
+              <Button
+                variant={catalogView === 'list' ? 'secondary' : 'ghost'}
+                size="sm"
+                className="rounded-none h-8 px-2"
+                onClick={() => setCatalogView('list')}
+                title="List view"
+              >
+                <List className="w-4 h-4" />
+              </Button>
+              <Button
+                variant={catalogView === 'grid' ? 'secondary' : 'ghost'}
+                size="sm"
+                className="rounded-none h-8 px-2"
+                onClick={() => setCatalogView('grid')}
+                title="Grid view"
+              >
+                <LayoutGrid className="w-4 h-4" />
+              </Button>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => setShowOtherIncome(true)}>
+              <DollarSign className="w-4 h-4 mr-1" /> Other Income
+            </Button>
+          </div>
         </div>
 
         <div className="relative mb-4">
@@ -171,25 +197,67 @@ export default function POSPage() {
         </div>
 
         <div className="flex-1 overflow-y-auto">
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
-            {filtered.map(p => (
-              <button
-                key={p.id}
-                onClick={() => addToCart(p)}
-                className="bg-card border border-border rounded-xl p-4 text-left hover:border-primary/50 hover:bg-muted/30 transition-all group"
-              >
-                <div className="w-full aspect-square bg-muted rounded-lg mb-3 flex items-center justify-center">
-                  <ShoppingCart className="w-8 h-8 text-muted-foreground/30 group-hover:text-primary/40 transition-colors" />
+          {catalogView === 'grid' ? (
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+              {filtered.map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => addToCart(p)}
+                  className="bg-card border border-border rounded-xl p-4 text-left hover:border-primary/50 hover:bg-muted/30 transition-all group flex flex-col"
+                >
+                  <div className="w-full aspect-square bg-muted rounded-lg mb-3 flex items-center justify-center shrink-0">
+                    <ShoppingCart className="w-8 h-8 text-muted-foreground/30 group-hover:text-primary/40 transition-colors" />
+                  </div>
+                  <p className="text-sm font-medium text-foreground break-words whitespace-normal leading-snug">{p.productName}</p>
+                  <p className="text-xs text-muted-foreground font-mono break-all mt-0.5">{p.sku}</p>
+                  <div className="flex items-center justify-between gap-2 mt-2 flex-wrap">
+                    <p className="text-sm font-bold text-primary">{fmt(p.sellingPrice || 0)}</p>
+                    <Badge variant="secondary" className="text-[10px] whitespace-nowrap">{p.stockQuantity || 0} left</Badge>
+                  </div>
+                </button>
+              ))}
+              {filtered.length === 0 && (
+                <div className="col-span-full text-center py-12 text-muted-foreground">
+                  <ShoppingCart className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                  No products found
                 </div>
-                <p className="text-sm font-medium text-foreground truncate">{p.productName}</p>
-                <p className="text-xs text-muted-foreground font-mono">{p.sku}</p>
-                <div className="flex items-center justify-between mt-2">
-                  <p className="text-sm font-bold text-primary">{fmt(p.sellingPrice || 0)}</p>
-                  <Badge variant="secondary" className="text-[10px]">{p.stockQuantity || 0} left</Badge>
-                </div>
-              </button>
-            ))}
-          </div>
+              )}
+            </div>
+          ) : (
+            <div className="border border-border rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-muted-foreground bg-muted/30">
+                    <th className="text-left p-3 font-medium">Product</th>
+                    <th className="text-left p-3 font-medium">SKU</th>
+                    <th className="text-right p-3 font-medium">Price</th>
+                    <th className="text-right p-3 font-medium">Stock</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="text-center py-12 text-muted-foreground">
+                        <ShoppingCart className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                        No products found
+                      </td>
+                    </tr>
+                  ) : filtered.map(p => (
+                    <tr
+                      key={p.id}
+                      onClick={() => addToCart(p)}
+                      className="border-b border-border last:border-0 hover:bg-muted/30 cursor-pointer transition-colors"
+                    >
+                      <td className="p-3 font-medium text-foreground break-words whitespace-normal max-w-xs">{p.productName}</td>
+                      <td className="p-3 text-muted-foreground font-mono text-xs break-all">{p.sku}</td>
+                      <td className="p-3 text-right font-semibold text-primary whitespace-nowrap">{fmt(p.sellingPrice || 0)}</td>
+                      <td className="p-3 text-right"><Badge variant="secondary" className="text-[10px] whitespace-nowrap">{p.stockQuantity || 0} left</Badge></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
 
@@ -240,7 +308,7 @@ export default function POSPage() {
           ) : cart.map(item => (
             <div key={item.product.id} className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-foreground truncate">{item.product.productName}</p>
+                <p className="text-sm font-medium text-foreground break-words whitespace-normal">{item.product.productName}</p>
                 <p className="text-xs text-muted-foreground">{fmt(item.unitPrice)} each</p>
               </div>
               <div className="flex items-center gap-1.5">
@@ -324,6 +392,15 @@ export default function POSPage() {
               <Label>Phone Number *</Label>
               <Input value={newCustPhone} onChange={e => setNewCustPhone(e.target.value)} placeholder="+254..." />
             </div>
+            <div>
+              <Label>Location</Label>
+              <div className="flex gap-2">
+                <Input value={newCustAddress} onChange={e => setNewCustAddress(e.target.value)} placeholder="Address (optional)" className="flex-1" />
+                <Button type="button" variant="outline" size="icon" className="shrink-0" onClick={() => setShowCustLocationPicker(true)}>
+                  <MapPin className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCustomerDialog(false)}>Cancel</Button>
@@ -331,6 +408,14 @@ export default function POSPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <LocationPickerDialog
+        open={showCustLocationPicker}
+        onOpenChange={setShowCustLocationPicker}
+        title="Customer Location"
+        value={newCustAddress}
+        onSelect={(address) => { setNewCustAddress(address); }}
+      />
 
       {/* Delivery Route Map Dialog */}
       <Dialog open={showDeliveryMap} onOpenChange={setShowDeliveryMap}>
