@@ -6,11 +6,12 @@ import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from '@project/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
-import { Search, Plus, Download, Upload, Truck, Pencil, Trash2, Eye, DollarSign, FileDown, MapPin, CheckSquare } from 'lucide-react';
+import { Search, Plus, Download, Upload, Truck, Pencil, Trash2, Eye, DollarSign, FileDown, MapPin, CheckSquare, Phone, Mail } from 'lucide-react';
 import { toast } from 'sonner';
 import { downloadCsv, parseCsv, downloadTemplate } from '../lib/exportHelper';
 import { format } from 'date-fns';
 import LocationPickerDialog from '../components/LocationPickerDialog';
+import ViewToggle, { useViewMode } from '../components/ViewToggle';
 
 interface Supplier {
   id: string;
@@ -42,6 +43,7 @@ export default function SuppliersPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [viewMode, setViewMode] = useViewMode('suppliers', 'list');
 
   const load = async () => {
     setLoading(true);
@@ -161,6 +163,25 @@ export default function SuppliersPage() {
 
   const fmt = (n?: number) => `KES ${(n || 0).toLocaleString()}`;
 
+  const renderActions = (s: Supplier) => (
+    <div className="flex justify-end gap-1">
+      <Button variant="ghost" size="sm" onClick={() => openEdit(s)}><Pencil className="w-3.5 h-3.5" /></Button>
+      <AlertDialog>
+        <AlertDialogTrigger asChild><Button variant="ghost" size="sm" className="text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button></AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete supplier?</AlertDialogTitle>
+            <AlertDialogDescription>This will permanently delete {s.supplierName}.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => handleDelete(s.id)} className="bg-destructive">Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -168,7 +189,8 @@ export default function SuppliersPage() {
           <h1 className="text-2xl font-bold text-foreground">Suppliers</h1>
           <p className="text-sm text-muted-foreground">{suppliers.length} suppliers</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <ViewToggle value={viewMode} onChange={setViewMode} />
           {selectedIds.size > 0 && (
             <AlertDialog>
               <AlertDialogTrigger asChild>
@@ -214,67 +236,94 @@ export default function SuppliersPage() {
         <Input placeholder="Search suppliers..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
       </div>
 
-      <Card className="bg-card border-border">
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-muted-foreground">
-                  <th className="p-3 w-8"><input type="checkbox" checked={selectedIds.size === suppliers.length && suppliers.length > 0} onChange={toggleSelectAll} className="rounded" /></th>
-                  <th className="text-left p-3 font-medium">Name</th>
-                  <th className="text-left p-3 font-medium">Phone</th>
-                  <th className="text-left p-3 font-medium">Email</th>
-                  <th className="text-right p-3 font-medium">Deposit Balance</th>
-                  <th className="text-right p-3 font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  [...Array(5)].map((_, i) => (
-                    <tr key={i} className="border-b border-border">
-                      <td className="p-3"></td>
-                      {[...Array(5)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}
+      {viewMode === 'list' ? (
+        <Card className="bg-card border-border">
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-muted-foreground">
+                    <th className="p-3 w-8"><input type="checkbox" checked={selectedIds.size === suppliers.length && suppliers.length > 0} onChange={toggleSelectAll} className="rounded" /></th>
+                    <th className="text-left p-3 font-medium">Name</th>
+                    <th className="text-left p-3 font-medium">Phone</th>
+                    <th className="text-left p-3 font-medium">Email</th>
+                    <th className="text-right p-3 font-medium">Deposit Balance</th>
+                    <th className="text-right p-3 font-medium">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    [...Array(5)].map((_, i) => (
+                      <tr key={i} className="border-b border-border">
+                        <td className="p-3"></td>
+                        {[...Array(5)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}
+                      </tr>
+                    ))
+                  ) : suppliers.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="text-center py-12 text-muted-foreground">
+                        <Truck className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                        No suppliers found
+                      </td>
                     </tr>
-                  ))
-                ) : suppliers.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="text-center py-12 text-muted-foreground">
-                      <Truck className="w-10 h-10 mx-auto mb-2 opacity-40" />
-                      No suppliers found
-                    </td>
-                  </tr>
-                ) : suppliers.map(s => (
-                  <tr key={s.id} className="border-b border-border hover:bg-muted/30">
-                    <td className="p-3"><input type="checkbox" checked={selectedIds.has(s.id)} onChange={() => toggleSelect(s.id)} className="rounded" /></td>
-                    <td className="p-3 font-medium text-foreground">{s.supplierName}</td>
-                    <td className="p-3 text-muted-foreground">{s.phone || '-'}</td>
-                    <td className="p-3 text-muted-foreground">{s.email || '-'}</td>
-                    <td className="p-3 text-right font-semibold text-primary">{fmt(s.depositBalance)}</td>
-                    <td className="p-3 text-right">
-                      <div className="flex justify-end gap-1">
-                        <Button variant="ghost" size="sm" onClick={() => openEdit(s)}><Pencil className="w-3.5 h-3.5" /></Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild><Button variant="ghost" size="sm" className="text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button></AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Delete supplier?</AlertDialogTitle>
-                              <AlertDialogDescription>This will permanently delete {s.supplierName}.</AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => handleDelete(s.id)} className="bg-destructive">Delete</AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                  ) : suppliers.map(s => (
+                    <tr key={s.id} className="border-b border-border hover:bg-muted/30">
+                      <td className="p-3"><input type="checkbox" checked={selectedIds.has(s.id)} onChange={() => toggleSelect(s.id)} className="rounded" /></td>
+                      <td className="p-3 font-medium text-foreground break-words whitespace-normal">{s.supplierName}</td>
+                      <td className="p-3 text-muted-foreground whitespace-nowrap">{s.phone || '-'}</td>
+                      <td className="p-3 text-muted-foreground break-all">{s.email || '-'}</td>
+                      <td className="p-3 text-right font-semibold text-primary whitespace-nowrap">{fmt(s.depositBalance)}</td>
+                      <td className="p-3 text-right">{renderActions(s)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {suppliers.length > 0 && (
+            <label className="flex items-center gap-2 text-xs text-muted-foreground select-none w-fit cursor-pointer">
+              <input type="checkbox" checked={selectedIds.size === suppliers.length} onChange={toggleSelectAll} className="rounded" />
+              Select all
+            </label>
+          )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {loading ? (
+              [...Array(4)].map((_, i) => (
+                <Card key={i} className="bg-card border-border"><CardContent className="p-4"><div className="h-24 bg-muted rounded animate-pulse" /></CardContent></Card>
+              ))
+            ) : suppliers.length === 0 ? (
+              <Card className="col-span-full bg-card border-border">
+                <CardContent className="py-12 text-center text-muted-foreground">
+                  <Truck className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                  No suppliers found
+                </CardContent>
+              </Card>
+            ) : suppliers.map(s => (
+              <Card key={s.id} className={`bg-card ${selectedIds.has(s.id) ? 'border-primary' : 'border-border'}`}>
+                <CardContent className="p-4 space-y-3">
+                  <div className="flex items-start gap-2">
+                    <input type="checkbox" checked={selectedIds.has(s.id)} onChange={() => toggleSelect(s.id)} className="mt-1 rounded shrink-0" />
+                    <p className="font-semibold text-foreground break-words whitespace-normal leading-snug min-w-0 flex-1">{s.supplierName}</p>
+                  </div>
+                  <div className="space-y-1.5 text-xs text-muted-foreground">
+                    {s.phone && <p className="flex items-start gap-1.5"><Phone className="w-3.5 h-3.5 mt-0.5 shrink-0" /><span className="break-all">{s.phone}</span></p>}
+                    {s.email && <p className="flex items-start gap-1.5"><Mail className="w-3.5 h-3.5 mt-0.5 shrink-0" /><span className="break-all">{s.email}</span></p>}
+                    {s.address && <p className="flex items-start gap-1.5"><MapPin className="w-3.5 h-3.5 mt-0.5 shrink-0" /><span className="break-words whitespace-normal min-w-0">{s.address}</span></p>}
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Deposit Balance</p>
+                    <p className="font-semibold text-primary break-words">{fmt(s.depositBalance)}</p>
+                  </div>
+                  <div className="border-t border-border pt-2">{renderActions(s)}</div>
+                </CardContent>
+              </Card>
+            ))}
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      )}
 
       <Dialog open={showForm} onOpenChange={setShowForm}>
         <DialogContent className="max-w-md">
