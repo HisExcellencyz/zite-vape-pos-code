@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 import { useAuth, logout } from 'zitejs/auth';
 import {
   LayoutDashboard, ShoppingCart, Package, Users, Truck,
@@ -13,27 +13,31 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger
 } from '@project/components/ui/dropdown-menu';
 import { useState } from 'react';
+import { usePermissions } from '../hooks/usePermissions';
 
+// `area` links each menu item to the permission matrix on the Users page.
 const navItems = [
-  { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/pos', icon: ShoppingCart, label: 'POS' },
-  { to: '/inventory', icon: Package, label: 'Inventory' },
-  { to: '/categories', icon: FolderTree, label: 'Categories' },
-  { to: '/sales', icon: Receipt, label: 'Sales' },
-  { to: '/purchases', icon: ShoppingBag, label: 'Purchases' },
-  { to: '/purchase-orders', icon: FileText, label: 'Purchase Orders' },
-  { to: '/expenses', icon: Wallet, label: 'Expenses' },
-  { to: '/customers', icon: Users, label: 'Customers' },
-  { to: '/suppliers', icon: Truck, label: 'Suppliers' },
-  { to: '/addresses', icon: MapPin, label: 'Addresses' },
-  { to: '/users', icon: Shield, label: 'Users' },
-  { to: '/settings', icon: Settings, label: 'Settings' },
+  { to: '/', icon: LayoutDashboard, label: 'Dashboard', area: 'reports' },
+  { to: '/pos', icon: ShoppingCart, label: 'POS', area: 'pos' },
+  { to: '/inventory', icon: Package, label: 'Inventory', area: 'inventory' },
+  { to: '/categories', icon: FolderTree, label: 'Categories', area: 'inventory' },
+  { to: '/sales', icon: Receipt, label: 'Sales', area: 'pos' },
+  { to: '/purchases', icon: ShoppingBag, label: 'Purchases', area: 'purchases' },
+  { to: '/purchase-orders', icon: FileText, label: 'Purchase Orders', area: 'purchases' },
+  { to: '/expenses', icon: Wallet, label: 'Expenses', area: 'expenses' },
+  { to: '/customers', icon: Users, label: 'Customers', area: 'customers' },
+  { to: '/suppliers', icon: Truck, label: 'Suppliers', area: 'suppliers' },
+  { to: '/addresses', icon: MapPin, label: 'Addresses', area: 'pos' },
+  { to: '/users', icon: Shield, label: 'Users', area: 'users' },
+  { to: '/settings', icon: Settings, label: 'Settings', area: 'settings' },
 ];
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   const { user } = useAuth();
+  const { can, roleName } = usePermissions();
   const [collapsed, setCollapsed] = useState(false);
-  const location = useLocation();
+
+  const visibleItems = navItems.filter(item => can(item.area, 'view'));
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -64,6 +68,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                   <div className="text-left overflow-hidden">
                     <p className="text-xs font-medium text-foreground truncate">{user?.firstName || user?.email}</p>
                     <p className="text-[10px] text-muted-foreground truncate">{user?.email}</p>
+                    {roleName && <p className="text-[10px] text-primary truncate">{roleName}</p>}
                   </div>
                 )}
               </button>
@@ -78,7 +83,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
         {/* Nav */}
         <nav className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">
-          {navItems.map(item => (
+          {visibleItems.map(item => (
             <NavLink
               key={item.to}
               to={item.to}
