@@ -1,17 +1,18 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { getCustomers, saveCustomer, deleteRecord, exportCsv, importCsv, getCustomerDetails, bulkDeleteRecords } from 'zitejs/api';
 import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from '@project/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
-import { Search, Plus, Download, Upload, Users, Pencil, Trash2, Phone, Eye, FileDown, MapPin, CheckSquare, Mail } from 'lucide-react';
+import { Search, Plus, Download, Upload, Users, Pencil, Trash2, Phone, Eye, MapPin, CheckSquare, Mail } from 'lucide-react';
 import { toast } from 'sonner';
-import { downloadCsv, parseCsv, downloadTemplate } from '../lib/exportHelper';
+import { downloadCsv } from '../lib/exportHelper';
 import { format } from 'date-fns';
 import LocationPickerDialog from '../components/LocationPickerDialog';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
+import ImportDialog from '../components/ImportDialog';
 
 interface Customer {
   id: string;
@@ -37,7 +38,7 @@ export default function CustomersPage() {
   const [detailCustomer, setDetailCustomer] = useState<any>(null);
   const [detailOrders, setDetailOrders] = useState<any[]>([]);
   const [detailStats, setDetailStats] = useState({ orderCount: 0, totalSpent: 0 });
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importOpen, setImportOpen] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useViewMode('customers', 'list');
@@ -106,18 +107,9 @@ export default function CustomersPage() {
     } catch { toast.error('Export failed'); }
   };
 
-  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const text = await file.text();
-    const rows = parseCsv(text);
-    if (rows.length === 0) return toast.error('No data found');
-    try {
-      const res = await importCsv({ table: 'customers', rows });
-      toast.success(`Imported ${res.imported}, Updated ${res.updated}`);
-      load();
-    } catch (err: any) { toast.error(err.message || 'Failed'); }
-    if (fileInputRef.current) fileInputRef.current.value = '';
+  const runImport = async (rows: Record<string, string>[]) => {
+    const res = await importCsv({ table: 'customers', rows });
+    return { imported: res.imported, updated: res.updated, errors: res.errors };
   };
 
   const openDetails = async (c: Customer) => {
@@ -198,22 +190,7 @@ export default function CustomersPage() {
             </AlertDialog>
           )}
           <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExport}><Download className="w-4 h-4 mr-1" /> Export</Button>
-          <Dialog>
-            <DialogTrigger asChild>
-              <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10"><Upload className="w-4 h-4 mr-1" /> Import</Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-md">
-              <DialogHeader><DialogTitle>Import Customers</DialogTitle></DialogHeader>
-              <div className="space-y-4">
-                <p className="text-sm text-muted-foreground">Upload a CSV file with columns: <span className="font-medium text-foreground">Customer Name, Phone Number, Email, Address</span>. Existing customers matched by phone number will be updated.</p>
-                <Button variant="outline" size="sm" className="border-yellow-500 text-yellow-400 hover:bg-yellow-500/10" onClick={() => downloadTemplate('customers')}><FileDown className="w-4 h-4 mr-1" /> Download Template</Button>
-                <div>
-                  <Label className="text-sm mb-1 block">Select CSV file</Label>
-                  <Input ref={fileInputRef} type="file" accept=".csv,.txt" onChange={handleImport} />
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
+          <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10" onClick={() => setImportOpen(true)}><Upload className="w-4 h-4 mr-1" /> Import</Button>
           <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" /> Add Customer</Button>
         </div>
       </div>
@@ -308,6 +285,17 @@ export default function CustomersPage() {
         </div>
       )}
 
+      <ImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        title="Import Customers"
+        template="customers"
+        chunkSize={100}
+        description={<>Upload a CSV with columns: <span className="font-medium text-foreground">Customer Name, Phone Number, Email, Address</span>. Customers matched by phone number are updated. Press OK to start the import.</>}
+        onImport={runImport}
+        onDone={load}
+      />
+
       <Dialog open={showForm} onOpenChange={setShowForm}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>{editing ? 'Edit Customer' : 'New Customer'}</DialogTitle></DialogHeader>
@@ -337,7 +325,6 @@ export default function CustomersPage() {
         onSelect={(address) => { setFormAddress(address); }}
       />
 
-      {/* Customer Details Dialog */}
       <Dialog open={showDetails} onOpenChange={setShowDetails}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle className="break-words">{detailCustomer?.customerName}</DialogTitle></DialogHeader>
@@ -348,18 +335,14 @@ export default function CustomersPage() {
                 {detailCustomer.email && <span className="break-all">{detailCustomer.email}</span>}
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <Card className="bg-muted/50 border-border">
-                  <CardContent className="pt-4">
-                    <p className="text-xs text-muted-foreground">Total Orders</p>
-                    <p className="text-2xl font-bold text-foreground">{detailStats.orderCount}</p>
-                  </CardContent>
-                </Card>
-                <Card className="bg-muted/50 border-border">
-                  <CardContent className="pt-4">
-                    <p className="text-xs text-muted-foreground">Total Spent</p>
-                    <p className="text-2xl font-bold text-primary">KES {detailStats.totalSpent.toLocaleString()}</p>
-                  </CardContent>
-                </Card>
+                <Card className="bg-muted/50 border-border"><CardContent className="pt-4">
+                  <p className="text-xs text-muted-foreground">Total Orders</p>
+                  <p className="text-2xl font-bold text-foreground">{detailStats.orderCount}</p>
+                </CardContent></Card>
+                <Card className="bg-muted/50 border-border"><CardContent className="pt-4">
+                  <p className="text-xs text-muted-foreground">Total Spent</p>
+                  <p className="text-2xl font-bold text-primary">KES {detailStats.totalSpent.toLocaleString()}</p>
+                </CardContent></Card>
               </div>
               <div>
                 <h3 className="text-sm font-semibold text-foreground mb-2">Order History</h3>
