@@ -1,13 +1,16 @@
 import { useState, useEffect } from 'react';
-import { getSales } from 'zitejs/api';
+import { getSales, exportCsv, importSales } from 'zitejs/api';
 import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
 import { Badge } from '@project/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
-import { Search, Download, Receipt } from 'lucide-react';
+import { Search, Download, Upload, Receipt } from 'lucide-react';
 import { format } from 'date-fns';
+import { toast } from 'sonner';
+import { downloadCsv } from '../lib/exportHelper';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
+import ImportDialog from '../components/ImportDialog';
 
 interface Sale {
   id: string;
@@ -33,11 +36,12 @@ export default function SalesPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [viewMode, setViewMode] = useViewMode('sales', 'list');
+  const [importOpen, setImportOpen] = useState(false);
 
   const load = async () => {
     setLoading(true);
     try {
-      const res = await getSales({ search, status: statusFilter || undefined });
+      const res = await getSales({ search, status: statusFilter && statusFilter !== 'all' ? statusFilter : undefined });
       setSales(res.sales as Sale[]);
     } finally {
       setLoading(false);
@@ -46,6 +50,19 @@ export default function SalesPage() {
 
   useEffect(() => { load(); }, [statusFilter]);
 
+  const handleExport = async () => {
+    try {
+      const res = await exportCsv({ table: 'sales' });
+      downloadCsv(res.csv, res.filename);
+      toast.success('Exported');
+    } catch { toast.error('Export failed'); }
+  };
+
+  const runImport = async (rows: Record<string, string>[], adjustStock: boolean) => {
+    const res = await importSales({ rows, adjustStock });
+    return { imported: res.imported, skipped: res.skipped, errors: res.errors };
+  };
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -53,9 +70,10 @@ export default function SalesPage() {
           <h1 className="text-2xl font-bold text-foreground">Sales</h1>
           <p className="text-sm text-muted-foreground">{sales.length} sales records</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <ViewToggle value={viewMode} onChange={setViewMode} />
-          <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10"><Download className="w-4 h-4 mr-1" /> Export</Button>
+          <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExport}><Download className="w-4 h-4 mr-1" /> Export</Button>
+          <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10" onClick={() => setImportOpen(true)}><Upload className="w-4 h-4 mr-1" /> Import</Button>
         </div>
       </div>
 
@@ -101,7 +119,7 @@ export default function SalesPage() {
                     <tr>
                       <td colSpan={6} className="text-center py-12 text-muted-foreground">
                         <Receipt className="w-10 h-10 mx-auto mb-2 opacity-40" />
-                        No sales yet. Create your first sale in POS.
+                        No sales yet. Create your first sale in POS or import a file.
                       </td>
                     </tr>
                   ) : sales.map(s => (
@@ -112,9 +130,7 @@ export default function SalesPage() {
                       <td className="p-3 text-right text-muted-foreground whitespace-nowrap">{fmt(s.subtotal)}</td>
                       <td className="p-3 text-right font-semibold text-foreground whitespace-nowrap">{fmt(s.total)}</td>
                       <td className="p-3 text-center">
-                        <Badge variant="secondary" className={statusColors[s.status || ''] || ''}>
-                          {s.status}
-                        </Badge>
+                        <Badge variant="secondary" className={statusColors[s.status || ''] || ''}>{s.status}</Badge>
                       </td>
                     </tr>
                   ))}
@@ -133,7 +149,7 @@ export default function SalesPage() {
             <Card className="col-span-full bg-card border-border">
               <CardContent className="py-12 text-center text-muted-foreground">
                 <Receipt className="w-10 h-10 mx-auto mb-2 opacity-40" />
-                No sales yet. Create your first sale in POS.
+                No sales yet. Create your first sale in POS or import a file.
               </CardContent>
             </Card>
           ) : sales.map(s => (
@@ -165,6 +181,21 @@ export default function SalesPage() {
           ))}
         </div>
       )}
+
+      <ImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        title="Import Sales"
+        template="sales"
+        optionLabel="Also deduct the imported quantities from current stock (leave off for old sales already reflected in your stock counts)"
+        description={<>
+          Upload a CSV with one row per product line. Rows sharing the same <span className="font-medium text-foreground">Sale Ref</span> become one sale.
+          Columns: <span className="font-medium text-foreground">Sale Ref, Date, Customer Name, Customer Phone, Payment Method, Product SKU, Quantity, Unit Price, Discount, Notes</span>.
+          <br />The <span className="font-medium text-foreground">Date</span> can be in the past (YYYY-MM-DD or DD/MM/YYYY, optionally with a time like 14:30); leave it empty to use today. Products are matched by SKU. Sale Refs already imported are skipped. Press OK to start.
+        </>}
+        onImport={runImport}
+        onDone={load}
+      />
     </div>
   );
 }
