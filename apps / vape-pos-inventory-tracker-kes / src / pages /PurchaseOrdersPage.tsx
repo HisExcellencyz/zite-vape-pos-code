@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   getPurchaseOrders, savePurchaseOrder, verifyPurchaseOrder,
-  generateLpoPdf, exportLpoCsv, getProducts, getSuppliers, deleteRecord
+  generateLpoPdf, exportLpoCsv, getProducts, getSuppliers, deleteRecord, importLpos
 } from 'zitejs/api';
 import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
@@ -10,19 +10,16 @@ import { Label } from '@project/components/ui/label';
 import { Badge } from '@project/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@project/components/ui/tabs';
 import { Checkbox } from '@project/components/ui/checkbox';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@project/components/ui/dropdown-menu';
-import {
-  Plus, Download, FileText, Search, Trash2, ClipboardCheck,
-  FileSpreadsheet, Eye, Send
-} from 'lucide-react';
+import { Plus, Upload, FileText, Search, Trash2, ClipboardCheck, FileSpreadsheet, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { downloadCsv } from '../lib/exportHelper';
 import { DatePicker } from '@project/components/ui/date-picker';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
+import ImportDialog from '../components/ImportDialog';
 
 interface LPOItem {
   productId: string;
@@ -64,11 +61,11 @@ export default function PurchaseOrdersPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [showVerify, setShowVerify] = useState<PurchaseOrder | null>(null);
   const [showDetail, setShowDetail] = useState<PurchaseOrder | null>(null);
   const [viewMode, setViewMode] = useViewMode('purchase-orders', 'list');
 
-  // Form state
   const [editId, setEditId] = useState<string | undefined>();
   const [supplierId, setSupplierId] = useState('');
   const [orderDate, setOrderDate] = useState<Date | undefined>(new Date());
@@ -78,18 +75,13 @@ export default function PurchaseOrdersPage() {
   const [productSearch, setProductSearch] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Verify state
   const [verifyItems, setVerifyItems] = useState<LPOItem[]>([]);
   const [verifying, setVerifying] = useState(false);
 
   const load = async () => {
     setLoading(true);
     try {
-      const [o, p, s] = await Promise.all([
-        getPurchaseOrders({}),
-        getProducts({}),
-        getSuppliers({}),
-      ]);
+      const [o, p, s] = await Promise.all([getPurchaseOrders({}), getProducts({}), getSuppliers({})]);
       setOrders(o.orders as PurchaseOrder[]);
       setProducts(p.products as Product[]);
       setSuppliers(s.suppliers as Supplier[]);
@@ -101,13 +93,8 @@ export default function PurchaseOrdersPage() {
   const fmt = (n?: number) => `KES ${(n || 0).toLocaleString()}`;
 
   const openNewForm = () => {
-    setEditId(undefined);
-    setSupplierId('');
-    setOrderDate(new Date());
-    setExpectedDate(undefined);
-    setNotes('');
-    setItems([]);
-    setShowForm(true);
+    setEditId(undefined); setSupplierId(''); setOrderDate(new Date());
+    setExpectedDate(undefined); setNotes(''); setItems([]); setShowForm(true);
   };
 
   const openEditForm = (o: PurchaseOrder) => {
@@ -160,11 +147,7 @@ export default function PurchaseOrdersPage() {
   const openVerify = (o: PurchaseOrder) => {
     let parsed: LPOItem[] = [];
     try { parsed = JSON.parse(o.itemsJson || '[]'); } catch {}
-    setVerifyItems(parsed.map(i => ({
-      ...i,
-      verified: i.verified || false,
-      verifiedQty: i.verifiedQty ?? i.quantity,
-    })));
+    setVerifyItems(parsed.map(i => ({ ...i, verified: i.verified || false, verifiedQty: i.verifiedQty ?? i.quantity })));
     setShowVerify(o);
   };
 
@@ -184,7 +167,6 @@ export default function PurchaseOrdersPage() {
     try {
       toast.info(`Generating ${branded ? 'branded' : 'unbranded'} PDF...`);
       const res = await generateLpoPdf({ orderId: o.id, branded });
-      // Download directly to device
       const link = document.createElement('a');
       link.href = res.url;
       link.download = `${o.lpoNumber || 'LPO'}${branded ? '' : '-unbranded'}.pdf`;
@@ -210,51 +192,29 @@ export default function PurchaseOrdersPage() {
     } catch { toast.error('Delete failed'); }
   };
 
-  const handleMarkSent = async (o: PurchaseOrder) => {
-    try {
-      let parsed: LPOItem[] = [];
-      try { parsed = JSON.parse(o.itemsJson || '[]'); } catch {}
-      await savePurchaseOrder({
-        id: o.id,
-        supplierId: o.supplier?.[0] || '',
-        orderDate: o.orderDate || new Date().toISOString(),
-        items: parsed,
-      });
-      // Update status directly
-      // For now we re-use save; ideally we'd have a status update endpoint
-      toast.success('Marked as sent');
-      load();
-    } catch { toast.error('Failed'); }
+  const runImport = async (rows: Record<string, string>[]) => {
+    const res = await importLpos({ rows });
+    return { imported: res.imported, skipped: res.skipped, errors: res.errors };
   };
 
   const renderActions = (o: PurchaseOrder) => (
     <div className="flex items-center justify-end gap-1 flex-wrap">
-      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowDetail(o)} title="View">
-        <Eye className="w-3.5 h-3.5" />
-      </Button>
+      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowDetail(o)} title="View"><Eye className="w-3.5 h-3.5" /></Button>
       {o.status !== 'verified' && o.status !== 'cancelled' && (
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openVerify(o)} title="Verify">
-          <ClipboardCheck className="w-3.5 h-3.5" />
-        </Button>
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openVerify(o)} title="Verify"><ClipboardCheck className="w-3.5 h-3.5" /></Button>
       )}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" className="h-7 w-7" title="Download PDF">
-            <FileText className="w-3.5 h-3.5" />
-          </Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7" title="Download PDF"><FileText className="w-3.5 h-3.5" /></Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem onClick={() => handleDownloadPdf(o, true)}>Branded PDF</DropdownMenuItem>
           <DropdownMenuItem onClick={() => handleDownloadPdf(o, false)}>Unbranded PDF</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDownloadExcel(o)} title="Excel">
-        <FileSpreadsheet className="w-3.5 h-3.5" />
-      </Button>
+      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDownloadExcel(o)} title="Excel"><FileSpreadsheet className="w-3.5 h-3.5" /></Button>
       {o.status === 'draft' && (
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditForm(o)} title="Edit">
-          <Search className="w-3.5 h-3.5" />
-        </Button>
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditForm(o)} title="Edit"><Search className="w-3.5 h-3.5" /></Button>
       )}
       <AlertDialog>
         <AlertDialogTrigger asChild>
@@ -275,9 +235,7 @@ export default function PurchaseOrdersPage() {
   );
 
   const statusBadge = (o: PurchaseOrder) => (
-    <Badge variant="secondary" className={statusColors[o.status || 'draft'] || statusColors.draft}>
-      {o.status || 'Draft'}
-    </Badge>
+    <Badge variant="secondary" className={statusColors[o.status || 'draft'] || statusColors.draft}>{o.status || 'Draft'}</Badge>
   );
 
   return (
@@ -287,8 +245,9 @@ export default function PurchaseOrdersPage() {
           <h1 className="text-2xl font-bold text-foreground">Purchase Orders</h1>
           <p className="text-sm text-muted-foreground">{orders.length} LPOs</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <ViewToggle value={viewMode} onChange={setViewMode} />
+          <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10" onClick={() => setImportOpen(true)}><Upload className="w-4 h-4 mr-1" /> Import</Button>
           <Button size="sm" onClick={openNewForm}><Plus className="w-4 h-4 mr-1" /> New LPO</Button>
         </div>
       </div>
@@ -377,7 +336,20 @@ export default function PurchaseOrdersPage() {
         </div>
       )}
 
-      {/* Create/Edit LPO Dialog */}
+      <ImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        title="Import Purchase Orders (LPOs)"
+        template="lpos"
+        description={<>
+          Upload a CSV with one row per product line. Rows sharing the same <span className="font-medium text-foreground">LPO Number</span> become one LPO.
+          Columns: <span className="font-medium text-foreground">LPO Number, Supplier Name, Order Date, Expected Delivery Date, Status, Product SKU, Quantity, Unit Price, Notes</span>.
+          <br />Dates can be in the past (YYYY-MM-DD or DD/MM/YYYY). Status: Draft, Sent, Partially Verified, Verified or Cancelled. Imported LPOs are recorded as history only — they do not change stock or create purchases. Existing LPO numbers are skipped. Press OK to start.
+        </>}
+        onImport={runImport}
+        onDone={load}
+      />
+
       <Dialog open={showForm} onOpenChange={setShowForm}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{editId ? 'Edit' : 'New'} Purchase Order</DialogTitle></DialogHeader>
@@ -387,9 +359,7 @@ export default function PurchaseOrdersPage() {
                 <Label>Supplier *</Label>
                 <Select value={supplierId} onValueChange={setSupplierId}>
                   <SelectTrigger><SelectValue placeholder="Select supplier" /></SelectTrigger>
-                  <SelectContent>{suppliers.map(s => (
-                    <SelectItem key={s.id} value={s.id}>{s.supplierName}</SelectItem>
-                  ))}</SelectContent>
+                  <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.supplierName}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
               <div>
@@ -402,7 +372,6 @@ export default function PurchaseOrdersPage() {
               <DatePicker value={expectedDate} onChange={setExpectedDate} />
             </div>
 
-            {/* Add products */}
             <div>
               <Label>Products</Label>
               <div className="relative mb-2">
@@ -452,12 +421,9 @@ export default function PurchaseOrdersPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Verify Dialog */}
       <Dialog open={!!showVerify} onOpenChange={() => setShowVerify(null)}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Verify Delivery — {showVerify?.lpoNumber}</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>Verify Delivery — {showVerify?.lpoNumber}</DialogTitle></DialogHeader>
           <p className="text-sm text-muted-foreground">Check each product received and confirm quantities. Once all verified, a purchase will be auto-recorded.</p>
           <div className="space-y-2 mt-4">
             {verifyItems.map((item, i) => (
@@ -485,19 +451,14 @@ export default function PurchaseOrdersPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowVerify(null)}>Cancel</Button>
-            <Button onClick={handleVerify} disabled={verifying}>
-              {verifying ? 'Verifying...' : 'Confirm Verification'}
-            </Button>
+            <Button onClick={handleVerify} disabled={verifying}>{verifying ? 'Verifying...' : 'Confirm Verification'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Detail View Dialog */}
       <Dialog open={!!showDetail} onOpenChange={() => setShowDetail(null)}>
         <DialogContent className="max-w-xl">
-          <DialogHeader>
-            <DialogTitle>{showDetail?.lpoNumber}</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>{showDetail?.lpoNumber}</DialogTitle></DialogHeader>
           {showDetail && (() => {
             let parsed: LPOItem[] = [];
             try { parsed = JSON.parse(showDetail.itemsJson || '[]'); } catch {}
