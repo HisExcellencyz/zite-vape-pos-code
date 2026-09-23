@@ -1,17 +1,17 @@
-import { useState, useEffect, useRef } from 'react';
-import { getSuppliers, saveSupplier, deleteRecord, exportCsv, importCsv, recordDeposit, getSupplierDetails, bulkDeleteRecords } from 'zitejs/api';
+import { useState, useEffect } from 'react';
+import { getSuppliers, saveSupplier, deleteRecord, exportCsv, importCsv, bulkDeleteRecords } from 'zitejs/api';
 import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from '@project/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
-import { Search, Plus, Download, Upload, Truck, Pencil, Trash2, Eye, DollarSign, FileDown, MapPin, CheckSquare, Phone, Mail } from 'lucide-react';
+import { Search, Plus, Download, Upload, Truck, Pencil, Trash2, MapPin, CheckSquare, Phone, Mail } from 'lucide-react';
 import { toast } from 'sonner';
-import { downloadCsv, parseCsv, downloadTemplate } from '../lib/exportHelper';
-import { format } from 'date-fns';
+import { downloadCsv } from '../lib/exportHelper';
 import LocationPickerDialog from '../components/LocationPickerDialog';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
+import ImportDialog from '../components/ImportDialog';
 
 interface Supplier {
   id: string;
@@ -33,14 +33,7 @@ export default function SuppliersPage() {
   const [formEmail, setFormEmail] = useState('');
   const [formAddress, setFormAddress] = useState('');
   const [saving, setSaving] = useState(false);
-  const [showDeposit, setShowDeposit] = useState(false);
-  const [depositSupplierId, setDepositSupplierId] = useState('');
-  const [depositAmount, setDepositAmount] = useState('');
-  const [depositNotes, setDepositNotes] = useState('');
-  const [showTransactions, setShowTransactions] = useState(false);
-  const [txSupplier, setTxSupplier] = useState<any>(null);
-  const [transactions, setTransactions] = useState<any[]>([]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importOpen, setImportOpen] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useViewMode('suppliers', 'list');
@@ -109,37 +102,9 @@ export default function SuppliersPage() {
     } catch { toast.error('Export failed'); }
   };
 
-  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const text = await file.text();
-    const rows = parseCsv(text);
-    if (rows.length === 0) return toast.error('No data found');
-    try {
-      const res = await importCsv({ table: 'suppliers', rows });
-      toast.success(`Imported ${res.imported}`);
-      load();
-    } catch (err: any) { toast.error(err.message || 'Failed'); }
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
-  const handleDeposit = async () => {
-    if (!depositAmount || Number(depositAmount) <= 0) return toast.error('Enter a valid amount');
-    try {
-      await recordDeposit({ supplierId: depositSupplierId, amount: Number(depositAmount), notes: depositNotes || undefined });
-      toast.success('Deposit recorded');
-      setShowDeposit(false); setDepositAmount(''); setDepositNotes('');
-      load();
-    } catch (e: any) { toast.error(e.message || 'Failed'); }
-  };
-
-  const openTransactions = async (s: Supplier) => {
-    try {
-      const res = await getSupplierDetails({ supplierId: s.id });
-      setTxSupplier(res.supplier);
-      setTransactions(res.transactions);
-      setShowTransactions(true);
-    } catch { toast.error('Failed to load'); }
+  const runImport = async (rows: Record<string, string>[]) => {
+    const res = await importCsv({ table: 'suppliers', rows });
+    return { imported: res.imported, updated: res.updated, errors: res.errors };
   };
 
   const toggleSelect = (id: string) => {
@@ -211,22 +176,7 @@ export default function SuppliersPage() {
             </AlertDialog>
           )}
           <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExport}><Download className="w-4 h-4 mr-1" /> Export</Button>
-          <Dialog>
-            <DialogTrigger asChild>
-              <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10"><Upload className="w-4 h-4 mr-1" /> Import</Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-md">
-              <DialogHeader><DialogTitle>Import Suppliers</DialogTitle></DialogHeader>
-              <div className="space-y-4">
-                <p className="text-sm text-muted-foreground">Upload a CSV file with columns: <span className="font-medium text-foreground">Supplier Name, Phone, Email, Address</span>. Each row creates a new supplier.</p>
-                <Button variant="outline" size="sm" className="border-yellow-500 text-yellow-400 hover:bg-yellow-500/10" onClick={() => downloadTemplate('suppliers')}><FileDown className="w-4 h-4 mr-1" /> Download Template</Button>
-                <div>
-                  <Label className="text-sm mb-1 block">Select CSV file</Label>
-                  <Input ref={fileInputRef} type="file" accept=".csv,.txt" onChange={handleImport} />
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
+          <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10" onClick={() => setImportOpen(true)}><Upload className="w-4 h-4 mr-1" /> Import</Button>
           <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" /> Add Supplier</Button>
         </div>
       </div>
@@ -324,6 +274,17 @@ export default function SuppliersPage() {
           </div>
         </div>
       )}
+
+      <ImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        title="Import Suppliers"
+        template="suppliers"
+        chunkSize={100}
+        description={<>Upload a CSV with columns: <span className="font-medium text-foreground">Supplier Name, Phone, Email, Address</span>. Each row creates a new supplier. Press OK to start the import.</>}
+        onImport={runImport}
+        onDone={load}
+      />
 
       <Dialog open={showForm} onOpenChange={setShowForm}>
         <DialogContent className="max-w-md">
