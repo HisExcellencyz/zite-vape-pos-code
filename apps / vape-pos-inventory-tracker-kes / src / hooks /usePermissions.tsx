@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { getMyPermissions } from 'zitejs/api';
 
 type PermMatrix = Record<string, Record<string, boolean>>;
@@ -6,38 +6,50 @@ type PermMatrix = Record<string, Record<string, boolean>>;
 interface PermContextType {
   permissions: PermMatrix;
   roleName: string;
+  /** True when the signed-in user has no role yet (waiting for an admin). */
+  pending: boolean;
   loading: boolean;
   can: (area: string, action: string) => boolean;
+  refresh: () => Promise<void>;
 }
 
 const PermContext = createContext<PermContextType>({
   permissions: {},
   roleName: '',
+  pending: false,
   loading: true,
   can: () => false,
+  refresh: async () => {},
 });
 
 export function PermissionsProvider({ children }: { children: ReactNode }) {
   const [permissions, setPermissions] = useState<PermMatrix>({});
   const [roleName, setRoleName] = useState('');
+  const [pending, setPending] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    getMyPermissions({})
-      .then(res => {
-        setPermissions(res.permissions || {});
-        setRoleName(res.roleName || '');
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+  const load = useCallback(async () => {
+    try {
+      const res = await getMyPermissions({});
+      setPermissions((res.permissions as PermMatrix) || {});
+      setRoleName(res.roleName || '');
+      setPending(!!res.pending);
+    } catch {
+      setPermissions({});
+      setPending(true);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const can = (area: string, action: string) => {
-    return permissions[area]?.[action] === true;
-  };
+  useEffect(() => { load(); }, [load]);
+
+  const can = (area: string, action: string) => permissions[area]?.[action] === true;
+
+  const refresh = async () => { setLoading(true); await load(); };
 
   return (
-    <PermContext.Provider value={{ permissions, roleName, loading, can }}>
+    <PermContext.Provider value={{ permissions, roleName, pending, loading, can, refresh }}>
       {children}
     </PermContext.Provider>
   );
