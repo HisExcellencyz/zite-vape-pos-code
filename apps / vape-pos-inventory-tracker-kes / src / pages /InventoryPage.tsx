@@ -1,17 +1,19 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
-import { getProducts, getCategories, saveProduct, deleteRecord, exportCsv, importCsv, bulkUpdateProducts, bulkDeleteRecords } from 'zitejs/api';
-import { Card, CardContent, CardHeader, CardTitle } from '@project/components/ui/card';
+import { useState, useEffect, useRef } from 'react';
+import { getProducts, getCategories, saveProduct, deleteRecord, exportCsv, importCsv, bulkUpdateProducts, bulkDeleteRecords, uploadProductImage } from 'zitejs/api';
+import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
 import { Badge } from '@project/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@project/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
-import { Search, Plus, Download, Upload, Package, Pencil, Trash2, CheckSquare, FileDown } from 'lucide-react';
+import { Search, Plus, Download, Upload, Package, Pencil, Trash2, CheckSquare, ImagePlus } from 'lucide-react';
 import { toast } from 'sonner';
-import { downloadCsv, parseCsv, downloadTemplate } from '../lib/exportHelper';
+import { downloadCsv } from '../lib/exportHelper';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
+import ImportDialog from '../components/ImportDialog';
+import ProductImage, { compressImage } from '../components/ProductImage';
 
 interface Product {
   id: string;
@@ -22,12 +24,15 @@ interface Product {
   stockQuantity?: number;
   status?: string;
   category?: string | string[];
+  images?: { url: string }[];
 }
 
 interface Category {
   id: string;
   categoryName?: string;
 }
+
+const photoOf = (p: Product) => p.images?.[0]?.url;
 
 export default function InventoryPage() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -38,6 +43,7 @@ export default function InventoryPage() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [viewMode, setViewMode] = useViewMode('inventory', 'list');
+  const [importOpen, setImportOpen] = useState(false);
 
   // Form state
   const [formName, setFormName] = useState('');
@@ -47,6 +53,11 @@ export default function InventoryPage() {
   const [formStock, setFormStock] = useState('0');
   const [formCategory, setFormCategory] = useState('');
   const [formDescription, setFormDescription] = useState('');
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null); // what the form currently shows
+  const [photoData, setPhotoData] = useState<string | null>(null); // new upload (compressed data URL)
+  const [photoName, setPhotoName] = useState('');
+  const [removePhoto, setRemovePhoto] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement>(null);
   const [saving, setSaving] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBulk, setShowBulk] = useState(false);
@@ -55,13 +66,12 @@ export default function InventoryPage() {
   const [bulkCost, setBulkCost] = useState('');
   const [bulkSelling, setBulkSelling] = useState('');
   const [bulkCategory, setBulkCategory] = useState('');
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
     setLoading(true);
     try {
       const [prods, cats] = await Promise.all([
-        getProducts({ search, status: statusFilter || undefined }),
+        getProducts({ search, status: statusFilter && statusFilter !== 'all' ? statusFilter : undefined }),
         getCategories({}),
       ]);
       setProducts(prods.products as Product[]);
@@ -75,6 +85,14 @@ export default function InventoryPage() {
 
   useEffect(() => { load(); }, [search, statusFilter]);
 
+  const resetPhoto = (existing?: string | null) => {
+    setPhotoPreview(existing || null);
+    setPhotoData(null);
+    setPhotoName('');
+    setRemovePhoto(false);
+    if (photoInputRef.current) photoInputRef.current.value = '';
+  };
+
   const openEdit = (p: Product) => {
     setEditing(p);
     setFormName(p.productName || '');
@@ -82,14 +100,41 @@ export default function InventoryPage() {
     setFormCost(String(p.costPrice || 0));
     setFormSelling(String(p.sellingPrice || 0));
     setFormStock(String(p.stockQuantity || 0));
+    setFormCategory((Array.isArray(p.category) ? p.category[0] : p.category) || '');
     setFormDescription('');
+    resetPhoto(photoOf(p));
     setShowForm(true);
   };
 
   const openNew = () => {
     setEditing(null);
     setFormName(''); setFormSku(''); setFormCost(''); setFormSelling(''); setFormStock('0'); setFormDescription(''); setFormCategory('');
+    resetPhoto(null);
     setShowForm(true);
+  };
+
+  const handlePhotoChosen = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) return toast.error('Please choose an image file');
+    if (file.size > 15 * 1024 * 1024) return toast.error('Image is too large (max 15 MB)');
+    try {
+      const data = await compressImage(file);
+      setPhotoData(data);
+      setPhotoPreview(data);
+      setPhotoName(file.name);
+      setRemovePhoto(false);
+    } catch (err: any) {
+      toast.error(err.message || 'Could not process image');
+    }
+  };
+
+  const handleRemovePhoto = () => {
+    setPhotoData(null);
+    setPhotoPreview(null);
+    setPhotoName('');
+    setRemovePhoto(true);
+    if (photoInputRef.current) photoInputRef.current.value = '';
   };
 
   const handleSave = async () => {
@@ -99,7 +144,7 @@ export default function InventoryPage() {
     }
     setSaving(true);
     try {
-      await saveProduct({
+      const res: any = await saveProduct({
         id: editing?.id,
         productName: formName,
         sku: formSku,
@@ -109,6 +154,20 @@ export default function InventoryPage() {
         category: formCategory || undefined,
         description: formDescription || undefined,
       });
+      const productId = editing?.id || res?.product?.id;
+
+      if (productId && (photoData || (removePhoto && editing && photoOf(editing)))) {
+        try {
+          await uploadProductImage(
+            photoData
+              ? { productId, dataUrl: photoData, filename: photoName || `${formSku}.jpg` }
+              : { productId, remove: true },
+          );
+        } catch (err: any) {
+          toast.warning(`Product saved, but the photo failed: ${err.message || 'upload error'}`);
+        }
+      }
+
       toast.success(editing ? 'Product updated' : 'Product created');
       setShowForm(false);
       load();
@@ -137,18 +196,9 @@ export default function InventoryPage() {
     } catch { toast.error('Export failed'); }
   };
 
-  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const text = await file.text();
-    const rows = parseCsv(text);
-    if (rows.length === 0) return toast.error('No data found in file');
-    try {
-      const res = await importCsv({ table: 'products', rows });
-      toast.success(`Imported ${res.imported}, Updated ${res.updated}${res.errors.length ? `, ${res.errors.length} errors` : ''}`);
-      load();
-    } catch (err: any) { toast.error(err.message || 'Import failed'); }
-    if (fileInputRef.current) fileInputRef.current.value = '';
+  const runImport = async (rows: Record<string, string>[]) => {
+    const res = await importCsv({ table: 'products', rows });
+    return { imported: res.imported, updated: res.updated, errors: res.errors };
   };
 
   const handleBulkAction = async () => {
@@ -185,11 +235,7 @@ export default function InventoryPage() {
   };
 
   const toggleAll = () => {
-    if (selectedIds.size === products.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(products.map(p => p.id)));
-    }
+    setSelectedIds(selectedIds.size === products.length ? new Set() : new Set(products.map(p => p.id)));
   };
 
   const fmt = (n?: number) => n != null ? `KES ${n.toLocaleString()}` : 'KES 0';
@@ -234,27 +280,11 @@ export default function InventoryPage() {
             </Button>
           )}
           <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExport}><Download className="w-4 h-4 mr-1" /> Export</Button>
-          <Dialog>
-            <DialogTrigger asChild>
-              <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10"><Upload className="w-4 h-4 mr-1" /> Import</Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-md">
-              <DialogHeader><DialogTitle>Import Products</DialogTitle></DialogHeader>
-              <div className="space-y-4">
-                <p className="text-sm text-muted-foreground">Upload a CSV file with columns: <span className="font-medium text-foreground">Product Name, SKU, Cost Price, Selling Price, Stock Quantity, Category (optional)</span>. Existing products matched by SKU will be updated. If a Category name doesn't exist yet, it will be created automatically.</p>
-                <Button variant="outline" size="sm" className="border-yellow-500 text-yellow-400 hover:bg-yellow-500/10" onClick={() => downloadTemplate('products')}><FileDown className="w-4 h-4 mr-1" /> Download Template</Button>
-                <div>
-                  <Label className="text-sm mb-1 block">Select CSV file</Label>
-                  <Input ref={fileInputRef} type="file" accept=".csv,.txt" onChange={handleImport} />
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
+          <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10" onClick={() => setImportOpen(true)}><Upload className="w-4 h-4 mr-1" /> Import</Button>
           <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" /> Add Product</Button>
         </div>
       </div>
 
-      {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -270,7 +300,6 @@ export default function InventoryPage() {
         </Select>
       </div>
 
-      {/* Products */}
       {viewMode === 'list' ? (
         <Card className="bg-card border-border">
           <CardContent className="p-0">
@@ -307,14 +336,17 @@ export default function InventoryPage() {
                     products.map(p => (
                       <tr key={p.id} className="border-b border-border hover:bg-muted/30 transition-colors">
                         <td className="p-3"><input type="checkbox" checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} className="rounded" /></td>
-                        <td className="p-3 font-medium text-foreground break-words whitespace-normal max-w-xs">{p.productName}</td>
+                        <td className="p-3 font-medium text-foreground max-w-xs">
+                          <div className="flex items-center gap-3">
+                            <ProductImage src={photoOf(p)} alt={p.productName} className="w-10 h-10" />
+                            <span className="break-words whitespace-normal min-w-0">{p.productName}</span>
+                          </div>
+                        </td>
                         <td className="p-3 text-muted-foreground font-mono text-xs break-all">{p.sku}</td>
                         <td className="p-3 text-right text-muted-foreground whitespace-nowrap">{fmt(p.costPrice)}</td>
                         <td className="p-3 text-right text-foreground whitespace-nowrap">{fmt(p.sellingPrice)}</td>
                         <td className="p-3 text-right">
-                          <span className={p.stockQuantity && p.stockQuantity > 0 ? 'text-emerald-400' : 'text-red-400'}>
-                            {p.stockQuantity || 0}
-                          </span>
+                          <span className={p.stockQuantity && p.stockQuantity > 0 ? 'text-emerald-400' : 'text-red-400'}>{p.stockQuantity || 0}</span>
                         </td>
                         <td className="p-3 text-center">{statusBadge(p)}</td>
                         <td className="p-3 text-right">{renderActions(p)}</td>
@@ -334,10 +366,10 @@ export default function InventoryPage() {
               Select all
             </label>
           )}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 items-stretch">
             {loading ? (
-              [...Array(4)].map((_, i) => (
-                <Card key={i} className="bg-card border-border"><CardContent className="p-4"><div className="h-28 bg-muted rounded animate-pulse" /></CardContent></Card>
+              [...Array(5)].map((_, i) => (
+                <Card key={i} className="bg-card border-border"><CardContent className="p-4"><div className="aspect-square bg-muted rounded animate-pulse" /></CardContent></Card>
               ))
             ) : products.length === 0 ? (
               <Card className="col-span-full bg-card border-border">
@@ -347,17 +379,18 @@ export default function InventoryPage() {
                 </CardContent>
               </Card>
             ) : products.map(p => (
-              <Card key={p.id} className={`bg-card ${selectedIds.has(p.id) ? 'border-primary' : 'border-border'}`}>
-                <CardContent className="p-4 space-y-3">
-                  <div className="flex items-start gap-2">
-                    <input type="checkbox" checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} className="mt-1 rounded shrink-0" />
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium text-foreground break-words whitespace-normal leading-snug">{p.productName}</p>
-                      <p className="text-xs text-muted-foreground font-mono break-all mt-0.5">{p.sku}</p>
-                    </div>
-                    <div className="shrink-0">{statusBadge(p)}</div>
+              <Card key={p.id} className={`bg-card flex flex-col ${selectedIds.has(p.id) ? 'border-primary' : 'border-border'}`}>
+                <CardContent className="p-3 space-y-3 flex flex-col flex-1">
+                  <div className="relative">
+                    <ProductImage src={photoOf(p)} alt={p.productName} className="w-full" />
+                    <input type="checkbox" checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} className="absolute top-2 left-2 rounded" />
+                    <div className="absolute top-2 right-2">{statusBadge(p)}</div>
                   </div>
-                  <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="min-w-0">
+                    <p className="font-medium text-foreground break-words whitespace-normal leading-snug [overflow-wrap:anywhere]">{p.productName}</p>
+                    <p className="text-xs text-muted-foreground font-mono break-all mt-0.5">{p.sku}</p>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-xs mt-auto">
                     <div className="min-w-0">
                       <p className="text-muted-foreground">Cost</p>
                       <p className="font-medium text-foreground break-words">{fmt(p.costPrice)}</p>
@@ -379,6 +412,17 @@ export default function InventoryPage() {
         </div>
       )}
 
+      <ImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        title="Import Products"
+        template="products"
+        chunkSize={100}
+        description={<>Upload a CSV with columns: <span className="font-medium text-foreground">Product Name, SKU, Cost Price, Selling Price, Stock Quantity, Category (optional)</span>. Products matched by SKU are updated. Unknown categories are created automatically. Press OK to start the import. (In Excel: File → Save As → CSV.)</>}
+        onImport={runImport}
+        onDone={load}
+      />
+
       {/* Product Form Dialog */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
         <DialogContent className="max-w-lg">
@@ -386,6 +430,26 @@ export default function InventoryPage() {
             <DialogTitle>{editing ? 'Edit Product' : 'New Product'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+            {/* Photo */}
+            <div className="flex items-center gap-4">
+              <ProductImage src={photoPreview} alt="Product photo" className="w-24 h-24" />
+              <div className="space-y-2">
+                <Label className="block">Product photo</Label>
+                <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoChosen} />
+                <div className="flex gap-2 flex-wrap">
+                  <Button type="button" variant="outline" size="sm" onClick={() => photoInputRef.current?.click()}>
+                    <ImagePlus className="w-4 h-4 mr-1" /> {photoPreview ? 'Change' : 'Upload'}
+                  </Button>
+                  {photoPreview && (
+                    <Button type="button" variant="ghost" size="sm" className="text-destructive" onClick={handleRemovePhoto}>
+                      <Trash2 className="w-4 h-4 mr-1" /> Remove
+                    </Button>
+                  )}
+                </div>
+                <p className="text-[11px] text-muted-foreground">Photos are cropped to a square so every product looks the same.</p>
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label>Product Name *</Label>
@@ -416,9 +480,7 @@ export default function InventoryPage() {
                 <Select value={formCategory} onValueChange={setFormCategory}>
                   <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
                   <SelectContent>
-                    {categories.map(c => (
-                      <SelectItem key={c.id} value={c.id}>{c.categoryName}</SelectItem>
-                    ))}
+                    {categories.map(c => <SelectItem key={c.id} value={c.id}>{c.categoryName}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -467,9 +529,7 @@ export default function InventoryPage() {
                 <Label>Category</Label>
                 <Select value={bulkCategory} onValueChange={setBulkCategory}>
                   <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
-                  <SelectContent>
-                    {categories.map(c => <SelectItem key={c.id} value={c.id}>{c.categoryName}</SelectItem>)}
-                  </SelectContent>
+                  <SelectContent>{categories.map(c => <SelectItem key={c.id} value={c.id}>{c.categoryName}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
             )}
@@ -481,9 +541,7 @@ export default function InventoryPage() {
             <Button variant="outline" onClick={() => setShowBulk(false)}>Cancel</Button>
             {bulkAction === 'delete' ? (
               <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button variant="destructive">Delete</Button>
-                </AlertDialogTrigger>
+                <AlertDialogTrigger asChild><Button variant="destructive">Delete</Button></AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
                     <AlertDialogTitle>Delete {selectedIds.size} products?</AlertDialogTitle>
