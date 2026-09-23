@@ -13,6 +13,7 @@ export default createEndpoint({
   outputSchema: z.object({
     totalSales: z.number(),
     totalRevenue: z.number(),
+    totalOtherIncome: z.number(),
     totalExpenses: z.number(),
     totalPurchases: z.number(),
     profitLoss: z.number(),
@@ -112,6 +113,30 @@ export default createEndpoint({
       params: expParams,
     });
 
+    // Other income
+    const incParams: string[] = [];
+    let incDateFilter = '';
+    let iIdx = 1;
+    if (input.startDate) {
+      incDateFilter += ` AND i."incomeDate" >= $${iIdx}`;
+      incParams.push(input.startDate);
+      iIdx++;
+    }
+    if (input.endDate) {
+      incDateFilter += ` AND i."incomeDate" <= $${iIdx}`;
+      incParams.push(input.endDate);
+      iIdx++;
+    }
+
+    const incomeResult = await zite.sql({
+      query: `
+        SELECT COALESCE(SUM(i."amount"), 0) AS "totalOtherIncome"
+        FROM "OtherIncome" i
+        WHERE 1=1${incDateFilter}
+      `,
+      params: incParams,
+    });
+
     // Stock value
     const stockResult = await zite.sql({
       query: `
@@ -190,6 +215,7 @@ export default createEndpoint({
     const totalRevenue = Number(salesResult.rows[0]?.totalRevenue ?? 0);
     const totalPurchases = Number(purchasesResult.rows[0]?.totalPurchases ?? 0);
     const totalExpenses = Number(expensesResult.rows[0]?.totalExpenses ?? 0);
+    const totalOtherIncome = Number(incomeResult.rows[0]?.totalOtherIncome ?? 0);
 
     // Delivery distance stats
     const deliveryResult = await zite.sql({
@@ -206,9 +232,11 @@ export default createEndpoint({
     return {
       totalSales: Number(salesResult.rows[0]?.totalSales ?? 0),
       totalRevenue,
+      totalOtherIncome,
       totalExpenses: totalExpenses + totalPurchases,
       totalPurchases,
-      profitLoss: totalRevenue - totalPurchases - totalExpenses,
+      // Profit = sales + other income - purchases - other expenses
+      profitLoss: totalRevenue + totalOtherIncome - totalPurchases - totalExpenses,
       stockValue: Number(stockResult.rows[0]?.stockValue ?? 0),
       topProducts: topProducts.rows.map(r => ({
         productName: String(r.productName ?? ''),
