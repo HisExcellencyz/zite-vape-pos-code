@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getPurchases, getProducts, getSuppliers, createPurchase, exportCsv } from 'zitejs/api';
+import { getPurchases, getProducts, getSuppliers, createPurchase, exportCsv, importPurchases } from 'zitejs/api';
 import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
@@ -7,11 +7,12 @@ import { Label } from '@project/components/ui/label';
 import { Badge } from '@project/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
-import { Plus, Download, ShoppingBag, Trash2, Search } from 'lucide-react';
+import { Plus, Download, Upload, ShoppingBag, Trash2, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { downloadCsv } from '../lib/exportHelper';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
+import ImportDialog from '../components/ImportDialog';
 
 interface Purchase {
   id: string;
@@ -24,7 +25,6 @@ interface Purchase {
 
 interface Product { id: string; productName?: string; sku?: string; costPrice?: number; }
 interface Supplier { id: string; supplierName?: string; depositBalance?: number; }
-
 interface CartItem { product: Product; quantity: number; unitPrice: number; }
 
 export default function PurchasesPage() {
@@ -33,6 +33,7 @@ export default function PurchasesPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedSupplier, setSelectedSupplier] = useState('');
   const [paymentType, setPaymentType] = useState<'cash' | 'deposit'>('cash');
@@ -44,11 +45,7 @@ export default function PurchasesPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const [p, prods, sups] = await Promise.all([
-        getPurchases({}),
-        getProducts({}),
-        getSuppliers({}),
-      ]);
+      const [p, prods, sups] = await Promise.all([getPurchases({}), getProducts({}), getSuppliers({})]);
       setPurchases(p.purchases as Purchase[]);
       setProducts(prods.products as Product[]);
       setSuppliers(sups.suppliers as Supplier[]);
@@ -104,6 +101,11 @@ export default function PurchasesPage() {
     } catch { toast.error('Export failed'); }
   };
 
+  const runImport = async (rows: Record<string, string>[], adjustStock: boolean) => {
+    const res = await importPurchases({ rows, adjustStock });
+    return { imported: res.imported, skipped: res.skipped, errors: res.errors };
+  };
+
   const fmt = (n?: number) => `KES ${(n || 0).toLocaleString()}`;
 
   const paymentBadge = (p: Purchase) => (
@@ -119,9 +121,10 @@ export default function PurchasesPage() {
           <h1 className="text-2xl font-bold text-foreground">Purchases</h1>
           <p className="text-sm text-muted-foreground">{purchases.length} purchase records</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <ViewToggle value={viewMode} onChange={setViewMode} />
           <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExport}><Download className="w-4 h-4 mr-1" /> Export</Button>
+          <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10" onClick={() => setImportOpen(true)}><Upload className="w-4 h-4 mr-1" /> Import</Button>
           <Button size="sm" onClick={() => setShowForm(true)}><Plus className="w-4 h-4 mr-1" /> Add Purchase</Button>
         </div>
       </div>
@@ -200,7 +203,21 @@ export default function PurchasesPage() {
         </div>
       )}
 
-      {/* New Purchase Dialog */}
+      <ImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        title="Import Purchases"
+        template="purchases"
+        optionLabel="Also add the imported quantities to current stock (leave off for old purchases already reflected in your stock counts)"
+        description={<>
+          Upload a CSV with one row per product line. Rows sharing the same <span className="font-medium text-foreground">Purchase Ref</span> become one purchase.
+          Columns: <span className="font-medium text-foreground">Purchase Ref, Date, Supplier Name, Payment Type, Product SKU, Quantity, Unit Price, Notes</span>.
+          <br />The <span className="font-medium text-foreground">Date</span> can be in the past (YYYY-MM-DD or DD/MM/YYYY). Payment Type is <span className="font-medium text-foreground">Cash</span> or <span className="font-medium text-foreground">From Deposit</span> (deducts the supplier deposit, needs enough balance). Unknown suppliers are created. Refs already imported are skipped. Press OK to start.
+        </>}
+        onImport={runImport}
+        onDone={load}
+      />
+
       <Dialog open={showForm} onOpenChange={setShowForm}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>New Purchase</DialogTitle></DialogHeader>
@@ -232,7 +249,6 @@ export default function PurchasesPage() {
               </div>
             </div>
 
-            {/* Add products */}
             <div>
               <Label>Add Products</Label>
               <div className="relative mb-2">
@@ -251,7 +267,6 @@ export default function PurchasesPage() {
               )}
             </div>
 
-            {/* Cart */}
             {cart.length > 0 && (
               <div className="space-y-2">
                 {cart.map((item, i) => (
