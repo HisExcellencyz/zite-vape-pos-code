@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getUsers, getRoles, saveRole, inviteUser, assignRole, deleteRecord, exportCsv } from 'zitejs/api';
+import { getUsers, saveRole, inviteUser, assignRole, revokeInvite, deleteRecord } from 'zitejs/api';
 import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
@@ -9,9 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@project/components/ui/tabs';
 import { Switch } from '@project/components/ui/switch';
-import { Textarea } from '@project/components/ui/textarea';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
-import { Search, Plus, UserPlus, Shield, Mail, Pencil, Trash2, Download, Check, X } from 'lucide-react';
+import { Search, Plus, UserPlus, Shield, Mail, Pencil, Trash2, Download, Check, X, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import { downloadCsv } from '../lib/exportHelper';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
@@ -35,6 +34,7 @@ interface AppUser {
   firstName?: string;
   lastName?: string;
   emailVerified?: boolean;
+  isOwner?: boolean;
   roleId?: string | null;
   roleName?: string;
   status?: string;
@@ -69,7 +69,6 @@ export default function UsersPage() {
   const [search, setSearch] = useState('');
   const [viewMode, setViewMode] = useViewMode('users', 'list');
 
-  // Invite state
   const [inviteOpen, setInviteOpen] = useState(false);
   const [invEmail, setInvEmail] = useState('');
   const [invFirst, setInvFirst] = useState('');
@@ -77,7 +76,6 @@ export default function UsersPage() {
   const [invRole, setInvRole] = useState('');
   const [inviting, setInviting] = useState(false);
 
-  // Role editor
   const [roleOpen, setRoleOpen] = useState(false);
   const [editRole, setEditRole] = useState<Role | null>(null);
   const [roleName, setRoleName] = useState('');
@@ -88,10 +86,10 @@ export default function UsersPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const res = await getUsers({ search: search || undefined });
+      const res = await getUsers({});
       setUsers(res.users);
       setRoles(res.roles);
-    } catch { toast.error('Failed to load users'); }
+    } catch (e: any) { toast.error(e.message || 'Failed to load users'); }
     setLoading(false);
   };
 
@@ -115,22 +113,37 @@ export default function UsersPage() {
     setInviting(false);
   };
 
+  const handleResend = async (u: AppUser) => {
+    try {
+      const res = await inviteUser({
+        email: u.email,
+        firstName: u.firstName || undefined,
+        lastName: u.lastName || undefined,
+        roleId: u.roleId || undefined,
+      });
+      toast.success(res.message);
+    } catch (err: any) { toast.error(err.message || 'Failed to resend'); }
+  };
+
+  const handleRevoke = async (u: AppUser) => {
+    try {
+      await revokeInvite({ email: u.email });
+      toast.success('Invitation cancelled');
+      load();
+    } catch (err: any) { toast.error(err.message || 'Failed'); }
+  };
+
   const handleAssignRole = async (userId: string, roleId: string) => {
     try {
       await assignRole({ userId, roleId });
-      toast.success('Role assigned');
+      toast.success(roleId === 'none' ? 'Access removed' : 'Role assigned');
       load();
-    } catch { toast.error('Failed to assign role'); }
+    } catch (err: any) { toast.error(err.message || 'Failed to assign role'); }
   };
 
-  // Role CRUD
   const openNewRole = () => {
-    setEditRole(null);
-    setRoleName('');
-    setRoleDesc('');
-    setRolePerms(emptyPerms());
-    setRoleDefault(false);
-    setRoleOpen(true);
+    setEditRole(null); setRoleName(''); setRoleDesc('');
+    setRolePerms(emptyPerms()); setRoleDefault(false); setRoleOpen(true);
   };
 
   const openEditRole = (r: Role) => {
@@ -138,17 +151,12 @@ export default function UsersPage() {
     setRoleName(r.roleName || '');
     setRoleDesc(r.description || '');
     setRoleDefault(r.isDefault || false);
-    try {
-      setRolePerms(r.permissions ? JSON.parse(r.permissions) : emptyPerms());
-    } catch { setRolePerms(emptyPerms()); }
+    try { setRolePerms(r.permissions ? JSON.parse(r.permissions) : emptyPerms()); } catch { setRolePerms(emptyPerms()); }
     setRoleOpen(true);
   };
 
   const togglePerm = (area: Area, action: Action) => {
-    setRolePerms(prev => ({
-      ...prev,
-      [area]: { ...prev[area], [action]: !prev[area][action] },
-    }));
+    setRolePerms(prev => ({ ...prev, [area]: { ...prev[area], [action]: !prev[area]?.[action] } }));
   };
 
   const handleSaveRole = async () => {
@@ -177,8 +185,8 @@ export default function UsersPage() {
   };
 
   const handleExportUsers = () => {
-    const csv = ['Name,Email,Role'].concat(
-      users.map(u => `"${u.name || ''}","${u.email}","${u.roleName || ''}"`)
+    const csv = ['Name,Email,Role,Status'].concat(
+      users.map(u => `"${u.name || ''}","${u.email}","${u.roleName || ''}","${u.status || ''}"`)
     ).join('\n');
     downloadCsv(csv, 'users_export.csv');
     toast.success('Exported');
@@ -188,31 +196,36 @@ export default function UsersPage() {
     !search || u.email?.toLowerCase().includes(search.toLowerCase()) || u.name?.toLowerCase().includes(search.toLowerCase())
   );
 
-  const statusBadge = (u: AppUser) => (
-    <Badge
-      variant="secondary"
-      className={`text-xs ${u.status === 'Verified' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-pink-500/10 text-pink-400 border-pink-500/20'}`}
-    >
-      {u.status === 'Verified' ? 'Verified' : 'Unverified'}
-    </Badge>
-  );
+  const statusBadge = (u: AppUser) => {
+    const cls =
+      u.status === 'Verified' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+      : u.status === 'Invited' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+      : 'bg-pink-500/10 text-pink-400 border-pink-500/20';
+    return <Badge variant="secondary" className={`text-xs ${cls}`}>{u.status || 'Unverified'}</Badge>;
+  };
 
-  const roleSelect = (u: AppUser, className: string) => (
-    <Select
-      value={u.roleId || 'none'}
-      onValueChange={val => val !== 'none' && handleAssignRole(u.id, val)}
-    >
-      <SelectTrigger className={className}>
-        <SelectValue placeholder="Assign role" />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="none">Unassigned</SelectItem>
-        {roles.map(r => (
-          <SelectItem key={r.id} value={r.id}>{r.roleName}</SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
+  const roleControl = (u: AppUser, className: string) => {
+    if (u.isOwner) return <Badge variant="outline" className="text-xs">Owner</Badge>;
+    return (
+      <Select value={u.roleId || 'none'} onValueChange={val => handleAssignRole(u.id, val)}>
+        <SelectTrigger className={className}><SelectValue placeholder="Assign role" /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="none">No access</SelectItem>
+          {roles.map(r => <SelectItem key={r.id} value={r.id}>{r.roleName}</SelectItem>)}
+        </SelectContent>
+      </Select>
+    );
+  };
+
+  const userActions = (u: AppUser) => {
+    if (u.status !== 'Invited') return <span className="text-xs text-muted-foreground">—</span>;
+    return (
+      <div className="flex gap-1">
+        <Button variant="ghost" size="sm" title="Resend invitation" onClick={() => handleResend(u)}><Send className="w-3.5 h-3.5" /></Button>
+        <Button variant="ghost" size="sm" title="Cancel invitation" className="text-destructive" onClick={() => handleRevoke(u)}><X className="w-3.5 h-3.5" /></Button>
+      </div>
+    );
+  };
 
   const roleActions = (r: Role) => (
     <div className="flex gap-1">
@@ -220,7 +233,7 @@ export default function UsersPage() {
       <AlertDialog>
         <AlertDialogTrigger asChild><Button variant="ghost" size="sm" className="text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button></AlertDialogTrigger>
         <AlertDialogContent>
-          <AlertDialogHeader><AlertDialogTitle>Delete role?</AlertDialogTitle><AlertDialogDescription>This will remove "{r.roleName}" and unassign users from it.</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogHeader><AlertDialogTitle>Delete role?</AlertDialogTitle><AlertDialogDescription>This will remove "{r.roleName}". Users with this role will lose access until reassigned.</AlertDialogDescription></AlertDialogHeader>
           <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleDeleteRole(r.id)}>Delete</AlertDialogAction></AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -232,7 +245,7 @@ export default function UsersPage() {
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Users & Roles</h1>
-          <p className="text-sm text-muted-foreground">Manage team access and permissions</p>
+          <p className="text-sm text-muted-foreground">Invite team members, assign roles and control access</p>
         </div>
         <ViewToggle value={viewMode} onChange={setViewMode} />
       </div>
@@ -243,7 +256,6 @@ export default function UsersPage() {
           <TabsTrigger value="roles">Roles & Permissions</TabsTrigger>
         </TabsList>
 
-        {/* USERS TAB */}
         <TabsContent value="users" className="space-y-4">
           <div className="flex items-center gap-3 flex-wrap">
             <div className="relative flex-1 min-w-[200px] max-w-sm">
@@ -274,7 +286,7 @@ export default function UsersPage() {
                       <th className="p-3 font-medium">Email</th>
                       <th className="p-3 font-medium">Status</th>
                       <th className="p-3 font-medium">Role</th>
-                      <th className="p-3 font-medium w-[140px]">Actions</th>
+                      <th className="p-3 font-medium w-[110px]">Invite</th>
                     </tr></thead>
                     <tbody>
                       {filtered.map(u => (
@@ -282,14 +294,8 @@ export default function UsersPage() {
                           <td className="p-3 font-medium text-foreground break-words whitespace-normal">{u.name || u.firstName || '—'}</td>
                           <td className="p-3 text-muted-foreground break-all">{u.email}</td>
                           <td className="p-3">{statusBadge(u)}</td>
-                          <td className="p-3">{roleSelect(u, 'w-[140px] h-8 text-xs')}</td>
-                          <td className="p-3">
-                            <Button variant="ghost" size="sm" onClick={() => {
-                              toast.info(`${u.email} — ${u.roleName || 'No role'}`);
-                            }}>
-                              <Mail className="w-3.5 h-3.5" />
-                            </Button>
-                          </td>
+                          <td className="p-3">{roleControl(u, 'w-[150px] h-8 text-xs')}</td>
+                          <td className="p-3">{userActions(u)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -311,15 +317,9 @@ export default function UsersPage() {
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">Role</p>
-                      {roleSelect(u, 'w-full h-8 text-xs')}
+                      {roleControl(u, 'w-full h-8 text-xs')}
                     </div>
-                    <div className="border-t border-border pt-2 flex justify-end">
-                      <Button variant="ghost" size="sm" onClick={() => {
-                        toast.info(`${u.email} — ${u.roleName || 'No role'}`);
-                      }}>
-                        <Mail className="w-3.5 h-3.5" />
-                      </Button>
-                    </div>
+                    {u.status === 'Invited' && <div className="border-t border-border pt-2 flex justify-end">{userActions(u)}</div>}
                   </CardContent>
                 </Card>
               ))}
@@ -327,13 +327,10 @@ export default function UsersPage() {
           )}
         </TabsContent>
 
-        {/* ROLES TAB */}
         <TabsContent value="roles" className="space-y-4">
           <div className="flex items-center justify-between">
             <p className="text-sm text-muted-foreground">Define roles and their permission matrices</p>
-            <Button size="sm" onClick={openNewRole}>
-              <Plus className="w-4 h-4 mr-1" /> Add Role
-            </Button>
+            <Button size="sm" onClick={openNewRole}><Plus className="w-4 h-4 mr-1" /> Add Role</Button>
           </div>
 
           {roles.length === 0 ? (
@@ -409,17 +406,17 @@ export default function UsersPage() {
             <div>
               <Label>Role</Label>
               <Select value={invRole} onValueChange={setInvRole}>
-                <SelectTrigger><SelectValue placeholder="Select a role" /></SelectTrigger>
-                <SelectContent>
-                  {roles.map(r => <SelectItem key={r.id} value={r.id}>{r.roleName}</SelectItem>)}
-                </SelectContent>
+                <SelectTrigger><SelectValue placeholder="Select a role (default role if empty)" /></SelectTrigger>
+                <SelectContent>{roles.map(r => <SelectItem key={r.id} value={r.id}>{r.roleName}</SelectItem>)}</SelectContent>
               </Select>
             </div>
-            <p className="text-xs text-muted-foreground">An invite email will be sent. The user will appear as unverified until they sign in.</p>
+            <p className="text-xs text-muted-foreground">
+              An email is sent with a sign-in link. The person signs in with this email address (magic link or Google) and gets the role automatically. Until then they show as "Invited".
+            </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setInviteOpen(false)}>Cancel</Button>
-            <Button onClick={handleInvite} disabled={inviting}>{inviting ? 'Sending...' : 'Send Invite'}</Button>
+            <Button onClick={handleInvite} disabled={inviting}><Mail className="w-4 h-4 mr-1" />{inviting ? 'Sending...' : 'Send Invite'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -435,7 +432,7 @@ export default function UsersPage() {
             </div>
             <div className="flex items-center gap-3">
               <Switch checked={roleDefault} onCheckedChange={setRoleDefault} />
-              <Label className="text-sm">Set as default role for new users</Label>
+              <Label className="text-sm">Use as the default role when inviting users without picking one</Label>
             </div>
             <div>
               <Label className="mb-2 block">Permissions Matrix</Label>
@@ -444,9 +441,7 @@ export default function UsersPage() {
                   <thead>
                     <tr className="bg-muted/50 text-muted-foreground">
                       <th className="p-2 text-left font-medium">Area</th>
-                      {ACTIONS.map(a => (
-                        <th key={a} className="p-2 text-center font-medium capitalize">{a}</th>
-                      ))}
+                      {ACTIONS.map(a => <th key={a} className="p-2 text-center font-medium capitalize">{a}</th>)}
                     </tr>
                   </thead>
                   <tbody>
@@ -458,9 +453,7 @@ export default function UsersPage() {
                             <button
                               onClick={() => togglePerm(area, action)}
                               className={`w-7 h-7 rounded-md flex items-center justify-center transition-colors ${
-                                rolePerms[area]?.[action]
-                                  ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
-                                  : 'bg-muted/50 text-muted-foreground hover:bg-muted'
+                                rolePerms[area]?.[action] ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30' : 'bg-muted/50 text-muted-foreground hover:bg-muted'
                               }`}
                             >
                               {rolePerms[area]?.[action] ? <Check className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
@@ -472,6 +465,7 @@ export default function UsersPage() {
                   </tbody>
                 </table>
               </div>
+              <p className="text-xs text-muted-foreground mt-2">"view" controls whether the menu item and page are visible. Tip: for an admin role, tick users → edit.</p>
             </div>
           </div>
           <DialogFooter>
@@ -500,9 +494,7 @@ function PermissionsGrid({ perms }: { perms: PermMatrix }) {
               <td className="p-1.5 font-medium text-foreground capitalize">{area}</td>
               {ACTIONS.map(action => (
                 <td key={action} className="p-1.5 text-center">
-                  {perms[area]?.[action]
-                    ? <Check className="w-3.5 h-3.5 text-green-400 mx-auto" />
-                    : <span className="text-muted-foreground/40">—</span>}
+                  {perms[area]?.[action] ? <Check className="w-3.5 h-3.5 text-green-400 mx-auto" /> : <span className="text-muted-foreground/40">—</span>}
                 </td>
               ))}
             </tr>
