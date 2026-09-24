@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
+import { normalizeImageUrl, isHttpUrl } from '../lib/imageUrl';
 
 export default createEndpoint({
   description: 'Import CSV data for products, customers, or suppliers',
@@ -40,6 +41,19 @@ export default createEndpoint({
               }
             }
 
+            // Optional photo link. Blank column = leave the existing photo untouched
+            // on updates; invalid link = skip just the photo, not the whole row.
+            const imageUrlRaw = (row['Image URL'] || row['ImageURL'] || row['Image Url'] || row['imageUrl'] || row['Image Link'] || '').trim();
+            let imageRecord: { url: string }[] | undefined;
+            if (imageUrlRaw) {
+              const normalized = normalizeImageUrl(imageUrlRaw);
+              if (isHttpUrl(normalized)) {
+                imageRecord = [{ url: normalized }];
+              } else {
+                errors.push(`SKU ${sku}: Image URL must start with http:// or https://, photo skipped`);
+              }
+            }
+
             // Check if SKU exists
             const existing = await zite.products.findOne({ filters: { sku } });
             if (existing) {
@@ -52,6 +66,7 @@ export default createEndpoint({
                   stockQuantity,
                   status,
                   ...(categoryId ? { category: categoryId } : {}),
+                  ...(imageRecord ? { images: imageRecord } : {}),
                 },
               });
               updated++;
@@ -67,6 +82,7 @@ export default createEndpoint({
                   reorderLevel: 5,
                   taxRate: 0,
                   ...(categoryId ? { category: categoryId } : {}),
+                  ...(imageRecord ? { images: imageRecord } : {}),
                 },
               });
               imported++;
