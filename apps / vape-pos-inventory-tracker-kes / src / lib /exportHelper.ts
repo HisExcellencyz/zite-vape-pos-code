@@ -2,7 +2,7 @@ export type TemplateKey = 'products' | 'customers' | 'suppliers' | 'sales' | 'pu
 
 const IMPORT_TEMPLATES: Record<TemplateKey, { headers: string[]; samples: string[][] }> = {
   products: {
-    headers: ['Product Name', 'SKU', 'Cost Price', 'Selling Price', 'Stock Quantity', 'Category'],
+    headers: ['Product Name', 'SKU', 'Cost Price', 'Selling Price', 'Stock Quantity', 'Category', 'Image URL'],
     samples: [],
   },
   customers: {
