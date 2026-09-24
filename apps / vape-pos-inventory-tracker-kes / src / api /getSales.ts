@@ -20,7 +20,7 @@ export default createEndpoint({
 
     const { records, hasMore } = await zite.sales.findAll({
       filters: Object.keys(filters).length > 0 ? filters : undefined,
-      limit: input.limit || 50,
+      limit: input.limit || 2000,
       offset: input.offset || 0,
     });
 
