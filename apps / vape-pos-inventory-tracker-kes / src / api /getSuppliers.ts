@@ -13,7 +13,7 @@ export default createEndpoint({
   outputSchema: z.object({ suppliers: z.array(z.any()), hasMore: z.boolean() }),
   execute: async ({ input }) => {
     const { records, hasMore } = await zite.suppliers.findAll({
-      limit: input.limit || 50,
+      limit: input.limit || 2000,
       offset: input.offset || 0,
     });
 
