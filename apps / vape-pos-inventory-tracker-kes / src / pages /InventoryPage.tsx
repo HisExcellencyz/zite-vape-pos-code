@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { getProducts, getCategories, saveProduct, deleteRecord, exportCsv, importCsv, bulkUpdateProducts, bulkDeleteRecords, uploadProductImage } from 'zitejs/api';
 import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
@@ -8,12 +8,13 @@ import { Badge } from '@project/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
-import { Search, Plus, Download, Upload, Package, Pencil, Trash2, CheckSquare, ImagePlus } from 'lucide-react';
+import { Search, Plus, Download, Upload, Package, Pencil, Trash2, CheckSquare } from 'lucide-react';
 import { toast } from 'sonner';
 import { downloadCsv } from '../lib/exportHelper';
+import { normalizeImageUrl, isDirectImageUrl, isHttpUrl } from '../lib/imageUrl';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
 import ImportDialog from '../components/ImportDialog';
-import ProductImage, { compressImage } from '../components/ProductImage';
+import ProductImage from '../components/ProductImage';
 
 interface Product {
   id: string;
@@ -53,11 +54,7 @@ export default function InventoryPage() {
   const [formStock, setFormStock] = useState('0');
   const [formCategory, setFormCategory] = useState('');
   const [formDescription, setFormDescription] = useState('');
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null); // what the form currently shows
-  const [photoData, setPhotoData] = useState<string | null>(null); // new upload (compressed data URL)
-  const [photoName, setPhotoName] = useState('');
-  const [removePhoto, setRemovePhoto] = useState(false);
-  const photoInputRef = useRef<HTMLInputElement>(null);
+  const [formImageUrl, setFormImageUrl] = useState(''); // photo link, entered or edited by hand
   const [saving, setSaving] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBulk, setShowBulk] = useState(false);
@@ -85,14 +82,6 @@ export default function InventoryPage() {
 
   useEffect(() => { load(); }, [search, statusFilter]);
 
-  const resetPhoto = (existing?: string | null) => {
-    setPhotoPreview(existing || null);
-    setPhotoData(null);
-    setPhotoName('');
-    setRemovePhoto(false);
-    if (photoInputRef.current) photoInputRef.current.value = '';
-  };
-
   const openEdit = (p: Product) => {
     setEditing(p);
     setFormName(p.productName || '');
@@ -102,39 +91,15 @@ export default function InventoryPage() {
     setFormStock(String(p.stockQuantity || 0));
     setFormCategory((Array.isArray(p.category) ? p.category[0] : p.category) || '');
     setFormDescription('');
-    resetPhoto(photoOf(p));
+    setFormImageUrl(photoOf(p) || '');
     setShowForm(true);
   };
 
   const openNew = () => {
     setEditing(null);
     setFormName(''); setFormSku(''); setFormCost(''); setFormSelling(''); setFormStock('0'); setFormDescription(''); setFormCategory('');
-    resetPhoto(null);
+    setFormImageUrl('');
     setShowForm(true);
-  };
-
-  const handlePhotoChosen = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) return toast.error('Please choose an image file');
-    if (file.size > 15 * 1024 * 1024) return toast.error('Image is too large (max 15 MB)');
-    try {
-      const data = await compressImage(file);
-      setPhotoData(data);
-      setPhotoPreview(data);
-      setPhotoName(file.name);
-      setRemovePhoto(false);
-    } catch (err: any) {
-      toast.error(err.message || 'Could not process image');
-    }
-  };
-
-  const handleRemovePhoto = () => {
-    setPhotoData(null);
-    setPhotoPreview(null);
-    setPhotoName('');
-    setRemovePhoto(true);
-    if (photoInputRef.current) photoInputRef.current.value = '';
   };
 
   const handleSave = async () => {
@@ -156,13 +121,21 @@ export default function InventoryPage() {
       });
       const productId = editing?.id || res?.product?.id;
 
-      if (productId && (photoData || (removePhoto && editing && photoOf(editing)))) {
+      const originalUrl = editing ? (photoOf(editing) || '') : '';
+      const newUrl = formImageUrl.trim();
+
+      if (productId && newUrl !== originalUrl) {
         try {
-          await uploadProductImage(
-            photoData
-              ? { productId, dataUrl: photoData, filename: photoName || `${formSku}.jpg` }
-              : { productId, remove: true },
-          );
+          if (newUrl) {
+            const normalized = normalizeImageUrl(newUrl);
+            if (!isHttpUrl(normalized)) {
+              toast.warning('Product saved, but the photo link must start with http:// or https:// — photo not updated.');
+            } else {
+              await uploadProductImage({ productId, imageUrl: normalized, filename: `${formSku}.jpg` });
+            }
+          } else {
+            await uploadProductImage({ productId, remove: true });
+          }
         } catch (err: any) {
           toast.warning(`Product saved, but the photo failed: ${err.message || 'upload error'}`);
         }
@@ -264,6 +237,8 @@ export default function InventoryPage() {
       {p.status}
     </Badge>
   );
+
+  const normalizedFormUrl = formImageUrl ? normalizeImageUrl(formImageUrl) : '';
 
   return (
     <div className="p-6 space-y-6">
@@ -418,7 +393,11 @@ export default function InventoryPage() {
         title="Import Products"
         template="products"
         chunkSize={100}
-        description={<>Upload a CSV with columns: <span className="font-medium text-foreground">Product Name, SKU, Cost Price, Selling Price, Stock Quantity, Category (optional)</span>. Products matched by SKU are updated. Unknown categories are created automatically. Press OK to start the import. (In Excel: File → Save As → CSV.)</>}
+        description={<>
+          Upload a CSV with columns: <span className="font-medium text-foreground">Product Name, SKU, Cost Price, Selling Price, Stock Quantity, Category (optional), Image URL (optional)</span>. Products matched by SKU are updated. Unknown categories are created automatically.
+          <br /><br />
+          <span className="font-medium text-foreground">Image URL</span> must be a direct link to a photo already hosted online — Google Drive and Dropbox share links are converted automatically. For other sites, use the direct image address (right-click the photo → "Copy Image Address"), not a viewer page link. Free options: imgur.com, ImgBB, or Cloudinary. A blank Image URL leaves an existing product's photo unchanged. Press OK to start the import. (In Excel: File → Save As → CSV.)
+        </>}
         onImport={runImport}
         onDone={load}
       />
@@ -431,22 +410,23 @@ export default function InventoryPage() {
           </DialogHeader>
           <div className="space-y-4">
             {/* Photo */}
-            <div className="flex items-center gap-4">
-              <ProductImage src={photoPreview} alt="Product photo" className="w-24 h-24" />
-              <div className="space-y-2">
-                <Label className="block">Product photo</Label>
-                <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoChosen} />
-                <div className="flex gap-2 flex-wrap">
-                  <Button type="button" variant="outline" size="sm" onClick={() => photoInputRef.current?.click()}>
-                    <ImagePlus className="w-4 h-4 mr-1" /> {photoPreview ? 'Change' : 'Upload'}
-                  </Button>
-                  {photoPreview && (
-                    <Button type="button" variant="ghost" size="sm" className="text-destructive" onClick={handleRemovePhoto}>
-                      <Trash2 className="w-4 h-4 mr-1" /> Remove
-                    </Button>
-                  )}
-                </div>
-                <p className="text-[11px] text-muted-foreground">Photos are cropped to a square so every product looks the same.</p>
+            <div className="flex items-start gap-4">
+              <ProductImage src={normalizedFormUrl || null} alt="Product photo" className="w-24 h-24" />
+              <div className="space-y-2 flex-1 min-w-0">
+                <Label className="block">Product photo link</Label>
+                <Input
+                  value={formImageUrl}
+                  onChange={e => setFormImageUrl(e.target.value)}
+                  placeholder="https://example.com/photo.jpg"
+                />
+                {formImageUrl && !isDirectImageUrl(normalizedFormUrl) && (
+                  <p className="text-[11px] text-amber-400">
+                    This looks like a page link rather than a direct image link. If the photo doesn't appear after saving, use the direct image address instead (right-click the photo → "Copy Image Address").
+                  </p>
+                )}
+                <p className="text-[11px] text-muted-foreground">
+                  Paste a link to a photo already hosted online. Google Drive and Dropbox share links are converted automatically. Other options: imgur.com, ImgBB, Cloudinary. Leave blank to remove the photo.
+                </p>
               </div>
             </div>
 
@@ -480,7 +460,9 @@ export default function InventoryPage() {
                 <Select value={formCategory} onValueChange={setFormCategory}>
                   <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
                   <SelectContent>
-                    {categories.map(c => <SelectItem key={c.id} value={c.id}>{c.categoryName}</SelectItem>)}
+                    {categories.map(c => (
+                      <SelectItem key={c.id} value={c.id}>{c.categoryName}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
