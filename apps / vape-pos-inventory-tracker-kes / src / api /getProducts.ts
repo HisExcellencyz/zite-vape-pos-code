@@ -21,9 +21,13 @@ export default createEndpoint({
     const filters: Record<string, unknown> = {};
     if (input.status) filters.status = input.status;
 
+    // Was defaulting to 50, which hid anything past the first page. 2000 is
+    // the platform's own max per call, so this comfortably covers the whole
+    // catalog for a shop this size. If the catalog ever passes ~2000 items,
+    // real offset-based pagination should replace this.
     const { records, hasMore } = await zite.products.findAll({
       filters: Object.keys(filters).length > 0 ? filters : undefined,
-      limit: input.limit || 50,
+      limit: input.limit || 2000,
       offset: input.offset || 0,
     });
 
