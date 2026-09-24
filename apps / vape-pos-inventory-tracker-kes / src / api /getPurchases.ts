@@ -12,7 +12,7 @@ export default createEndpoint({
   outputSchema: z.object({ purchases: z.array(z.any()), hasMore: z.boolean() }),
   execute: async ({ input }) => {
     const { records, hasMore } = await zite.purchases.findAll({
-      limit: input.limit || 50,
+      limit: input.limit || 2000,
       offset: input.offset || 0,
     });
     return { purchases: records, hasMore };
