@@ -2,10 +2,11 @@ import { useState, useEffect } from 'react';
 import { getDashboard, GetDashboardOutputType } from 'zitejs/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@project/components/ui/card';
 import { Skeleton } from '@project/components/ui/skeleton';
-import { DollarSign, ShoppingCart, TrendingDown, TrendingUp, Package, Users, MapPin } from 'lucide-react';
+import { DollarSign, ShoppingCart, TrendingDown, TrendingUp, Package, Users, MapPin, Store } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { DatePicker } from '@project/components/ui/date-picker';
 import { Button } from '@project/components/ui/button';
+import { useBranch } from '../hooks/useBranch';
 
 const fmt = (n: number) => 'KES ' + n.toLocaleString('en-KE', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
@@ -16,6 +17,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [startDate, setStartDate] = useState<Date | undefined>();
   const [endDate, setEndDate] = useState<Date | undefined>();
+  const { currentBranch } = useBranch();
 
   const load = async () => {
     setLoading(true);
@@ -23,6 +25,7 @@ export default function DashboardPage() {
       const res = await getDashboard({
         startDate: startDate?.toISOString(),
         endDate: endDate?.toISOString(),
+        branchId: currentBranch?.id,
       });
       setData(res);
     } catch (e) {
@@ -32,7 +35,7 @@ export default function DashboardPage() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [currentBranch?.id]);
 
   const kpis = data ? [
     { label: 'Total Sales', value: fmt(data.totalRevenue), icon: ShoppingCart, color: 'text-primary', change: `${data.totalSales} orders` },
@@ -47,7 +50,9 @@ export default function DashboardPage() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
-          <p className="text-sm text-muted-foreground">Business overview and performance</p>
+          <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+            <Store className="w-3.5 h-3.5" /> {currentBranch?.branchName || 'All outlets'} — business overview and performance
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <DatePicker value={startDate} onChange={setStartDate} />
