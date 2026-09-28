@@ -13,6 +13,7 @@ import { format } from 'date-fns';
 import { downloadCsv } from '../lib/exportHelper';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
 import ImportDialog from '../components/ImportDialog';
+import { useBranch } from '../hooks/useBranch';
 
 interface Purchase {
   id: string;
@@ -41,6 +42,7 @@ export default function PurchasesPage() {
   const [productSearch, setProductSearch] = useState('');
   const [saving, setSaving] = useState(false);
   const [viewMode, setViewMode] = useViewMode('purchases', 'list');
+  const { currentBranch } = useBranch();
 
   const load = async () => {
     setLoading(true);
@@ -80,6 +82,7 @@ export default function PurchasesPage() {
         items: cart.map(c => ({ productId: c.product.id, quantity: c.quantity, unitPrice: c.unitPrice })),
         paymentType,
         notes: notes || undefined,
+        branchId: currentBranch?.id,
       });
       toast.success('Purchase recorded');
       setShowForm(false);
