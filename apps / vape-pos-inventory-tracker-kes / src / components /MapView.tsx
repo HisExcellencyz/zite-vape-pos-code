@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { Loader } from '@googlemaps/js-api-loader';
 import { Input } from '@project/components/ui/input';
 import { Button } from '@project/components/ui/button';
-import { Search } from 'lucide-react';
+import { Search, Navigation } from 'lucide-react';
 
 interface MapPin {
   lat: number;
@@ -19,9 +19,11 @@ interface Props {
   selectedPin?: { lat: number; lng: number } | null;
   showSearch?: boolean;
   onSearchSelect?: (lat: number, lng: number, address: string) => void;
+  /** Show a "Plus Code" entry box (e.g. 6GCRMQFG+R8) alongside the search box, for places without a street address. */
+  showPlusCode?: boolean;
 }
 
-export default function MapView({ pins = [], center, zoom = 13, className = 'h-[300px]', onClick, selectedPin, showSearch = false, onSearchSelect }: Props) {
+export default function MapView({ pins = [], center, zoom = 13, className = 'h-[300px]', onClick, selectedPin, showSearch = false, onSearchSelect, showPlusCode = false }: Props) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<google.maps.Marker[]>([]);
@@ -30,6 +32,8 @@ export default function MapView({ pins = [], center, zoom = 13, className = 'h-[
   const [error, setError] = useState<string>();
   const [searchQuery, setSearchQuery] = useState('');
   const [searching, setSearching] = useState(false);
+  const [plusCodeQuery, setPlusCodeQuery] = useState('');
+  const [geocodingPlusCode, setGeocodingPlusCode] = useState(false);
   const geocoderRef = useRef<google.maps.Geocoder | null>(null);
 
   const apiKey = import.meta.env.VITE_GOOGLEMAPS_API_KEY;
@@ -134,6 +138,32 @@ export default function MapView({ pins = [], center, zoom = 13, className = 'h-[
     setSearching(false);
   }, [searchQuery, onClick, onSearchSelect, apiKey]);
 
+  const handlePlusCodeSearch = useCallback(async () => {
+    if (!plusCodeQuery.trim() || !apiKey) return;
+    setGeocodingPlusCode(true);
+    try {
+      const resp = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(plusCodeQuery)}&key=${apiKey}`);
+      const data = await resp.json();
+      if (data.results && data.results.length > 0) {
+        const loc = data.results[0].geometry.location;
+        const lat = loc.lat;
+        const lng = loc.lng;
+        const addr = data.results[0].formatted_address || plusCodeQuery;
+
+        if (onClick) onClick(lat, lng);
+        if (onSearchSelect) onSearchSelect(lat, lng, addr);
+
+        const map = mapInstanceRef.current;
+        if (map) {
+          map.panTo({ lat, lng });
+          map.setZoom(16);
+        }
+        setPlusCodeQuery('');
+      }
+    } catch { /* no results */ }
+    setGeocodingPlusCode(false);
+  }, [plusCodeQuery, onClick, onSearchSelect, apiKey]);
+
   return (
     <div className="space-y-2">
       {showSearch && (
@@ -150,6 +180,23 @@ export default function MapView({ pins = [], center, zoom = 13, className = 'h-[
           </div>
           <Button size="sm" variant="outline" onClick={handleSearch} disabled={searching} className="h-8 text-xs">
             {searching ? '...' : 'Search'}
+          </Button>
+        </div>
+      )}
+      {showPlusCode && (
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Navigation className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+            <Input
+              placeholder="Plus Code (e.g. 6GCRMQFG+R8)"
+              value={plusCodeQuery}
+              onChange={e => setPlusCodeQuery(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handlePlusCodeSearch()}
+              className="pl-9 h-8 text-xs"
+            />
+          </div>
+          <Button size="sm" variant="outline" onClick={handlePlusCodeSearch} disabled={geocodingPlusCode} className="h-8 text-xs">
+            {geocodingPlusCode ? '...' : 'Add'}
           </Button>
         </div>
       )}
