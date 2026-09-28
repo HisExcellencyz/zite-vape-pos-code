@@ -20,6 +20,7 @@ import { downloadCsv } from '../lib/exportHelper';
 import { DatePicker } from '@project/components/ui/date-picker';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
 import ImportDialog from '../components/ImportDialog';
+import { useBranch } from '../hooks/useBranch';
 
 interface LPOItem {
   productId: string;
@@ -65,6 +66,7 @@ export default function PurchaseOrdersPage() {
   const [showVerify, setShowVerify] = useState<PurchaseOrder | null>(null);
   const [showDetail, setShowDetail] = useState<PurchaseOrder | null>(null);
   const [viewMode, setViewMode] = useViewMode('purchase-orders', 'list');
+  const { currentBranch } = useBranch();
 
   const [editId, setEditId] = useState<string | undefined>();
   const [supplierId, setSupplierId] = useState('');
@@ -132,6 +134,7 @@ export default function PurchaseOrdersPage() {
       await savePurchaseOrder({
         id: editId,
         supplierId,
+        branchId: currentBranch?.id,
         orderDate: orderDate ? format(orderDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'),
         expectedDeliveryDate: expectedDate ? format(expectedDate, 'yyyy-MM-dd') : undefined,
         notes: notes || undefined,
