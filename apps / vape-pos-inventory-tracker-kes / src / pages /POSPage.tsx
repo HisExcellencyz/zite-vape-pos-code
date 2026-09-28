@@ -6,13 +6,15 @@ import { Label } from '@project/components/ui/label';
 import { Badge } from '@project/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
-import { Search, Plus, Minus, ShoppingCart, Trash2, UserPlus, X, Receipt, DollarSign, MapPin, Route } from 'lucide-react';
+import { Search, Plus, Minus, ShoppingCart, Trash2, UserPlus, X, Receipt, DollarSign, MapPin, Route, UserCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import DeliveryRouteMap from '../components/DeliveryRouteMap';
 import LocationPickerDialog from '../components/LocationPickerDialog';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
 import OtherIncomeDialog from '../components/OtherIncomeDialog';
 import ProductImage from '../components/ProductImage';
+import CustomerPicker, { PickableCustomer } from '../components/CustomerPicker';
+import { useBranch } from '../hooks/useBranch';
 
 interface Product {
   id: string;
@@ -49,10 +51,12 @@ export default function POSPage() {
   const [newCustName, setNewCustName] = useState('');
   const [newCustPhone, setNewCustPhone] = useState('');
   const [newCustAddress, setNewCustAddress] = useState('');
+  const [duplicateMatch, setDuplicateMatch] = useState<Customer | null>(null);
   const [showCustLocationPicker, setShowCustLocationPicker] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [showOtherIncome, setShowOtherIncome] = useState(false);
   const [catalogView, setCatalogView] = useViewMode('pos', 'grid');
+  const { currentBranch } = useBranch();
 
   const [showDeliveryMap, setShowDeliveryMap] = useState(false);
   const [routePoints, setRoutePoints] = useState<any[]>([]);
@@ -104,6 +108,7 @@ export default function POSPage() {
         items: cart.map(c => ({ productId: c.product.id, quantity: c.quantity, unitPrice: c.unitPrice })),
         customerId: selectedCustomer?.id,
         paymentMethod,
+        branchId: currentBranch?.id,
         pickupPoint: pickups.map((p: any) => p.label).join('; ') || undefined,
         deliveryAddress: dropoffs.map((p: any) => p.label).join('; ') || undefined,
         deliveryCoordinates: routePoints.length > 0 ? routePoints.map((p: any) => `${p.lat},${p.lng}`).join(' → ') : undefined,
@@ -123,6 +128,30 @@ export default function POSPage() {
     }
   };
 
+  // As the phone number for a brand-new customer is typed, quietly check
+  // whether it's already registered so we can offer that customer instead of
+  // erroring out only after Save is pressed.
+  const checkExistingByPhone = async (phoneRaw: string) => {
+    const phone = phoneRaw.trim();
+    if (!phone) { setDuplicateMatch(null); return; }
+    const normalized = phone.startsWith('+') ? phone : '+' + phone;
+    try {
+      const res = await getCustomers({ search: normalized });
+      const match = (res.customers as Customer[]).find(c => (c.phoneNumber || '') === normalized);
+      setDuplicateMatch(match || null);
+    } catch {
+      setDuplicateMatch(null);
+    }
+  };
+
+  const useDuplicateMatch = () => {
+    if (!duplicateMatch) return;
+    setSelectedCustomer(duplicateMatch);
+    setShowCustomerDialog(false);
+    setDuplicateMatch(null);
+    setNewCustName(''); setNewCustPhone(''); setNewCustAddress('');
+  };
+
   const handleCreateCustomer = async () => {
     if (!newCustName || !newCustPhone) return toast.error('Name and phone are required');
     try {
@@ -131,9 +160,16 @@ export default function POSPage() {
       setSelectedCustomer(res.customer as Customer);
       setShowCustomerDialog(false);
       setNewCustName(''); setNewCustPhone(''); setNewCustAddress('');
+      setDuplicateMatch(null);
       toast.success('Customer created');
     } catch (e: any) {
-      toast.error(e.message || 'Failed');
+      const msg = e.message || 'Failed';
+      if (msg.toLowerCase().includes('already exists')) {
+        await checkExistingByPhone(newCustPhone);
+        toast.error('That number is already registered — use the existing customer below.');
+      } else {
+        toast.error(msg);
+      }
     }
   };
 
@@ -243,16 +279,12 @@ export default function POSPage() {
               </div>
             ) : (
               <>
-                <Select onValueChange={id => {
-                  const c = customers.find(c => c.id === id);
-                  if (c) setSelectedCustomer(c);
-                }}>
-                  <SelectTrigger className="flex-1 h-9 text-xs"><SelectValue placeholder="Link customer..." /></SelectTrigger>
-                  <SelectContent>
-                    {customers.map(c => <SelectItem key={c.id} value={c.id}>{c.customerName} ({c.phoneNumber})</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                <Button size="sm" variant="outline" onClick={() => setShowCustomerDialog(true)} className="h-9"><UserPlus className="w-3.5 h-3.5" /></Button>
+                <CustomerPicker
+                  className="flex-1"
+                  placeholder="Link customer by name or phone..."
+                  onSelect={(c: PickableCustomer) => setSelectedCustomer(c as Customer)}
+                />
+                <Button size="sm" variant="outline" onClick={() => setShowCustomerDialog(true)} className="h-9 shrink-0"><UserPlus className="w-3.5 h-3.5" /></Button>
               </>
             )}
           </div>
@@ -332,12 +364,27 @@ export default function POSPage() {
       <OtherIncomeDialog open={showOtherIncome} onOpenChange={setShowOtherIncome} />
 
       {/* New Customer Dialog */}
-      <Dialog open={showCustomerDialog} onOpenChange={setShowCustomerDialog}>
+      <Dialog open={showCustomerDialog} onOpenChange={(open) => { setShowCustomerDialog(open); if (!open) setDuplicateMatch(null); }}>
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle>New Customer</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div><Label>Name *</Label><Input value={newCustName} onChange={e => setNewCustName(e.target.value)} placeholder="Customer name" /></div>
-            <div><Label>Phone Number *</Label><Input value={newCustPhone} onChange={e => setNewCustPhone(e.target.value)} placeholder="+254..." /></div>
+            <div>
+              <Label>Phone Number *</Label>
+              <Input
+                value={newCustPhone}
+                onChange={e => { setNewCustPhone(e.target.value); setDuplicateMatch(null); }}
+                onBlur={e => checkExistingByPhone(e.target.value)}
+                placeholder="+254..."
+              />
+            </div>
+            {duplicateMatch && (
+              <div className="rounded-lg border border-primary/40 bg-primary/5 p-3 space-y-2">
+                <p className="text-xs text-muted-foreground flex items-center gap-1.5"><UserCheck className="w-3.5 h-3.5" /> A customer with this number already exists:</p>
+                <p className="text-sm font-medium text-foreground">{duplicateMatch.customerName} · {duplicateMatch.phoneNumber}</p>
+                <Button type="button" size="sm" onClick={useDuplicateMatch}>Use this customer</Button>
+              </div>
+            )}
             <div>
               <Label>Location</Label>
               <div className="flex gap-2">
