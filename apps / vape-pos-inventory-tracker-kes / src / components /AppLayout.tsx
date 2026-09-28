@@ -4,16 +4,19 @@ import { useAuth, logout } from 'zitejs/auth';
 import {
   LayoutDashboard, ShoppingCart, Package, Users, Truck,
   Receipt, Settings, LogOut, ChevronLeft, ChevronRight,
-  ShoppingBag, Wallet, FolderTree, Shield, FileText, MapPin
+  ShoppingBag, Wallet, FolderTree, Shield, FileText, MapPin, Store, Check
 } from 'lucide-react';
 import { cn } from '@project/components/lib/utils';
 import { Button } from '@project/components/ui/button';
 import { Avatar, AvatarFallback } from '@project/components/ui/avatar';
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator, DropdownMenuLabel
 } from '@project/components/ui/dropdown-menu';
 import { useState } from 'react';
 import { usePermissions } from '../hooks/usePermissions';
+import { useBranch } from '../hooks/useBranch';
+
+const DEFAULT_LOGO = 'https://images.fillout.com/orgid-811092/flowpublicid-6hepsbbapu/widgetid-default/xmArbfbmsBwLWSE2d2Et7u/pasted-image-1788367385543-n4ulma8b.png';
 
 // `area` links each menu item to the permission matrix on the Users page.
 const navItems = [
@@ -35,9 +38,12 @@ const navItems = [
 export default function AppLayout({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const { can, roleName } = usePermissions();
+  const { branches, currentBranch, setCurrentBranchId } = useBranch();
   const [collapsed, setCollapsed] = useState(false);
 
   const visibleItems = navItems.filter(item => can(item.area, 'view'));
+  const outletLogo = currentBranch?.logoUrl || DEFAULT_LOGO;
+  const outletName = currentBranch?.branchName || 'Uptown Vapes';
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -48,10 +54,46 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           collapsed ? 'w-16' : 'w-60'
         )}
       >
-        {/* Logo */}
-        <div className="px-3 py-4 flex items-center gap-3 border-b border-border">
-          <img src="https://images.fillout.com/orgid-811092/flowpublicid-6hepsbbapu/widgetid-default/xmArbfbmsBwLWSE2d2Et7u/pasted-image-1788367385543-n4ulma8b.png" alt="Uptown Vapes" className="w-9 h-9 rounded-lg object-cover shrink-0" />
-          {!collapsed && <span className="text-sm font-bold text-foreground truncate">Uptown Vapes</span>}
+        {/* Outlet switcher */}
+        <div className="px-3 py-4 border-b border-border">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className={cn('flex items-center gap-3 w-full rounded-lg p-1 hover:bg-muted transition-colors', collapsed && 'justify-center')}>
+                <img src={outletLogo} alt={outletName} className="w-9 h-9 rounded-lg object-cover shrink-0" />
+                {!collapsed && (
+                  <div className="text-left min-w-0 flex-1">
+                    <span className="text-sm font-bold text-foreground truncate block">{outletName}</span>
+                    {branches.length > 1 && (
+                      <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+                        <Store className="w-3 h-3" /> Switch outlet
+                      </span>
+                    )}
+                  </div>
+                )}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-64">
+              <DropdownMenuLabel>Outlets</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {branches.map(b => (
+                <DropdownMenuItem key={b.id} onClick={() => setCurrentBranchId(b.id)} className="gap-2">
+                  <img src={b.logoUrl || DEFAULT_LOGO} alt={b.branchName} className="w-6 h-6 rounded object-cover shrink-0" />
+                  <span className="flex-1 truncate">{b.branchName}</span>
+                  {b.id === currentBranch?.id && <Check className="w-3.5 h-3.5 text-primary shrink-0" />}
+                </DropdownMenuItem>
+              ))}
+              {can('settings', 'view') && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild>
+                    <NavLink to="/settings" className="gap-2">
+                      <Settings className="w-4 h-4" /> Manage Outlets
+                    </NavLink>
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         {/* Profile */}
