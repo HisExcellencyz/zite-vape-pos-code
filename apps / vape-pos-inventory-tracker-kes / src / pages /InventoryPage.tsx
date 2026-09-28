@@ -8,7 +8,7 @@ import { Badge } from '@project/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
-import { Search, Plus, Download, Upload, Package, Pencil, Trash2, CheckSquare } from 'lucide-react';
+import { Search, Plus, Download, Upload, Package, Pencil, Trash2, CheckSquare, ArrowUp, ArrowDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { downloadCsv } from '../lib/exportHelper';
 import { normalizeImageUrl, isDirectImageUrl, isHttpUrl } from '../lib/imageUrl';
@@ -33,6 +33,16 @@ interface Category {
   categoryName?: string;
 }
 
+type SortBy = 'name' | 'stock' | 'price' | 'value';
+type SortDir = 'asc' | 'desc';
+
+const SORT_LABELS: Record<SortBy, string> = {
+  name: 'Name',
+  stock: 'Stock',
+  price: 'Selling Price',
+  value: 'Stock Value',
+};
+
 const photoOf = (p: Product) => p.images?.[0]?.url;
 
 export default function InventoryPage() {
@@ -41,6 +51,8 @@ export default function InventoryPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [sortBy, setSortBy] = useState<SortBy>('name');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [viewMode, setViewMode] = useViewMode('inventory', 'list');
@@ -68,7 +80,12 @@ export default function InventoryPage() {
     setLoading(true);
     try {
       const [prods, cats] = await Promise.all([
-        getProducts({ search, status: statusFilter && statusFilter !== 'all' ? statusFilter : undefined }),
+        getProducts({
+          search,
+          status: statusFilter && statusFilter !== 'all' ? statusFilter : undefined,
+          sortBy,
+          sortDir,
+        }),
         getCategories({}),
       ]);
       setProducts(prods.products as Product[]);
@@ -80,7 +97,7 @@ export default function InventoryPage() {
     }
   };
 
-  useEffect(() => { load(); }, [search, statusFilter]);
+  useEffect(() => { load(); }, [search, statusFilter, sortBy, sortDir]);
 
   const openEdit = (p: Product) => {
     setEditing(p);
@@ -213,6 +230,8 @@ export default function InventoryPage() {
 
   const fmt = (n?: number) => n != null ? `KES ${n.toLocaleString()}` : 'KES 0';
 
+  const toggleSortDir = () => setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+
   const renderActions = (p: Product) => (
     <div className="flex justify-end gap-1">
       <Button variant="ghost" size="sm" onClick={() => openEdit(p)}><Pencil className="w-3.5 h-3.5" /></Button>
@@ -273,6 +292,19 @@ export default function InventoryPage() {
             <SelectItem value="Inactive">Inactive</SelectItem>
           </SelectContent>
         </Select>
+        <div className="flex items-center gap-2">
+          <Select value={sortBy} onValueChange={v => setSortBy(v as SortBy)}>
+            <SelectTrigger className="w-44"><SelectValue placeholder="Sort by" /></SelectTrigger>
+            <SelectContent>
+              {(Object.keys(SORT_LABELS) as SortBy[]).map(key => (
+                <SelectItem key={key} value={key}>Sort: {SORT_LABELS[key]}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button variant="outline" size="icon" onClick={toggleSortDir} title={sortDir === 'asc' ? 'Ascending' : 'Descending'}>
+            {sortDir === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />}
+          </Button>
+        </div>
       </div>
 
       {viewMode === 'list' ? (
