@@ -6,6 +6,7 @@ import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
 import { DatePicker } from '@project/components/ui/date-picker';
 import { toast } from 'sonner';
+import { useBranch } from '../hooks/useBranch';
 
 interface Props {
   open: boolean;
@@ -24,6 +25,7 @@ export default function OtherIncomeDialog({ open, onOpenChange, onSaved }: Props
   const [notes, setNotes] = useState('');
   const [date, setDate] = useState<Date | undefined>(new Date());
   const [saving, setSaving] = useState(false);
+  const { currentBranch } = useBranch();
 
   useEffect(() => {
     if (open) {
@@ -48,6 +50,7 @@ export default function OtherIncomeDialog({ open, onOpenChange, onSaved }: Props
         amount: Number(amount),
         notes: notes.trim() || undefined,
         date: when.toISOString(),
+        branchId: currentBranch?.id,
       });
       toast.success('Other income recorded');
       onOpenChange(false);
