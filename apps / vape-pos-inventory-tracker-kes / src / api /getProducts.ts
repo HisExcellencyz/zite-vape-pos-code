@@ -3,7 +3,7 @@ import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
 
 export default createEndpoint({
-  description: 'List products with optional search and category filter',
+  description: 'List products with optional search, category filter and sorting',
   authenticated: true,
   inputSchema: z.object({
     search: z.string().optional(),
@@ -11,6 +11,8 @@ export default createEndpoint({
     status: z.string().optional(),
     offset: z.number().optional(),
     limit: z.number().optional(),
+    sortBy: z.enum(['name', 'stock', 'price', 'value']).optional(),
+    sortDir: z.enum(['asc', 'desc']).optional(),
   }),
   outputSchema: z.object({
     products: z.array(z.any()),
@@ -40,13 +42,34 @@ export default createEndpoint({
       );
     }
 
+    const dir = input.sortDir === 'desc' ? -1 : 1;
+    const sorted = [...filtered];
+    switch (input.sortBy) {
+      case 'name':
+        sorted.sort((a, b) => dir * (a.productName || '').localeCompare(b.productName || ''));
+        break;
+      case 'stock':
+        sorted.sort((a, b) => dir * ((a.stockQuantity || 0) - (b.stockQuantity || 0)));
+        break;
+      case 'price':
+        sorted.sort((a, b) => dir * ((a.sellingPrice || 0) - (b.sellingPrice || 0)));
+        break;
+      case 'value':
+        sorted.sort((a, b) => dir * (
+          (a.costPrice || 0) * (a.stockQuantity || 0) - (b.costPrice || 0) * (b.stockQuantity || 0)
+        ));
+        break;
+      default:
+        break;
+    }
+
     // Get total count
     const countResult = await zite.sql({
       query: `SELECT COUNT(*) AS total FROM "Products"`,
     });
 
     return {
-      products: filtered,
+      products: sorted,
       hasMore,
       total: Number(countResult.rows[0]?.total ?? 0),
     };
