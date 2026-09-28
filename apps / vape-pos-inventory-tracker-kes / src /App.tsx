@@ -20,6 +20,7 @@ import UsersPage from './pages/UsersPage';
 import AddressesPage from './pages/AddressesPage';
 import LandingPage from './pages/LandingPage';
 import { PermissionsProvider, usePermissions } from './hooks/usePermissions';
+import { BranchProvider } from './hooks/useBranch';
 
 // Each screen belongs to a permission "area" (see the roles matrix on the Users page).
 const ROUTES: { path: string; area: string; element: ReactElement }[] = [
@@ -131,9 +132,11 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <PermissionsProvider>
-        <AppRoutes />
-      </PermissionsProvider>
+      <BranchProvider>
+        <PermissionsProvider>
+          <AppRoutes />
+        </PermissionsProvider>
+      </BranchProvider>
       <Toaster />
     </BrowserRouter>
   );
