@@ -3,7 +3,7 @@ import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
 
 export default createEndpoint({
-  description: 'Dashboard statistics with period filtering',
+  description: 'Dashboard statistics with period and outlet (branch) filtering',
   authenticated: true,
   inputSchema: z.object({
     startDate: z.string().optional(),
@@ -53,6 +53,15 @@ export default createEndpoint({
       params.push(input.endDate);
       idx++;
     }
+    // Restrict to a single outlet when one is selected. Appending this to
+    // dateFilter/params (rather than only the first query) means it also
+    // applies automatically to topProducts, topCustomers and revenueByDay
+    // below, since they reuse the same dateFilter string and params array.
+    if (input.branchId) {
+      dateFilter += ` AND EXISTS (SELECT 1 FROM "BranchesSales" bs WHERE bs."salesId" = s.id AND bs."branchesId" = $${idx})`;
+      params.push(input.branchId);
+      idx++;
+    }
 
     // Total sales & revenue
     const salesResult = await zite.sql({
@@ -79,6 +88,11 @@ export default createEndpoint({
       purchaseParams.push(input.endDate);
       pIdx++;
     }
+    if (input.branchId) {
+      purchaseDateFilter += ` AND EXISTS (SELECT 1 FROM "BranchesPurchases" bp WHERE bp."purchasesId" = p.id AND bp."branchesId" = $${pIdx})`;
+      purchaseParams.push(input.branchId);
+      pIdx++;
+    }
 
     const purchasesResult = await zite.sql({
       query: `
@@ -101,6 +115,11 @@ export default createEndpoint({
     if (input.endDate) {
       expDateFilter += ` AND e."expenseDate" <= $${eIdx}`;
       expParams.push(input.endDate);
+      eIdx++;
+    }
+    if (input.branchId) {
+      expDateFilter += ` AND EXISTS (SELECT 1 FROM "BranchesOtherExpenses" be WHERE be."otherExpensesId" = e.id AND be."branchesId" = $${eIdx})`;
+      expParams.push(input.branchId);
       eIdx++;
     }
 
@@ -127,6 +146,11 @@ export default createEndpoint({
       incParams.push(input.endDate);
       iIdx++;
     }
+    if (input.branchId) {
+      incDateFilter += ` AND EXISTS (SELECT 1 FROM "BranchesOtherIncome" bi WHERE bi."otherIncomeId" = i.id AND bi."branchesId" = $${iIdx})`;
+      incParams.push(input.branchId);
+      iIdx++;
+    }
 
     const incomeResult = await zite.sql({
       query: `
@@ -137,13 +161,20 @@ export default createEndpoint({
       params: incParams,
     });
 
-    // Stock value
+    // Stock value (optionally scoped to products assigned to this outlet)
+    const stockParams: string[] = [];
+    let stockBranchFilter = '';
+    if (input.branchId) {
+      stockBranchFilter = ` AND EXISTS (SELECT 1 FROM "BranchesProducts" bpr WHERE bpr."productsId" = "Products".id AND bpr."branchesId" = $1)`;
+      stockParams.push(input.branchId);
+    }
     const stockResult = await zite.sql({
       query: `
         SELECT COALESCE(SUM("costPrice" * "stockQuantity"), 0) AS "stockValue"
         FROM "Products"
-        WHERE "status" = 'Active'
+        WHERE "status" = 'Active'${stockBranchFilter}
       `,
+      params: stockParams,
     });
 
     // Top products
@@ -218,6 +249,12 @@ export default createEndpoint({
     const totalOtherIncome = Number(incomeResult.rows[0]?.totalOtherIncome ?? 0);
 
     // Delivery distance stats
+    const deliveryParams: string[] = [];
+    let deliveryBranchFilter = '';
+    if (input.branchId) {
+      deliveryBranchFilter = ` AND EXISTS (SELECT 1 FROM "BranchesSales" bds WHERE bds."salesId" = "Sales".id AND bds."branchesId" = $1)`;
+      deliveryParams.push(input.branchId);
+    }
     const deliveryResult = await zite.sql({
       query: `
         SELECT COUNT(*) AS cnt,
@@ -225,8 +262,9 @@ export default createEndpoint({
                COALESCE(MAX("deliveryDistanceKm"), 0) AS max_dist,
                COALESCE(MIN("deliveryDistanceKm"), 0) AS min_dist
         FROM "Sales"
-        WHERE "deliveryDistanceKm" IS NOT NULL AND "deliveryDistanceKm" > 0
+        WHERE "deliveryDistanceKm" IS NOT NULL AND "deliveryDistanceKm" > 0${deliveryBranchFilter}
       `,
+      params: deliveryParams,
     });
 
     return {
