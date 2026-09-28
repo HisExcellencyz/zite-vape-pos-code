@@ -3,10 +3,11 @@ import { Loader } from '@googlemaps/js-api-loader';
 import { getAddresses } from 'zitejs/api';
 import { Input } from '@project/components/ui/input';
 import { Button } from '@project/components/ui/button';
-import { Badge } from '@project/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { Label } from '@project/components/ui/label';
-import { Search, Trash2, MapPin, Navigation, BookMarked } from 'lucide-react';
+import { Trash2, MapPin, BookMarked } from 'lucide-react';
+import LocationSearchBox from './LocationSearchBox';
+import { geocode } from '../lib/geocode';
 
 export interface RoutePoint {
   id: string;
@@ -47,16 +48,23 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<google.maps.Marker[]>([]);
   const polylinesRef = useRef<google.maps.Polyline[]>([]);
-  const geocoderRef = useRef<google.maps.Geocoder | null>(null);
+  // The map click handler is registered once, so it reads the latest points/callback from refs.
+  const pointsRef = useRef(points);
+  pointsRef.current = points;
+  const onPointsChangeRef = useRef(onPointsChange);
+  onPointsChangeRef.current = onPointsChange;
+
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string>();
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searching, setSearching] = useState(false);
   const [coordsInput, setCoordsInput] = useState('');
-  const [plusCodeInput, setPlusCodeInput] = useState('');
   const [savedAddresses, setSavedAddresses] = useState<SavedAddr[]>([]);
 
   const apiKey = import.meta.env.VITE_GOOGLEMAPS_API_KEY;
+
+  const addPoint = useCallback((lat: number, lng: number, label?: string) => {
+    const pt: RoutePoint = { id: genId(), label: label || `${lat.toFixed(5)},${lng.toFixed(5)}`, lat, lng };
+    onPointsChangeRef.current([...pointsRef.current, pt]);
+  }, []);
 
   // Load saved addresses
   useEffect(() => {
@@ -70,14 +78,10 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
     let mounted = true;
     const loader = new Loader({ apiKey, version: 'weekly' });
 
-    Promise.all([
-      loader.importLibrary('maps'),
-      loader.importLibrary('geocoding'),
-    ]).then(([{ Map }]) => {
+    loader.importLibrary('maps').then(({ Map }) => {
       if (!mounted || !mapRef.current || mapInstanceRef.current) return;
       const map = new Map(mapRef.current, { center: { lat: -1.2921, lng: 36.8219 }, zoom: 12 });
       mapInstanceRef.current = map;
-      geocoderRef.current = new google.maps.Geocoder();
 
       map.addListener('click', (e: google.maps.MapMouseEvent) => {
         if (e.latLng) addPoint(e.latLng.lat(), e.latLng.lng());
@@ -88,11 +92,6 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
 
     return () => { mounted = false; };
   }, [apiKey]);
-
-  const addPoint = useCallback((lat: number, lng: number, label?: string) => {
-    const pt: RoutePoint = { id: genId(), label: label || `${lat.toFixed(5)},${lng.toFixed(5)}`, lat, lng };
-    onPointsChange([...points, pt]);
-  }, [points, onPointsChange]);
 
   // Update markers and polylines
   useEffect(() => {
@@ -143,47 +142,18 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
     }
   }, [points]);
 
-  const handleSearch = async () => {
-    if (!searchQuery.trim()) return;
-    // Use the REST API as fallback for geocoding (more reliable than the JS Geocoder which may not init in time)
-    setSearching(true);
-    try {
-      const resp = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(searchQuery)}&key=${apiKey}`);
-      const data = await resp.json();
-      if (data.results?.[0]?.geometry?.location) {
-        const { lat, lng } = data.results[0].geometry.location;
-        addPoint(lat, lng, data.results[0].formatted_address || searchQuery);
-        setSearchQuery('');
-      }
-    } catch {}
-    setSearching(false);
-  };
-
   const handleCoordsAdd = () => {
     const parts = coordsInput.split(',').map(s => s.trim());
     if (parts.length === 2) {
       const lat = parseFloat(parts[0]), lng = parseFloat(parts[1]);
-      if (isFinite(lat) && isFinite(lng) && lat >= -90 && lat <= 90) {
+      if (isFinite(lat) && isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
         addPoint(lat, lng);
         setCoordsInput('');
       }
     }
   };
 
-  const handlePlusCodeAdd = async () => {
-    if (!plusCodeInput.trim() || !apiKey) return;
-    try {
-      const resp = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(plusCodeInput)}&key=${apiKey}`);
-      const data = await resp.json();
-      if (data.results?.[0]?.geometry?.location) {
-        const { lat, lng } = data.results[0].geometry.location;
-        addPoint(lat, lng, data.results[0].formatted_address || plusCodeInput);
-        setPlusCodeInput('');
-      }
-    } catch {}
-  };
-
-  const handleSavedAddress = (addrId: string) => {
+  const handleSavedAddress = async (addrId: string) => {
     const addr = savedAddresses.find(a => a.id === addrId);
     if (!addr) return;
     if (addr.coordinates) {
@@ -196,16 +166,12 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
         }
       }
     }
-    // Geocode the address name
-    if (addr.fullAddress || addr.addressName) {
-      fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(addr.fullAddress || addr.addressName || '')}&key=${apiKey}`)
-        .then(r => r.json())
-        .then(data => {
-          if (data.results?.[0]?.geometry?.location) {
-            const { lat, lng } = data.results[0].geometry.location;
-            addPoint(lat, lng, addr.addressName || addr.fullAddress || '');
-          }
-        }).catch(() => {});
+    // No coordinates saved: look the address up on Google Maps
+    const text = addr.fullAddress || addr.addressName || '';
+    if (text) {
+      const out = await geocode(text);
+      const r = out.results[0];
+      if (r) addPoint(r.lat, r.lng, addr.addressName || addr.fullAddress || r.address);
     }
   };
 
@@ -234,25 +200,13 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
         </div>
       )}
 
-      {/* Add via search */}
-      <div className="flex gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-          <Input placeholder="Search location..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSearch()} className="pl-8 h-8 text-xs" />
-        </div>
-        <Button size="sm" variant="outline" onClick={handleSearch} disabled={searching} className="h-8 text-xs">{searching ? '...' : 'Search'}</Button>
-      </div>
+      {/* Google Maps place search + Plus Code */}
+      <LocationSearchBox onPick={(lat, lng, address) => addPoint(lat, lng, address)} />
 
       {/* Add via coords */}
       <div className="flex gap-2">
         <Input placeholder="Coordinates (lat,lng)" value={coordsInput} onChange={e => setCoordsInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleCoordsAdd()} className="flex-1 h-8 text-xs" />
         <Button size="sm" variant="outline" onClick={handleCoordsAdd} className="h-8 text-xs"><MapPin className="w-3 h-3 mr-1" />Add</Button>
-      </div>
-
-      {/* Add via plus code */}
-      <div className="flex gap-2">
-        <Input placeholder="Plus Code (e.g. 6GCRMQFG+R8)" value={plusCodeInput} onChange={e => setPlusCodeInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handlePlusCodeAdd()} className="flex-1 h-8 text-xs" />
-        <Button size="sm" variant="outline" onClick={handlePlusCodeAdd} className="h-8 text-xs"><Navigation className="w-3 h-3 mr-1" />Add</Button>
       </div>
 
       {/* Map */}
