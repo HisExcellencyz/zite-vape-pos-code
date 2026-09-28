@@ -13,6 +13,7 @@ import { format } from 'date-fns';
 import { downloadCsv } from '../lib/exportHelper';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
 import OtherIncomeDialog from '../components/OtherIncomeDialog';
+import { useBranch } from '../hooks/useBranch';
 
 interface Expense { id: string; expenseNumber?: number; expenseDate?: string; description?: string; amount?: number; notes?: string; }
 interface Purchase { id: string; purchaseNumber?: number; purchaseDate?: string; total?: number; paymentType?: string; }
@@ -31,6 +32,7 @@ export default function ExpensesPage() {
   const [formNotes, setFormNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [viewMode, setViewMode] = useViewMode('expenses', 'list');
+  const { currentBranch } = useBranch();
 
   const load = async () => {
     setLoading(true);
@@ -49,7 +51,7 @@ export default function ExpensesPage() {
     if (!formAmount || Number(formAmount) <= 0) return toast.error('Valid amount is required');
     setSaving(true);
     try {
-      await createExpense({ description: formDesc, amount: Number(formAmount), notes: formNotes || undefined });
+      await createExpense({ description: formDesc, amount: Number(formAmount), notes: formNotes || undefined, branchId: currentBranch?.id });
       toast.success('Expense recorded');
       setShowForm(false); setFormDesc(''); setFormAmount(''); setFormNotes('');
       load();
