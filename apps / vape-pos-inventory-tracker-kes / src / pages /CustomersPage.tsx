@@ -6,7 +6,8 @@ import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
-import { Search, Plus, Download, Upload, Users, Pencil, Trash2, Phone, Eye, MapPin, CheckSquare, Mail } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
+import { Search, Plus, Download, Upload, Users, Pencil, Trash2, Phone, Eye, MapPin, CheckSquare, Mail, ArrowUp, ArrowDown, UserCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { downloadCsv } from '../lib/exportHelper';
 import { format } from 'date-fns';
@@ -21,12 +22,28 @@ interface Customer {
   email?: string;
   address?: string;
   notes?: string;
+  orderCount?: number;
+  totalSpent?: number;
 }
+
+type SortBy = 'name' | 'date' | 'orders' | 'value';
+type SortDir = 'asc' | 'desc';
+
+const SORT_LABELS: Record<SortBy, string> = {
+  name: 'Name',
+  date: 'Date Added',
+  orders: 'Number of Orders',
+  value: 'Total Value',
+};
+
+const fmt = (n?: number) => `KES ${(n || 0).toLocaleString()}`;
 
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState<SortBy>('name');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Customer | null>(null);
   const [formName, setFormName] = useState('');
@@ -34,6 +51,7 @@ export default function CustomersPage() {
   const [formEmail, setFormEmail] = useState('');
   const [formAddress, setFormAddress] = useState('');
   const [saving, setSaving] = useState(false);
+  const [duplicateMatch, setDuplicateMatch] = useState<Customer | null>(null);
   const [showDetails, setShowDetails] = useState(false);
   const [detailCustomer, setDetailCustomer] = useState<any>(null);
   const [detailOrders, setDetailOrders] = useState<any[]>([]);
@@ -46,18 +64,21 @@ export default function CustomersPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const res = await getCustomers({ search });
+      const res = await getCustomers({ search, sortBy, sortDir });
       setCustomers(res.customers as Customer[]);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { load(); }, [search]);
+  useEffect(() => { load(); }, [search, sortBy, sortDir]);
+
+  const toggleSortDir = () => setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
 
   const openNew = () => {
     setEditing(null);
     setFormName(''); setFormPhone(''); setFormEmail(''); setFormAddress('');
+    setDuplicateMatch(null);
     setShowForm(true);
   };
 
@@ -67,7 +88,25 @@ export default function CustomersPage() {
     setFormPhone(c.phoneNumber || '');
     setFormEmail(c.email || '');
     setFormAddress(c.address || '');
+    setDuplicateMatch(null);
     setShowForm(true);
+  };
+
+  // As the phone number is typed for a NEW customer, quietly check whether it
+  // already belongs to someone — so we can offer that customer instead of
+  // erroring out only after they press Save.
+  const checkExistingByPhone = async (phoneRaw: string) => {
+    if (editing) return; // duplicate check only matters when creating new
+    const phone = phoneRaw.trim();
+    if (!phone) { setDuplicateMatch(null); return; }
+    const normalized = phone.startsWith('+') ? phone : '+' + phone;
+    try {
+      const res = await getCustomers({ search: normalized });
+      const match = (res.customers as Customer[]).find(c => (c.phoneNumber || '') === normalized);
+      setDuplicateMatch(match || null);
+    } catch {
+      setDuplicateMatch(null);
+    }
   };
 
   const handleSave = async () => {
@@ -85,7 +124,13 @@ export default function CustomersPage() {
       setShowForm(false);
       load();
     } catch (e: any) {
-      toast.error(e.message || 'Failed');
+      const msg = e.message || 'Failed';
+      if (!editing && msg.toLowerCase().includes('already exists')) {
+        await checkExistingByPhone(formPhone);
+        toast.error('That number is already registered — use the existing customer below, or pick a different number.');
+      } else {
+        toast.error(msg);
+      }
     } finally {
       setSaving(false);
     }
@@ -195,9 +240,24 @@ export default function CustomersPage() {
         </div>
       </div>
 
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input placeholder="Search by name or phone..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative max-w-md flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input placeholder="Search by name or phone..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+        </div>
+        <div className="flex items-center gap-2">
+          <Select value={sortBy} onValueChange={v => setSortBy(v as SortBy)}>
+            <SelectTrigger className="w-48"><SelectValue placeholder="Sort by" /></SelectTrigger>
+            <SelectContent>
+              {(Object.keys(SORT_LABELS) as SortBy[]).map(key => (
+                <SelectItem key={key} value={key}>Sort: {SORT_LABELS[key]}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button variant="outline" size="icon" onClick={toggleSortDir} title={sortDir === 'asc' ? 'Ascending' : 'Descending'}>
+            {sortDir === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />}
+          </Button>
+        </div>
       </div>
 
       {viewMode === 'list' ? (
@@ -211,7 +271,8 @@ export default function CustomersPage() {
                     <th className="text-left p-3 font-medium">Name</th>
                     <th className="text-left p-3 font-medium">Phone</th>
                     <th className="text-left p-3 font-medium">Email</th>
-                    <th className="text-left p-3 font-medium">Address</th>
+                    <th className="text-right p-3 font-medium">Orders</th>
+                    <th className="text-right p-3 font-medium">Total Spent</th>
                     <th className="text-right p-3 font-medium">Actions</th>
                   </tr>
                 </thead>
@@ -220,12 +281,12 @@ export default function CustomersPage() {
                     [...Array(5)].map((_, i) => (
                       <tr key={i} className="border-b border-border">
                         <td className="p-3"></td>
-                        {[...Array(5)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}
+                        {[...Array(6)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}
                       </tr>
                     ))
                   ) : customers.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="text-center py-12 text-muted-foreground">
+                      <td colSpan={7} className="text-center py-12 text-muted-foreground">
                         <Users className="w-10 h-10 mx-auto mb-2 opacity-40" />
                         No customers found
                       </td>
@@ -236,7 +297,8 @@ export default function CustomersPage() {
                       <td className="p-3 font-medium text-foreground break-words whitespace-normal">{c.customerName}</td>
                       <td className="p-3 text-muted-foreground whitespace-nowrap"><span className="inline-flex items-center gap-1.5"><Phone className="w-3.5 h-3.5" />{c.phoneNumber}</span></td>
                       <td className="p-3 text-muted-foreground break-all">{c.email || '-'}</td>
-                      <td className="p-3 text-muted-foreground break-words whitespace-normal max-w-xs">{c.address || '-'}</td>
+                      <td className="p-3 text-right text-foreground">{c.orderCount || 0}</td>
+                      <td className="p-3 text-right font-semibold text-primary whitespace-nowrap">{fmt(c.totalSpent)}</td>
                       <td className="p-3 text-right">{renderActions(c)}</td>
                     </tr>
                   ))}
@@ -277,6 +339,16 @@ export default function CustomersPage() {
                     {c.email && <p className="flex items-start gap-1.5"><Mail className="w-3.5 h-3.5 mt-0.5 shrink-0" /><span className="break-all">{c.email}</span></p>}
                     {c.address && <p className="flex items-start gap-1.5"><MapPin className="w-3.5 h-3.5 mt-0.5 shrink-0" /><span className="break-words whitespace-normal min-w-0">{c.address}</span></p>}
                   </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs border-t border-border pt-2">
+                    <div>
+                      <p className="text-muted-foreground">Orders</p>
+                      <p className="font-semibold text-foreground">{c.orderCount || 0}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Total Spent</p>
+                      <p className="font-semibold text-primary break-words">{fmt(c.totalSpent)}</p>
+                    </div>
+                  </div>
                   <div className="border-t border-border pt-2">{renderActions(c)}</div>
                 </CardContent>
               </Card>
@@ -301,7 +373,28 @@ export default function CustomersPage() {
           <DialogHeader><DialogTitle>{editing ? 'Edit Customer' : 'New Customer'}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div><Label>Name *</Label><Input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Customer name" /></div>
-            <div><Label>Phone Number * (with +)</Label><Input value={formPhone} onChange={e => setFormPhone(e.target.value)} placeholder="+254712345678" /></div>
+            <div>
+              <Label>Phone Number * (with +)</Label>
+              <Input
+                value={formPhone}
+                onChange={e => { setFormPhone(e.target.value); setDuplicateMatch(null); }}
+                onBlur={e => checkExistingByPhone(e.target.value)}
+                placeholder="+254712345678"
+              />
+            </div>
+            {duplicateMatch && (
+              <div className="rounded-lg border border-primary/40 bg-primary/5 p-3 space-y-2">
+                <p className="text-xs text-muted-foreground flex items-center gap-1.5"><UserCheck className="w-3.5 h-3.5" /> A customer with this number already exists:</p>
+                <p className="text-sm font-medium text-foreground">{duplicateMatch.customerName} · {duplicateMatch.phoneNumber}</p>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => { openEdit(duplicateMatch); }}
+                >
+                  Edit this customer instead
+                </Button>
+              </div>
+            )}
             <div><Label>Email</Label><Input value={formEmail} onChange={e => setFormEmail(e.target.value)} placeholder="email@example.com" /></div>
             <div><Label>Address</Label>
               <div className="flex gap-2">
@@ -341,7 +434,7 @@ export default function CustomersPage() {
                 </CardContent></Card>
                 <Card className="bg-muted/50 border-border"><CardContent className="pt-4">
                   <p className="text-xs text-muted-foreground">Total Spent</p>
-                  <p className="text-2xl font-bold text-primary">KES {detailStats.totalSpent.toLocaleString()}</p>
+                  <p className="text-2xl font-bold text-primary">{fmt(detailStats.totalSpent)}</p>
                 </CardContent></Card>
               </div>
               <div>
@@ -356,7 +449,7 @@ export default function CustomersPage() {
                           <p className="text-sm text-foreground">{o.saleDate ? format(new Date(o.saleDate), 'dd MMM yyyy') : '-'}</p>
                           <p className="text-xs text-muted-foreground">{o.paymentMethod} · {o.status}</p>
                         </div>
-                        <p className="text-sm font-semibold text-foreground">KES {o.total.toLocaleString()}</p>
+                        <p className="text-sm font-semibold text-foreground">{fmt(o.total)}</p>
                       </div>
                     ))}
                   </div>
