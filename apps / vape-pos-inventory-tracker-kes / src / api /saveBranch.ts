@@ -1,0 +1,64 @@
+import { z } from 'zod';
+import { createEndpoint } from 'zitejs/backend';
+import { zite } from 'zitejs/db';
+
+export default createEndpoint({
+  description: 'Create or update an outlet/branch, including its own logo and cover photo',
+  authenticated: true,
+  inputSchema: z.object({
+    id: z.string().optional(),
+    branchName: z.string().min(1),
+    address: z.string().optional(),
+    phone: z.string().optional(),
+    taxId: z.string().optional(),
+    isMainBranch: z.boolean().optional(),
+    active: z.boolean().optional(),
+    logoUrl: z.string().optional(),
+    coverPhotoUrl: z.string().optional(),
+    plusCode: z.string().optional(),
+    coordinates: z.string().optional(),
+  }),
+  outputSchema: z.object({ success: z.boolean(), branch: z.any() }),
+  execute: async ({ input }) => {
+    // Logo / cover photo aren't declared as schema fields on Branches, so —
+    // exactly like businessSettings.customFields elsewhere in this app — the
+    // branding for each outlet is kept as a small JSON blob in customFields.
+    const branding = JSON.stringify({
+      logoUrl: (input.logoUrl || '').trim(),
+      coverPhotoUrl: (input.coverPhotoUrl || '').trim(),
+    });
+
+    const record: Record<string, unknown> = {
+      branchName: input.branchName,
+      address: input.address || null,
+      phone: input.phone || null,
+      taxId: input.taxId || null,
+      customFields: branding,
+      plusCode: input.plusCode || null,
+      coordinates: input.coordinates || null,
+    };
+    if (input.active !== undefined) record.active = input.active;
+
+    // Only one outlet can be the main outlet at a time.
+    if (input.isMainBranch) {
+      const { records: all } = await zite.branches.findAll({ limit: 200 });
+      for (const b of all) {
+        if (b.isMainBranch && b.id !== input.id) {
+          await zite.branches.update({ id: b.id, record: { isMainBranch: false } });
+        }
+      }
+      record.isMainBranch = true;
+    } else if (input.isMainBranch === false) {
+      record.isMainBranch = false;
+    }
+
+    if (input.id) {
+      const updated = await zite.branches.update({ id: input.id, record });
+      return { success: true, branch: updated };
+    }
+
+    record.active = record.active ?? true;
+    const created = await zite.branches.create({ record });
+    return { success: true, branch: created };
+  },
+});
