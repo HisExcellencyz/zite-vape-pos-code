@@ -87,10 +87,15 @@ export default function AddressesPage() {
     setCoordinates(`${lat.toFixed(6)},${lng.toFixed(6)}`);
   };
 
-  const handleSearchSelect = (lat: number, lng: number, address: string) => {
+  // Handles both a place search and a Plus Code lookup — either way the
+  // shared LocationSearchBox (inside MapView) resolves it via Google Maps
+  // and hands back coordinates, the formatted address and, when available,
+  // the location's own Plus Code.
+  const handleSearchSelect = (lat: number, lng: number, address: string, plusCodeResult?: string) => {
     setSelectedPin({ lat, lng });
     setCoordinates(`${lat.toFixed(6)},${lng.toFixed(6)}`);
     if (!fullAddress) setFullAddress(address);
+    if (plusCodeResult) setPlusCode(plusCodeResult);
   };
 
   // Auto-pin when coordinates are typed
@@ -102,27 +107,6 @@ export default function AddressesPage() {
       const lng = parseFloat(parts[1]);
       if (isFinite(lat) && isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
         setSelectedPin({ lat, lng });
-      }
-    }
-  };
-
-  // Auto-pin when plus code is typed (geocode it)
-  const handlePlusCodeChange = (val: string) => {
-    setPlusCode(val);
-    // Plus codes look like "6GCRMQFG+R8" — at least 6 chars with a +
-    if (val.length >= 6 && val.includes('+')) {
-      const apiKey = import.meta.env.VITE_GOOGLEMAPS_API_KEY;
-      if (apiKey) {
-        fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(val)}&key=${apiKey}`)
-          .then(r => r.json())
-          .then(data => {
-            if (data.results?.[0]?.geometry?.location) {
-              const { lat, lng } = data.results[0].geometry.location;
-              setSelectedPin({ lat, lng });
-              setCoordinates(`${lat.toFixed(6)},${lng.toFixed(6)}`);
-            }
-          })
-          .catch(() => {});
       }
     }
   };
@@ -308,7 +292,7 @@ export default function AddressesPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label>Plus Code</Label>
-                <Input value={plusCode} onChange={e => handlePlusCodeChange(e.target.value)} placeholder="e.g. 6GCRMQFG+R8" />
+                <Input value={plusCode} onChange={e => setPlusCode(e.target.value)} placeholder="e.g. 6GCRMQFG+R8" />
               </div>
               <div>
                 <Label>Coordinates</Label>
@@ -316,13 +300,17 @@ export default function AddressesPage() {
               </div>
             </div>
             <div>
-              <Label className="text-xs text-muted-foreground">Click on the map or search to set location</Label>
+              <Label className="text-xs text-muted-foreground">
+                Search a place, or find it by Plus Code — both offer suggestions as you type and use Google Maps.
+                You can also click directly on the map.
+              </Label>
               <MapView
                 className="h-[200px]"
                 onClick={handleMapClick}
                 selectedPin={selectedPin}
                 center={selectedPin || undefined}
                 showSearch
+                showPlusCode
                 onSearchSelect={handleSearchSelect}
               />
             </div>
