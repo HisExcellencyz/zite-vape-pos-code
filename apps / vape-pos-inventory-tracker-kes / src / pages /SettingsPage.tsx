@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { getSettings, saveSettings, saveBranch } from 'zitejs/api';
+import { useState } from 'react';
+import { saveBranch } from 'zitejs/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
@@ -7,23 +7,13 @@ import { Label } from '@project/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@project/components/ui/tabs';
 import { Switch } from '@project/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
-import { Building2, Save, Palette, Store, Plus, Pencil, Check } from 'lucide-react';
+import { Palette, Store, Plus, Pencil, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { useBranch, Branch } from '../hooks/useBranch';
 
 const DEFAULT_LOGO = 'https://images.fillout.com/orgid-811092/flowpublicid-6hepsbbapu/widgetid-default/xmArbfbmsBwLWSE2d2Et7u/pasted-image-1788367385543-n4ulma8b.png';
 
 export default function SettingsPage() {
-  const [settingsId, setSettingsId] = useState<string | null>(null);
-  const [businessName, setBusinessName] = useState('Uptown Vapes');
-  const [address, setAddress] = useState('');
-  const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
-  const [taxId, setTaxId] = useState('');
-  const [defaultCurrency, setDefaultCurrency] = useState('KES');
-  const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(true);
-
   const { branches, currentBranch, setCurrentBranchId, refresh: refreshBranches } = useBranch();
   const [outletDialogOpen, setOutletDialogOpen] = useState(false);
   const [editingOutlet, setEditingOutlet] = useState<Branch | null>(null);
@@ -36,45 +26,6 @@ export default function SettingsPage() {
   const [outletIsMain, setOutletIsMain] = useState(false);
   const [outletActive, setOutletActive] = useState(true);
   const [savingOutlet, setSavingOutlet] = useState(false);
-
-  useEffect(() => {
-    getSettings({}).then(res => {
-      if (res.settings) {
-        const s = res.settings as any;
-        setSettingsId(s.id);
-        setBusinessName(s.businessName || 'Uptown Vapes');
-        setAddress(s.address || '');
-        setPhone(s.phone || '');
-        setEmail(s.email || '');
-        setTaxId(s.taxId || '');
-        setDefaultCurrency(s.defaultCurrency || 'KES');
-      }
-      setLoading(false);
-    });
-  }, []);
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      const res = await saveSettings({
-        id: settingsId || undefined,
-        businessName,
-        address: address || undefined,
-        phone: phone || undefined,
-        email: email || undefined,
-        taxId: taxId || undefined,
-        defaultCurrency: defaultCurrency || undefined,
-      });
-      if (!settingsId && res.settings) {
-        setSettingsId((res.settings as any).id);
-      }
-      toast.success('Settings saved');
-    } catch (e: any) {
-      toast.error(e.message || 'Failed');
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const openNewOutlet = () => {
     setEditingOutlet(null);
@@ -122,76 +73,25 @@ export default function SettingsPage() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="p-6 flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
-
   return (
     <div className="p-6 space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Settings</h1>
-        <p className="text-sm text-muted-foreground">Manage your business configuration</p>
+        <p className="text-sm text-muted-foreground">Manage your outlets and appearance</p>
       </div>
 
-      <Tabs defaultValue="business">
+      <Tabs defaultValue="outlets">
         <TabsList className="bg-muted">
-          <TabsTrigger value="business">Business Details</TabsTrigger>
           <TabsTrigger value="outlets">Outlets</TabsTrigger>
           <TabsTrigger value="theme">Theme</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="business" className="mt-4">
-          <Card className="bg-card border-border max-w-2xl">
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Building2 className="w-4 h-4 text-primary" /> Business Information
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label>Business Name *</Label>
-                  <Input value={businessName} onChange={e => setBusinessName(e.target.value)} />
-                </div>
-                <div>
-                  <Label>Default Currency</Label>
-                  <Input value={defaultCurrency} onChange={e => setDefaultCurrency(e.target.value)} />
-                </div>
-              </div>
-              <div>
-                <Label>Address</Label>
-                <Input value={address} onChange={e => setAddress(e.target.value)} placeholder="Business address" />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label>Phone</Label>
-                  <Input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+254..." />
-                </div>
-                <div>
-                  <Label>Email</Label>
-                  <Input value={email} onChange={e => setEmail(e.target.value)} placeholder="info@example.com" />
-                </div>
-              </div>
-              <div>
-                <Label>Tax ID / PIN</Label>
-                <Input value={taxId} onChange={e => setTaxId(e.target.value)} placeholder="e.g. P051234567X" />
-              </div>
-              <Button onClick={handleSave} disabled={saving} className="w-full sm:w-auto">
-                <Save className="w-4 h-4 mr-1" /> {saving ? 'Saving...' : 'Save Settings'}
-              </Button>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
         <TabsContent value="outlets" className="mt-4 space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <p className="text-sm text-muted-foreground max-w-xl">
-              Each outlet can have its own name, logo and cover photo, and can be switched between from the sidebar.
-              Reports on the Dashboard can be filtered to a single outlet.
+              Each outlet is independent, with its own name, address, logo and cover photo — there's no shared
+              business name across outlets. Switch between them from the sidebar, and the Dashboard can be
+              filtered to a single outlet at a time.
             </p>
             <Button size="sm" onClick={openNewOutlet}><Plus className="w-4 h-4 mr-1" /> Add Outlet</Button>
           </div>
