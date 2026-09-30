@@ -96,7 +96,7 @@ export default function SalesPage() {
       {viewMode === 'list' ? (
         <Card className="bg-card border-border">
           <CardContent className="p-0">
-            <div className="overflow-x-auto">
+            <div className="overflow-auto max-h-[65vh]">
               <table className="w-full text-sm">
                 <thead className="sticky top-0 z-10 bg-card">
                   <tr className="border-b border-border text-muted-foreground bg-card">
