@@ -123,7 +123,7 @@ export default function ExpensesPage() {
 
         <TabsContent value="purchases" className="mt-4">
           {viewMode === 'list' ? (
-            <Card className="bg-card border-border"><CardContent className="p-0"><div className="overflow-x-auto">
+            <Card className="bg-card border-border"><CardContent className="p-0"><div className="overflow-auto max-h-[65vh]">
               <table className="w-full text-sm">
                 <thead className="sticky top-0 z-10 bg-card"><tr className="border-b border-border text-muted-foreground bg-card">
                   <th className="text-left p-3 font-medium">#</th>
@@ -170,7 +170,7 @@ export default function ExpensesPage() {
 
         <TabsContent value="other" className="mt-4">
           {viewMode === 'list' ? (
-            <Card className="bg-card border-border"><CardContent className="p-0"><div className="overflow-x-auto">
+            <Card className="bg-card border-border"><CardContent className="p-0"><div className="overflow-auto max-h-[65vh]">
               <table className="w-full text-sm">
                 <thead className="sticky top-0 z-10 bg-card"><tr className="border-b border-border text-muted-foreground bg-card">
                   <th className="text-left p-3 font-medium">#</th>
@@ -216,7 +216,7 @@ export default function ExpensesPage() {
 
         <TabsContent value="income" className="mt-4">
           {viewMode === 'list' ? (
-            <Card className="bg-card border-border"><CardContent className="p-0"><div className="overflow-x-auto">
+            <Card className="bg-card border-border"><CardContent className="p-0"><div className="overflow-auto max-h-[65vh]">
               <table className="w-full text-sm">
                 <thead className="sticky top-0 z-10 bg-card"><tr className="border-b border-border text-muted-foreground bg-card">
                   <th className="text-left p-3 font-medium">#</th>
