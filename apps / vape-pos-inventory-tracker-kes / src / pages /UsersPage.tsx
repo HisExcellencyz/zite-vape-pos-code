@@ -279,7 +279,7 @@ export default function UsersPage() {
           ) : viewMode === 'list' ? (
             <Card>
               <CardContent className="p-0">
-                <div className="overflow-x-auto">
+                <div className="overflow-auto max-h-[65vh]">
                   <table className="w-full text-sm">
                     <thead className="sticky top-0 z-10 bg-card"><tr className="border-b border-border text-left text-muted-foreground bg-card">
                       <th className="p-3 font-medium">User</th>
@@ -363,7 +363,7 @@ export default function UsersPage() {
           ) : (
             <Card>
               <CardContent className="p-0">
-                <div className="overflow-x-auto">
+                <div className="overflow-auto max-h-[65vh]">
                   <table className="w-full text-sm">
                     <thead className="sticky top-0 z-10 bg-card"><tr className="border-b border-border text-left text-muted-foreground bg-card">
                       <th className="p-3 font-medium">Role</th>
