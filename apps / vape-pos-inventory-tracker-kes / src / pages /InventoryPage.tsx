@@ -312,8 +312,8 @@ export default function InventoryPage() {
           <CardContent className="p-0">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-muted-foreground">
+                <thead className="sticky top-0 z-10 bg-card">
+                  <tr className="border-b border-border text-muted-foreground bg-card">
                     <th className="p-3 w-8"><input type="checkbox" checked={selectedIds.size === products.length && products.length > 0} onChange={toggleAll} className="rounded" /></th>
                     <th className="text-left p-3 font-medium">Product</th>
                     <th className="text-left p-3 font-medium">SKU</th>
