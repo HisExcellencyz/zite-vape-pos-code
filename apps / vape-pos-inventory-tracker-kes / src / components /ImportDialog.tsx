@@ -3,7 +3,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
-import { FileDown, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Progress } from '@project/components/ui/progress';
+import { FileDown, CheckCircle2, AlertTriangle, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 import { parseCsv, downloadTemplate, TemplateKey } from '../lib/exportHelper';
 
@@ -29,6 +30,20 @@ interface Props {
   onDone?: () => void;
 }
 
+/** "1m 05s remaining" / "12s remaining" / "finishing up..." */
+function formatEta(seconds: number): string {
+  if (seconds <= 1) return 'finishing up...';
+  if (seconds < 60) return `about ${Math.round(seconds)}s remaining`;
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return `about ${m}m ${s.toString().padStart(2, '0')}s remaining`;
+}
+
+// Rough heuristic for the very first estimate, before any real batch has
+// completed to measure an actual rate against. Refined live once real
+// timing is available (see below).
+const ASSUMED_ROWS_PER_SECOND = 40;
+
 export default function ImportDialog({
   open, onOpenChange, title, description, template,
   optionLabel, optionDefault = false, chunkSize, onImport, onDone,
@@ -36,18 +51,25 @@ export default function ImportDialog({
   const [rows, setRows] = useState<Record<string, string>[]>([]);
   const [fileName, setFileName] = useState('');
   const [running, setRunning] = useState(false);
-  const [progress, setProgress] = useState('');
+  const [progressPct, setProgressPct] = useState(0);
+  const [etaSeconds, setEtaSeconds] = useState<number | null>(null);
+  const [progressLabel, setProgressLabel] = useState('');
   const [result, setResult] = useState<ImportSummary | null>(null);
   const [option, setOption] = useState(optionDefault);
   const inputRef = useRef<HTMLInputElement>(null);
+  const simulateTimer = useRef<ReturnType<typeof setInterval>>();
 
   useEffect(() => {
     if (!open) {
       setRows([]); setFileName(''); setResult(null);
-      setRunning(false); setProgress(''); setOption(optionDefault);
+      setRunning(false); setProgressPct(0); setEtaSeconds(null); setProgressLabel('');
+      setOption(optionDefault);
       if (inputRef.current) inputRef.current.value = '';
+      if (simulateTimer.current) clearInterval(simulateTimer.current);
     }
   }, [open]);
+
+  useEffect(() => () => { if (simulateTimer.current) clearInterval(simulateTimer.current); }, []);
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -71,24 +93,64 @@ export default function ImportDialog({
   const handleOk = async () => {
     if (rows.length === 0 || running) return;
     setRunning(true);
+    setProgressPct(0);
+    setResult(null);
+    const startedAt = Date.now();
+
     try {
       let total: ImportSummary = { imported: 0, updated: 0, skipped: 0, errors: [] };
-      const batches: Record<string, string>[][] = [];
+
       if (chunkSize && rows.length > chunkSize) {
+        // Real, measured progress: each batch is a data point, so after the
+        // first one completes the ETA is based on this file's own actual speed.
+        const batches: Record<string, string>[][] = [];
         for (let i = 0; i < rows.length; i += chunkSize) batches.push(rows.slice(i, i + chunkSize));
+
+        for (let i = 0; i < batches.length; i++) {
+          setProgressLabel(`Importing batch ${i + 1} of ${batches.length}...`);
+          if (i > 0) {
+            const elapsedMs = Date.now() - startedAt;
+            const avgMsPerBatch = elapsedMs / i;
+            const remainingBatches = batches.length - i;
+            setEtaSeconds((avgMsPerBatch * remainingBatches) / 1000);
+          } else {
+            // Before we have a real measurement, estimate from row count.
+            setEtaSeconds(rows.length / ASSUMED_ROWS_PER_SECOND);
+          }
+          setProgressPct(Math.round((i / batches.length) * 100));
+
+          const r = await onImport(batches[i], option);
+          total = {
+            imported: total.imported + (r.imported || 0),
+            updated: (total.updated || 0) + (r.updated || 0),
+            skipped: (total.skipped || 0) + (r.skipped || 0),
+            errors: [...total.errors, ...(r.errors || [])],
+          };
+        }
+        setProgressPct(100);
+        setEtaSeconds(0);
       } else {
-        batches.push(rows);
+        // A single request with no per-batch feedback from the server, so the
+        // bar is simulated: it climbs toward an estimated duration (based on
+        // row count) and settles at 100% only once the real response lands.
+        setProgressLabel('Importing...');
+        const estimateSeconds = Math.max(2, rows.length / ASSUMED_ROWS_PER_SECOND);
+        setEtaSeconds(estimateSeconds);
+        let elapsedMs = 0;
+        simulateTimer.current = setInterval(() => {
+          elapsedMs += 200;
+          const pct = Math.min(92, Math.round((elapsedMs / (estimateSeconds * 1000)) * 92));
+          setProgressPct(pct);
+          setEtaSeconds(Math.max(0.5, estimateSeconds - elapsedMs / 1000));
+        }, 200);
+
+        const r = await onImport(rows, option);
+        if (simulateTimer.current) clearInterval(simulateTimer.current);
+        setProgressPct(100);
+        setEtaSeconds(0);
+        total = { imported: r.imported || 0, updated: r.updated || 0, skipped: r.skipped || 0, errors: r.errors || [] };
       }
-      for (let i = 0; i < batches.length; i++) {
-        if (batches.length > 1) setProgress(`Importing batch ${i + 1} of ${batches.length}...`);
-        const r = await onImport(batches[i], option);
-        total = {
-          imported: total.imported + (r.imported || 0),
-          updated: (total.updated || 0) + (r.updated || 0),
-          skipped: (total.skipped || 0) + (r.skipped || 0),
-          errors: [...total.errors, ...(r.errors || [])],
-        };
-      }
+
       setResult(total);
       if (total.imported + (total.updated || 0) > 0) {
         toast.success(`Imported ${total.imported}${total.updated ? `, updated ${total.updated}` : ''}`);
@@ -99,8 +161,9 @@ export default function ImportDialog({
     } catch (err: any) {
       toast.error(err.message || 'Import failed');
     } finally {
+      if (simulateTimer.current) clearInterval(simulateTimer.current);
       setRunning(false);
-      setProgress('');
+      setProgressLabel('');
     }
   };
 
@@ -115,6 +178,7 @@ export default function ImportDialog({
             type="button" variant="outline" size="sm"
             className="border-yellow-500 text-yellow-400 hover:bg-yellow-500/10"
             onClick={() => downloadTemplate(template)}
+            disabled={running}
           >
             <FileDown className="w-4 h-4 mr-1" /> Download Template
           </Button>
@@ -122,7 +186,7 @@ export default function ImportDialog({
           <div>
             <Label className="text-sm mb-1 block">Select CSV file</Label>
             <Input ref={inputRef} type="file" accept=".csv,.txt" onChange={handleFile} disabled={running} />
-            {fileName && (
+            {fileName && !running && !result && (
               <p className="text-xs text-muted-foreground mt-1 break-all">
                 {fileName} — {rows.length} row{rows.length === 1 ? '' : 's'} ready
               </p>
@@ -136,7 +200,20 @@ export default function ImportDialog({
             </label>
           )}
 
-          {progress && <p className="text-sm text-primary">{progress}</p>}
+          {running && (
+            <div className="space-y-2 rounded-lg border border-border p-3">
+              <Progress value={progressPct} />
+              <div className="flex items-center justify-between text-xs text-muted-foreground gap-2">
+                <span className="break-words">{progressLabel || 'Importing...'}</span>
+                <span className="shrink-0 font-medium text-foreground">{progressPct}%</span>
+              </div>
+              {etaSeconds !== null && (
+                <p className="flex items-center gap-1.5 text-xs text-primary">
+                  <Clock className="w-3.5 h-3.5 shrink-0" /> {formatEta(etaSeconds)}
+                </p>
+              )}
+            </div>
+          )}
 
           {result && (
             <div className="rounded-lg border border-border p-3 space-y-2 text-sm">
