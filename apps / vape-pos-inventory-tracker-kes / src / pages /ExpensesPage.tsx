@@ -125,7 +125,7 @@ export default function ExpensesPage() {
           {viewMode === 'list' ? (
             <Card className="bg-card border-border"><CardContent className="p-0"><div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead><tr className="border-b border-border text-muted-foreground">
+                <thead className="sticky top-0 z-10 bg-card"><tr className="border-b border-border text-muted-foreground bg-card">
                   <th className="text-left p-3 font-medium">#</th>
                   <th className="text-left p-3 font-medium">Date</th>
                   <th className="text-left p-3 font-medium">Payment</th>
@@ -146,7 +146,7 @@ export default function ExpensesPage() {
               </table>
             </div></CardContent></Card>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
               {purchases.length === 0 ? (
                 <Card className="col-span-full bg-card border-border"><CardContent className="py-8 text-center text-muted-foreground">No purchases</CardContent></Card>
               ) : purchases.map(p => (
@@ -172,7 +172,7 @@ export default function ExpensesPage() {
           {viewMode === 'list' ? (
             <Card className="bg-card border-border"><CardContent className="p-0"><div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead><tr className="border-b border-border text-muted-foreground">
+                <thead className="sticky top-0 z-10 bg-card"><tr className="border-b border-border text-muted-foreground bg-card">
                   <th className="text-left p-3 font-medium">#</th>
                   <th className="text-left p-3 font-medium">Date</th>
                   <th className="text-left p-3 font-medium">Description</th>
@@ -193,7 +193,7 @@ export default function ExpensesPage() {
               </table>
             </div></CardContent></Card>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
               {expenses.length === 0 ? (
                 <Card className="col-span-full bg-card border-border"><CardContent className="py-8 text-center text-muted-foreground">No expenses</CardContent></Card>
               ) : expenses.map(e => (
@@ -218,7 +218,7 @@ export default function ExpensesPage() {
           {viewMode === 'list' ? (
             <Card className="bg-card border-border"><CardContent className="p-0"><div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead><tr className="border-b border-border text-muted-foreground">
+                <thead className="sticky top-0 z-10 bg-card"><tr className="border-b border-border text-muted-foreground bg-card">
                   <th className="text-left p-3 font-medium">#</th>
                   <th className="text-left p-3 font-medium">Date</th>
                   <th className="text-left p-3 font-medium">Description</th>
@@ -239,7 +239,7 @@ export default function ExpensesPage() {
               </table>
             </div></CardContent></Card>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
               {income.length === 0 ? (
                 <Card className="col-span-full bg-card border-border"><CardContent className="py-8 text-center text-muted-foreground">No other income recorded</CardContent></Card>
               ) : income.map(i => (
