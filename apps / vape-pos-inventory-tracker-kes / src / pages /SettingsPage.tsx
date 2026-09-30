@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { saveBranch } from 'zitejs/api';
+import { useState, useEffect } from 'react';
+import { saveBranch, consolidateOutlets, getSettings, saveSettings, syncToGoogleSheets, monthlyArchival } from 'zitejs/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
@@ -7,11 +7,18 @@ import { Label } from '@project/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@project/components/ui/tabs';
 import { Switch } from '@project/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
-import { Palette, Store, Plus, Pencil, Check } from 'lucide-react';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
+import { Palette, Store, Plus, Pencil, Check, Merge, FileSpreadsheet, Archive, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { useBranch, Branch } from '../hooks/useBranch';
 
 const DEFAULT_LOGO = 'https://images.fillout.com/orgid-811092/flowpublicid-6hepsbbapu/widgetid-default/xmArbfbmsBwLWSE2d2Et7u/pasted-image-1788367385543-n4ulma8b.png';
+
+// businessSettings still exists as a table but is no longer presented as a
+// single "umbrella business" identity — it's now just where free-form
+// integration config (Google Sheets webhook, archival email) is kept,
+// mirroring the same customFields pattern used elsewhere in this app.
+const FALLBACK_SETTINGS_NAME = 'App Settings';
 
 export default function SettingsPage() {
   const { branches, currentBranch, setCurrentBranchId, refresh: refreshBranches } = useBranch();
@@ -26,6 +33,35 @@ export default function SettingsPage() {
   const [outletIsMain, setOutletIsMain] = useState(false);
   const [outletActive, setOutletActive] = useState(true);
   const [savingOutlet, setSavingOutlet] = useState(false);
+  const [consolidating, setConsolidating] = useState(false);
+  const [mainOutletName, setMainOutletName] = useState('Uptown Vapes');
+
+  // Integrations tab
+  const [settingsId, setSettingsId] = useState<string | undefined>();
+  const [settingsBusinessName, setSettingsBusinessName] = useState<string>(FALLBACK_SETTINGS_NAME);
+  const [settingsEmail, setSettingsEmail] = useState('');
+  const [sheetsWebhookUrl, setSheetsWebhookUrl] = useState('');
+  const [archivalEmail, setArchivalEmail] = useState('');
+  const [loadingIntegrations, setLoadingIntegrations] = useState(true);
+  const [savingIntegrations, setSavingIntegrations] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [sendingArchival, setSendingArchival] = useState(false);
+
+  useEffect(() => {
+    getSettings({}).then(res => {
+      const s = res.settings as any;
+      if (s) {
+        setSettingsId(s.id);
+        setSettingsBusinessName(s.businessName || FALLBACK_SETTINGS_NAME);
+        setSettingsEmail(s.email || '');
+        let cfg: any = {};
+        try { cfg = s.customFields ? JSON.parse(s.customFields) : {}; } catch {}
+        setSheetsWebhookUrl(cfg.googleSheetsWebhookUrl || '');
+        setArchivalEmail(cfg.archivalEmail || '');
+      }
+      setLoadingIntegrations(false);
+    }).catch(() => setLoadingIntegrations(false));
+  }, []);
 
   const openNewOutlet = () => {
     setEditingOutlet(null);
@@ -73,16 +109,77 @@ export default function SettingsPage() {
     }
   };
 
+  const handleConsolidate = async () => {
+    if (!mainOutletName.trim()) return toast.error('Enter the outlet name to consolidate into');
+    setConsolidating(true);
+    try {
+      const res = await consolidateOutlets({ mainOutletName: mainOutletName.trim() });
+      const movedTotal = Object.values(res.moved).reduce((a, b) => a + b, 0);
+      toast.success(`Moved ${movedTotal} records to "${mainOutletName.trim()}". ${res.resetOutlets} other outlet(s) reset to blank.`);
+      await refreshBranches();
+      setCurrentBranchId(res.branchId);
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to consolidate outlets');
+    } finally {
+      setConsolidating(false);
+    }
+  };
+
+  const handleSaveIntegrations = async () => {
+    setSavingIntegrations(true);
+    try {
+      const res = await saveSettings({
+        id: settingsId,
+        businessName: settingsBusinessName || FALLBACK_SETTINGS_NAME,
+        email: settingsEmail || undefined,
+        customFields: JSON.stringify({ googleSheetsWebhookUrl: sheetsWebhookUrl, archivalEmail }),
+      });
+      if (!settingsId && res.settings) setSettingsId((res.settings as any).id);
+      toast.success('Integration settings saved');
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to save');
+    } finally {
+      setSavingIntegrations(false);
+    }
+  };
+
+  const handleSyncNow = async () => {
+    if (!sheetsWebhookUrl.trim()) return toast.error('Add a Google Sheets webhook URL first');
+    setSyncing(true);
+    try {
+      const res = await syncToGoogleSheets({ webhookUrl: sheetsWebhookUrl.trim() });
+      toast.success(res.message);
+    } catch (e: any) {
+      toast.error(e.message || 'Sync failed');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleSendArchivalNow = async () => {
+    if (!archivalEmail.trim()) return toast.error('Add an archival recipient email first');
+    setSendingArchival(true);
+    try {
+      const res = await monthlyArchival({ recipientEmail: archivalEmail.trim() });
+      toast.success(res.message);
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to send archival');
+    } finally {
+      setSendingArchival(false);
+    }
+  };
+
   return (
     <div className="p-6 space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Settings</h1>
-        <p className="text-sm text-muted-foreground">Manage your outlets and appearance</p>
+        <p className="text-sm text-muted-foreground">Manage your outlets, integrations and appearance</p>
       </div>
 
       <Tabs defaultValue="outlets">
         <TabsList className="bg-muted">
           <TabsTrigger value="outlets">Outlets</TabsTrigger>
+          <TabsTrigger value="integrations">Integrations</TabsTrigger>
           <TabsTrigger value="theme">Theme</TabsTrigger>
         </TabsList>
 
@@ -122,6 +219,46 @@ export default function SettingsPage() {
               </Card>
             ))}
           </div>
+
+          <Card className="bg-card border-border max-w-2xl">
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Merge className="w-4 h-4 text-amber-400" /> Consolidate to one outlet
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Moves every sale, purchase, purchase order, expense, income entry, deposit and product onto a single
+                named outlet (creating it if it doesn't exist yet, and making it the main outlet). Every other
+                outlet is reset — name, address, phone, tax ID, logo and cover photo cleared — so it sits blank and
+                unused, ready to be set up fresh later. This cannot be undone.
+              </p>
+              <div>
+                <Label>Outlet to consolidate into</Label>
+                <Input value={mainOutletName} onChange={e => setMainOutletName(e.target.value)} placeholder="Uptown Vapes" />
+              </div>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="outline" className="border-amber-500 text-amber-400 hover:bg-amber-500/10" disabled={consolidating}>
+                    <Merge className="w-4 h-4 mr-1" /> {consolidating ? 'Consolidating...' : 'Consolidate Now'}
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Move all records to "{mainOutletName.trim() || 'this outlet'}"?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Every branch-linked record across the app will be reassigned to this outlet, and every other
+                      outlet will be reset to blank. This cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleConsolidate} className="bg-amber-500 hover:bg-amber-600">Consolidate</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </CardContent>
+          </Card>
 
           <Dialog open={outletDialogOpen} onOpenChange={setOutletDialogOpen}>
             <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
@@ -176,6 +313,70 @@ export default function SettingsPage() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
+        </TabsContent>
+
+        <TabsContent value="integrations" className="mt-4 space-y-4">
+          {loadingIntegrations ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : (
+            <>
+              <Card className="bg-card border-border max-w-2xl">
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-400" /> Google Sheets export
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <p className="text-sm text-muted-foreground">
+                    One-way push of products, customers, suppliers, sales, purchases, expenses and income to a
+                    Google Sheet. This app has no built-in Google Sheets connection, so it posts to a webhook URL —
+                    set up a Google Apps Script "Web App" bound to your Sheet that accepts a POST and appends the
+                    rows, then paste its URL here.
+                  </p>
+                  <div>
+                    <Label>Google Sheets webhook URL</Label>
+                    <Input value={sheetsWebhookUrl} onChange={e => setSheetsWebhookUrl(e.target.value)} placeholder="https://script.google.com/macros/s/.../exec" />
+                  </div>
+                  <div className="flex gap-2 flex-wrap">
+                    <Button size="sm" onClick={handleSaveIntegrations} disabled={savingIntegrations}>
+                      <Save className="w-3.5 h-3.5 mr-1" /> {savingIntegrations ? 'Saving...' : 'Save'}
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={handleSyncNow} disabled={syncing}>
+                      {syncing ? 'Syncing...' : 'Sync Now'}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="bg-card border-border max-w-2xl">
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Archive className="w-4 h-4 text-secondary" /> Monthly archival
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <p className="text-sm text-muted-foreground">
+                    Emails a CSV snapshot of sales, purchases, other expenses, other income and stock levels,
+                    automatically on the 1st of each month, to the address below. You can also send one immediately.
+                  </p>
+                  <div>
+                    <Label>Archival recipient email</Label>
+                    <Input value={archivalEmail} onChange={e => setArchivalEmail(e.target.value)} placeholder="owner@example.com" type="email" />
+                  </div>
+                  <div className="flex gap-2 flex-wrap">
+                    <Button size="sm" onClick={handleSaveIntegrations} disabled={savingIntegrations}>
+                      <Save className="w-3.5 h-3.5 mr-1" /> {savingIntegrations ? 'Saving...' : 'Save'}
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={handleSendArchivalNow} disabled={sendingArchival}>
+                      {sendingArchival ? 'Sending...' : 'Send Archival Now'}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          )}
         </TabsContent>
 
         <TabsContent value="theme" className="mt-4">
