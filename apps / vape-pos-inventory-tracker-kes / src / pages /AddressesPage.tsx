@@ -182,7 +182,7 @@ export default function AddressesPage() {
       )}
 
       {viewMode === 'grid' ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-3 grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
           {loading ? (
             [...Array(3)].map((_, i) => (
               <Card key={i} className="bg-card border-border"><CardContent className="p-4"><div className="h-16 bg-muted rounded animate-pulse" /></CardContent></Card>
@@ -219,8 +219,8 @@ export default function AddressesPage() {
           <CardContent className="p-0">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-muted-foreground">
+                <thead className="sticky top-0 z-10 bg-card">
+                  <tr className="border-b border-border text-muted-foreground bg-card">
                     <th className="text-left p-3 font-medium">Name</th>
                     <th className="text-left p-3 font-medium">Type</th>
                     <th className="text-left p-3 font-medium">Full Address</th>
