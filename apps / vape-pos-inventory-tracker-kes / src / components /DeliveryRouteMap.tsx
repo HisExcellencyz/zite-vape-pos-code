@@ -5,9 +5,10 @@ import { Input } from '@project/components/ui/input';
 import { Button } from '@project/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { Label } from '@project/components/ui/label';
-import { Trash2, MapPin, BookMarked } from 'lucide-react';
+import { Trash2, MapPin, BookMarked, Loader2 } from 'lucide-react';
 import LocationSearchBox from './LocationSearchBox';
 import { geocode } from '../lib/geocode';
+import { getShortestRidingDistanceKm, RoadDistanceResult } from '../lib/distance';
 
 export interface RoutePoint {
   id: string;
@@ -38,6 +39,12 @@ const tagLabels: Record<string, string> = {
   end: 'End',
 };
 
+const distanceModeLabels: Record<RoadDistanceResult['mode'], string> = {
+  TWO_WHEELER: 'shortest riding distance',
+  BICYCLE: 'shortest cycling distance',
+  'straight-line': 'straight-line estimate — road routing unavailable',
+};
+
 let nextId = 1;
 function genId() { return `rp_${nextId++}_${Date.now()}`; }
 
@@ -58,6 +65,8 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
   const [error, setError] = useState<string>();
   const [coordsInput, setCoordsInput] = useState('');
   const [savedAddresses, setSavedAddresses] = useState<SavedAddr[]>([]);
+  const [distanceMode, setDistanceMode] = useState<RoadDistanceResult['mode'] | null>(null);
+  const [calculatingDistance, setCalculatingDistance] = useState(false);
 
   const apiKey = import.meta.env.VITE_GOOGLEMAPS_API_KEY;
 
@@ -124,14 +133,6 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
         path, geodesic: false, strokeColor: '#3b82f6', strokeOpacity: 0.8, strokeWeight: 3, map,
       });
       polylinesRef.current.push(polyline);
-
-      let totalDist = 0;
-      for (let i = 0; i < path.length - 1; i++) {
-        totalDist += haversine(path[i].lat, path[i].lng, path[i + 1].lat, path[i + 1].lng);
-      }
-      onDistanceChange(Math.round(totalDist * 100) / 100);
-    } else {
-      onDistanceChange(0);
     }
 
     if (points.length > 0) {
@@ -141,6 +142,39 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
       if (points.length === 1) map.setZoom(15);
     }
   }, [points]);
+
+  // Recompute the actual road distance (not straight-line) whenever the
+  // stops change. This calls Google's Routes API with TWO_WHEELER first,
+  // falling back to BICYCLE, and finally to a labelled straight-line
+  // estimate if neither road mode is available for this route.
+  useEffect(() => {
+    let cancelled = false;
+
+    if (points.length < 2) {
+      setDistanceMode(null);
+      onDistanceChange(0);
+      return;
+    }
+
+    setCalculatingDistance(true);
+    getShortestRidingDistanceKm(points, apiKey)
+      .then(result => {
+        if (cancelled) return;
+        onDistanceChange(result.km);
+        setDistanceMode(result.mode);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        onDistanceChange(0);
+        setDistanceMode(null);
+      })
+      .finally(() => {
+        if (!cancelled) setCalculatingDistance(false);
+      });
+
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [points, apiKey]);
 
   const handleCoordsAdd = () => {
     const parts = coordsInput.split(',').map(s => s.trim());
@@ -250,19 +284,21 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
 
       {/* Total distance */}
       {points.length >= 2 && (
-        <div className="flex items-center justify-between bg-primary/10 rounded-md px-3 py-2">
-          <span className="text-xs font-medium text-foreground">Total Distance</span>
-          <span className="text-sm font-bold text-primary">{totalDistance.toFixed(2)} km</span>
+        <div className="rounded-md bg-primary/10 px-3 py-2 space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-foreground">Total Distance</span>
+            <span className="text-sm font-bold text-primary flex items-center gap-1.5">
+              {calculatingDistance && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              {totalDistance.toFixed(2)} km
+            </span>
+          </div>
+          {distanceMode && !calculatingDistance && (
+            <p className="text-[10px] text-muted-foreground text-right">
+              {distanceModeLabels[distanceMode]}
+            </p>
+          )}
         </div>
       )}
     </div>
   );
-}
-
-function haversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
