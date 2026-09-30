@@ -281,7 +281,7 @@ export default function UsersPage() {
               <CardContent className="p-0">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
-                    <thead><tr className="border-b border-border text-left text-muted-foreground">
+                    <thead className="sticky top-0 z-10 bg-card"><tr className="border-b border-border text-left text-muted-foreground bg-card">
                       <th className="p-3 font-medium">User</th>
                       <th className="p-3 font-medium">Email</th>
                       <th className="p-3 font-medium">Status</th>
@@ -304,7 +304,7 @@ export default function UsersPage() {
               </CardContent>
             </Card>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
               {filtered.map(u => (
                 <Card key={u.id} className="bg-card border-border">
                   <CardContent className="p-4 space-y-3">
@@ -365,7 +365,7 @@ export default function UsersPage() {
               <CardContent className="p-0">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
-                    <thead><tr className="border-b border-border text-left text-muted-foreground">
+                    <thead className="sticky top-0 z-10 bg-card"><tr className="border-b border-border text-left text-muted-foreground bg-card">
                       <th className="p-3 font-medium">Role</th>
                       <th className="p-3 font-medium">Description</th>
                       <th className="p-3 font-medium">Default</th>
