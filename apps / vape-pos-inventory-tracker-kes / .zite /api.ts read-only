@@ -2,9 +2,13 @@
 
 import { createCaller } from 'zitejs/caller';
 
+import type { default as _ApplySaleDeductionsEp } from '../src/api/applySaleDeductions';
 import type { default as _AssignRoleEp } from '../src/api/assignRole';
+import type { default as _BulkDeleteRecordsEp } from '../src/api/bulkDeleteRecords';
+import type { default as _BulkUpdateCategoriesEp } from '../src/api/bulkUpdateCategories';
 import type { default as _BulkUpdateProductsEp } from '../src/api/bulkUpdateProducts';
 import type { default as _CreateExpenseEp } from '../src/api/createExpense';
+import type { default as _CreateIncomeEp } from '../src/api/createIncome';
 import type { default as _CreatePurchaseEp } from '../src/api/createPurchase';
 import type { default as _CreateSaleEp } from '../src/api/createSale';
 import type { default as _DeleteRecordEp } from '../src/api/deleteRecord';
@@ -12,11 +16,14 @@ import type { default as _ExportCsvEp } from '../src/api/exportCsv';
 import type { default as _ExportLpoCsvEp } from '../src/api/exportLpoCsv';
 import type { default as _GenerateLpoPdfEp } from '../src/api/generateLpoPdf';
 import type { default as _GetAddressesEp } from '../src/api/getAddresses';
+import type { default as _GetBranchesEp } from '../src/api/getBranches';
 import type { default as _GetCategoriesEp } from '../src/api/getCategories';
 import type { default as _GetCustomerDetailsEp } from '../src/api/getCustomerDetails';
 import type { default as _GetCustomersEp } from '../src/api/getCustomers';
 import type { default as _GetDashboardEp } from '../src/api/getDashboard';
 import type { default as _GetExpensesEp } from '../src/api/getExpenses';
+import type { default as _GetIncomeEp } from '../src/api/getIncome';
+import type { default as _GetInventoryValuationEp } from '../src/api/getInventoryValuation';
 import type { default as _GetMyPermissionsEp } from '../src/api/getMyPermissions';
 import type { default as _GetProductsEp } from '../src/api/getProducts';
 import type { default as _GetPurchaseOrdersEp } from '../src/api/getPurchaseOrders';
@@ -28,9 +35,15 @@ import type { default as _GetSupplierDetailsEp } from '../src/api/getSupplierDet
 import type { default as _GetSuppliersEp } from '../src/api/getSuppliers';
 import type { default as _GetUsersEp } from '../src/api/getUsers';
 import type { default as _ImportCsvEp } from '../src/api/importCsv';
+import type { default as _ImportLposEp } from '../src/api/importLpos';
+import type { default as _ImportPurchasesEp } from '../src/api/importPurchases';
+import type { default as _ImportSalesEp } from '../src/api/importSales';
 import type { default as _InviteUserEp } from '../src/api/inviteUser';
+import type { default as _MonthlyArchivalEp } from '../src/api/monthlyArchival';
 import type { default as _RecordDepositEp } from '../src/api/recordDeposit';
+import type { default as _RevokeInviteEp } from '../src/api/revokeInvite';
 import type { default as _SaveAddressEp } from '../src/api/saveAddress';
+import type { default as _SaveBranchEp } from '../src/api/saveBranch';
 import type { default as _SaveCategoryEp } from '../src/api/saveCategory';
 import type { default as _SaveCustomerEp } from '../src/api/saveCustomer';
 import type { default as _SaveProductEp } from '../src/api/saveProduct';
@@ -38,12 +51,29 @@ import type { default as _SavePurchaseOrderEp } from '../src/api/savePurchaseOrd
 import type { default as _SaveRoleEp } from '../src/api/saveRole';
 import type { default as _SaveSettingsEp } from '../src/api/saveSettings';
 import type { default as _SaveSupplierEp } from '../src/api/saveSupplier';
+import type { default as _SyncToGoogleSheetsEp } from '../src/api/syncToGoogleSheets';
+import type { default as _UploadProductImageEp } from '../src/api/uploadProductImage';
 import type { default as _VerifyPurchaseOrderEp } from '../src/api/verifyPurchaseOrder';
+
+type _ApplySaleDeductionsCfg = typeof _ApplySaleDeductionsEp;
+export type ApplySaleDeductionsInputType = NonNullable<_ApplySaleDeductionsCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_ApplySaleDeductionsCfg['execute']>[0]['input'];
+export type ApplySaleDeductionsOutputType = Awaited<ReturnType<_ApplySaleDeductionsCfg['execute']>>;
+export const applySaleDeductions = createCaller<ApplySaleDeductionsInputType, ApplySaleDeductionsOutputType>('applySaleDeductions');
 
 type _AssignRoleCfg = typeof _AssignRoleEp;
 export type AssignRoleInputType = NonNullable<_AssignRoleCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_AssignRoleCfg['execute']>[0]['input'];
 export type AssignRoleOutputType = Awaited<ReturnType<_AssignRoleCfg['execute']>>;
 export const assignRole = createCaller<AssignRoleInputType, AssignRoleOutputType>('assignRole');
+
+type _BulkDeleteRecordsCfg = typeof _BulkDeleteRecordsEp;
+export type BulkDeleteRecordsInputType = NonNullable<_BulkDeleteRecordsCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_BulkDeleteRecordsCfg['execute']>[0]['input'];
+export type BulkDeleteRecordsOutputType = Awaited<ReturnType<_BulkDeleteRecordsCfg['execute']>>;
+export const bulkDeleteRecords = createCaller<BulkDeleteRecordsInputType, BulkDeleteRecordsOutputType>('bulkDeleteRecords');
+
+type _BulkUpdateCategoriesCfg = typeof _BulkUpdateCategoriesEp;
+export type BulkUpdateCategoriesInputType = NonNullable<_BulkUpdateCategoriesCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_BulkUpdateCategoriesCfg['execute']>[0]['input'];
+export type BulkUpdateCategoriesOutputType = Awaited<ReturnType<_BulkUpdateCategoriesCfg['execute']>>;
+export const bulkUpdateCategories = createCaller<BulkUpdateCategoriesInputType, BulkUpdateCategoriesOutputType>('bulkUpdateCategories');
 
 type _BulkUpdateProductsCfg = typeof _BulkUpdateProductsEp;
 export type BulkUpdateProductsInputType = NonNullable<_BulkUpdateProductsCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_BulkUpdateProductsCfg['execute']>[0]['input'];
@@ -54,6 +84,11 @@ type _CreateExpenseCfg = typeof _CreateExpenseEp;
 export type CreateExpenseInputType = NonNullable<_CreateExpenseCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_CreateExpenseCfg['execute']>[0]['input'];
 export type CreateExpenseOutputType = Awaited<ReturnType<_CreateExpenseCfg['execute']>>;
 export const createExpense = createCaller<CreateExpenseInputType, CreateExpenseOutputType>('createExpense');
+
+type _CreateIncomeCfg = typeof _CreateIncomeEp;
+export type CreateIncomeInputType = NonNullable<_CreateIncomeCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_CreateIncomeCfg['execute']>[0]['input'];
+export type CreateIncomeOutputType = Awaited<ReturnType<_CreateIncomeCfg['execute']>>;
+export const createIncome = createCaller<CreateIncomeInputType, CreateIncomeOutputType>('createIncome');
 
 type _CreatePurchaseCfg = typeof _CreatePurchaseEp;
 export type CreatePurchaseInputType = NonNullable<_CreatePurchaseCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_CreatePurchaseCfg['execute']>[0]['input'];
@@ -90,6 +125,11 @@ export type GetAddressesInputType = NonNullable<_GetAddressesCfg['inputSchema']>
 export type GetAddressesOutputType = Awaited<ReturnType<_GetAddressesCfg['execute']>>;
 export const getAddresses = createCaller<GetAddressesInputType, GetAddressesOutputType>('getAddresses');
 
+type _GetBranchesCfg = typeof _GetBranchesEp;
+export type GetBranchesInputType = NonNullable<_GetBranchesCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_GetBranchesCfg['execute']>[0]['input'];
+export type GetBranchesOutputType = Awaited<ReturnType<_GetBranchesCfg['execute']>>;
+export const getBranches = createCaller<GetBranchesInputType, GetBranchesOutputType>('getBranches');
+
 type _GetCategoriesCfg = typeof _GetCategoriesEp;
 export type GetCategoriesInputType = NonNullable<_GetCategoriesCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_GetCategoriesCfg['execute']>[0]['input'];
 export type GetCategoriesOutputType = Awaited<ReturnType<_GetCategoriesCfg['execute']>>;
@@ -114,6 +154,16 @@ type _GetExpensesCfg = typeof _GetExpensesEp;
 export type GetExpensesInputType = NonNullable<_GetExpensesCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_GetExpensesCfg['execute']>[0]['input'];
 export type GetExpensesOutputType = Awaited<ReturnType<_GetExpensesCfg['execute']>>;
 export const getExpenses = createCaller<GetExpensesInputType, GetExpensesOutputType>('getExpenses');
+
+type _GetIncomeCfg = typeof _GetIncomeEp;
+export type GetIncomeInputType = NonNullable<_GetIncomeCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_GetIncomeCfg['execute']>[0]['input'];
+export type GetIncomeOutputType = Awaited<ReturnType<_GetIncomeCfg['execute']>>;
+export const getIncome = createCaller<GetIncomeInputType, GetIncomeOutputType>('getIncome');
+
+type _GetInventoryValuationCfg = typeof _GetInventoryValuationEp;
+export type GetInventoryValuationInputType = NonNullable<_GetInventoryValuationCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_GetInventoryValuationCfg['execute']>[0]['input'];
+export type GetInventoryValuationOutputType = Awaited<ReturnType<_GetInventoryValuationCfg['execute']>>;
+export const getInventoryValuation = createCaller<GetInventoryValuationInputType, GetInventoryValuationOutputType>('getInventoryValuation');
 
 type _GetMyPermissionsCfg = typeof _GetMyPermissionsEp;
 export type GetMyPermissionsInputType = NonNullable<_GetMyPermissionsCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_GetMyPermissionsCfg['execute']>[0]['input'];
@@ -170,20 +220,50 @@ export type ImportCsvInputType = NonNullable<_ImportCsvCfg['inputSchema']> exten
 export type ImportCsvOutputType = Awaited<ReturnType<_ImportCsvCfg['execute']>>;
 export const importCsv = createCaller<ImportCsvInputType, ImportCsvOutputType>('importCsv');
 
+type _ImportLposCfg = typeof _ImportLposEp;
+export type ImportLposInputType = NonNullable<_ImportLposCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_ImportLposCfg['execute']>[0]['input'];
+export type ImportLposOutputType = Awaited<ReturnType<_ImportLposCfg['execute']>>;
+export const importLpos = createCaller<ImportLposInputType, ImportLposOutputType>('importLpos');
+
+type _ImportPurchasesCfg = typeof _ImportPurchasesEp;
+export type ImportPurchasesInputType = NonNullable<_ImportPurchasesCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_ImportPurchasesCfg['execute']>[0]['input'];
+export type ImportPurchasesOutputType = Awaited<ReturnType<_ImportPurchasesCfg['execute']>>;
+export const importPurchases = createCaller<ImportPurchasesInputType, ImportPurchasesOutputType>('importPurchases');
+
+type _ImportSalesCfg = typeof _ImportSalesEp;
+export type ImportSalesInputType = NonNullable<_ImportSalesCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_ImportSalesCfg['execute']>[0]['input'];
+export type ImportSalesOutputType = Awaited<ReturnType<_ImportSalesCfg['execute']>>;
+export const importSales = createCaller<ImportSalesInputType, ImportSalesOutputType>('importSales');
+
 type _InviteUserCfg = typeof _InviteUserEp;
 export type InviteUserInputType = NonNullable<_InviteUserCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_InviteUserCfg['execute']>[0]['input'];
 export type InviteUserOutputType = Awaited<ReturnType<_InviteUserCfg['execute']>>;
 export const inviteUser = createCaller<InviteUserInputType, InviteUserOutputType>('inviteUser');
+
+type _MonthlyArchivalCfg = typeof _MonthlyArchivalEp;
+export type MonthlyArchivalInputType = NonNullable<_MonthlyArchivalCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_MonthlyArchivalCfg['execute']>[0]['input'];
+export type MonthlyArchivalOutputType = Awaited<ReturnType<_MonthlyArchivalCfg['execute']>>;
+export const monthlyArchival = createCaller<MonthlyArchivalInputType, MonthlyArchivalOutputType>('monthlyArchival');
 
 type _RecordDepositCfg = typeof _RecordDepositEp;
 export type RecordDepositInputType = NonNullable<_RecordDepositCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_RecordDepositCfg['execute']>[0]['input'];
 export type RecordDepositOutputType = Awaited<ReturnType<_RecordDepositCfg['execute']>>;
 export const recordDeposit = createCaller<RecordDepositInputType, RecordDepositOutputType>('recordDeposit');
 
+type _RevokeInviteCfg = typeof _RevokeInviteEp;
+export type RevokeInviteInputType = NonNullable<_RevokeInviteCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_RevokeInviteCfg['execute']>[0]['input'];
+export type RevokeInviteOutputType = Awaited<ReturnType<_RevokeInviteCfg['execute']>>;
+export const revokeInvite = createCaller<RevokeInviteInputType, RevokeInviteOutputType>('revokeInvite');
+
 type _SaveAddressCfg = typeof _SaveAddressEp;
 export type SaveAddressInputType = NonNullable<_SaveAddressCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_SaveAddressCfg['execute']>[0]['input'];
 export type SaveAddressOutputType = Awaited<ReturnType<_SaveAddressCfg['execute']>>;
 export const saveAddress = createCaller<SaveAddressInputType, SaveAddressOutputType>('saveAddress');
+
+type _SaveBranchCfg = typeof _SaveBranchEp;
+export type SaveBranchInputType = NonNullable<_SaveBranchCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_SaveBranchCfg['execute']>[0]['input'];
+export type SaveBranchOutputType = Awaited<ReturnType<_SaveBranchCfg['execute']>>;
+export const saveBranch = createCaller<SaveBranchInputType, SaveBranchOutputType>('saveBranch');
 
 type _SaveCategoryCfg = typeof _SaveCategoryEp;
 export type SaveCategoryInputType = NonNullable<_SaveCategoryCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_SaveCategoryCfg['execute']>[0]['input'];
@@ -220,6 +300,16 @@ export type SaveSupplierInputType = NonNullable<_SaveSupplierCfg['inputSchema']>
 export type SaveSupplierOutputType = Awaited<ReturnType<_SaveSupplierCfg['execute']>>;
 export const saveSupplier = createCaller<SaveSupplierInputType, SaveSupplierOutputType>('saveSupplier');
 
+type _SyncToGoogleSheetsCfg = typeof _SyncToGoogleSheetsEp;
+export type SyncToGoogleSheetsInputType = NonNullable<_SyncToGoogleSheetsCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_SyncToGoogleSheetsCfg['execute']>[0]['input'];
+export type SyncToGoogleSheetsOutputType = Awaited<ReturnType<_SyncToGoogleSheetsCfg['execute']>>;
+export const syncToGoogleSheets = createCaller<SyncToGoogleSheetsInputType, SyncToGoogleSheetsOutputType>('syncToGoogleSheets');
+
+type _UploadProductImageCfg = typeof _UploadProductImageEp;
+export type UploadProductImageInputType = NonNullable<_UploadProductImageCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_UploadProductImageCfg['execute']>[0]['input'];
+export type UploadProductImageOutputType = Awaited<ReturnType<_UploadProductImageCfg['execute']>>;
+export const uploadProductImage = createCaller<UploadProductImageInputType, UploadProductImageOutputType>('uploadProductImage');
+
 type _VerifyPurchaseOrderCfg = typeof _VerifyPurchaseOrderEp;
 export type VerifyPurchaseOrderInputType = NonNullable<_VerifyPurchaseOrderCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_VerifyPurchaseOrderCfg['execute']>[0]['input'];
 export type VerifyPurchaseOrderOutputType = Awaited<ReturnType<_VerifyPurchaseOrderCfg['execute']>>;
@@ -227,9 +317,13 @@ export const verifyPurchaseOrder = createCaller<VerifyPurchaseOrderInputType, Ve
 
 
 export const api = {
+  applySaleDeductions,
   assignRole,
+  bulkDeleteRecords,
+  bulkUpdateCategories,
   bulkUpdateProducts,
   createExpense,
+  createIncome,
   createPurchase,
   createSale,
   deleteRecord,
@@ -237,11 +331,14 @@ export const api = {
   exportLpoCsv,
   generateLpoPdf,
   getAddresses,
+  getBranches,
   getCategories,
   getCustomerDetails,
   getCustomers,
   getDashboard,
   getExpenses,
+  getIncome,
+  getInventoryValuation,
   getMyPermissions,
   getProducts,
   getPurchaseOrders,
@@ -253,9 +350,15 @@ export const api = {
   getSuppliers,
   getUsers,
   importCsv,
+  importLpos,
+  importPurchases,
+  importSales,
   inviteUser,
+  monthlyArchival,
   recordDeposit,
+  revokeInvite,
   saveAddress,
+  saveBranch,
   saveCategory,
   saveCustomer,
   saveProduct,
@@ -263,5 +366,7 @@ export const api = {
   saveRole,
   saveSettings,
   saveSupplier,
+  syncToGoogleSheets,
+  uploadProductImage,
   verifyPurchaseOrder,
 };
