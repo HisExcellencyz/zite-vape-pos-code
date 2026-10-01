@@ -24,6 +24,44 @@
   --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
 
+  --background: 220 20% 97%;
+  --foreground: 230 25% 12%;
+  --card: 0 0% 100%;
+  --card-foreground: 230 25% 12%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 230 25% 12%;
+  --primary: 210 85% 48%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 40 95% 45%;
+  --secondary-foreground: 230 25% 10%;
+  --muted: 220 16% 92%;
+  --muted-foreground: 220 10% 42%;
+  --accent: 160 70% 36%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 75% 52%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 220 15% 86%;
+  --input: 220 15% 86%;
+  --ring: 210 85% 48%;
+  --radius: 0.625rem;
+
+  --chart-1: 210 85% 58%;
+  --chart-2: 45 93% 52%;
+  --chart-3: 335 78% 58%;
+  --chart-4: 160 70% 42%;
+  --chart-5: 280 65% 60%;
+
+  --sidebar-background: 0 0% 100%;
+  --sidebar-foreground: 230 25% 15%;
+  --sidebar-primary: 210 85% 58%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 220 16% 92%;
+  --sidebar-accent-foreground: 230 25% 12%;
+  --sidebar-border: 220 15% 86%;
+  --sidebar-ring: 335 78% 58%;
+}
+
+.dark {
   --background: 230 25% 7%;
   --foreground: 60 20% 94%;
   --card: 230 25% 10%;
@@ -43,27 +81,11 @@
   --border: 230 20% 18%;
   --input: 230 20% 18%;
   --ring: 335 78% 58%;
-  --radius: 0.625rem;
-
-  --chart-1: 210 85% 58%;
-  --chart-2: 45 93% 52%;
-  --chart-3: 335 78% 58%;
-  --chart-4: 160 70% 42%;
-  --chart-5: 280 65% 60%;
-
   --sidebar-background: 230 25% 8%;
   --sidebar-foreground: 60 20% 88%;
-  --sidebar-primary: 210 85% 58%;
-  --sidebar-primary-foreground: 0 0% 100%;
   --sidebar-accent: 230 20% 15%;
   --sidebar-accent-foreground: 60 20% 94%;
   --sidebar-border: 230 20% 15%;
-  --sidebar-ring: 335 78% 58%;
-}
-
-.dark {
-  --background: 230 25% 7%;
-  --foreground: 60 20% 94%;
 }
 
 @layer base {
@@ -89,4 +111,44 @@
 }
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--muted-foreground));
+}
+
+/* ── Hover glows on tiles & tabs (gold / pink / blue / green rotation) ── */
+@layer components {
+  :root {
+    --glow-gold: 45 95% 55%;
+    --glow-pink: 330 85% 62%;
+    --glow-blue: 205 90% 58%;
+    --glow-green: 150 70% 48%;
+  }
+  .bg-card.border, .bg-card.rounded-xl, [role='tab'], aside nav a {
+    --glow: var(--glow-gold);
+    transition: border-color .2s ease, box-shadow .25s ease, background-color .2s ease;
+  }
+  :nth-child(4n + 2 of .bg-card) { --glow: var(--glow-pink); }
+  :nth-child(4n + 3 of .bg-card) { --glow: var(--glow-blue); }
+  :nth-child(4n + 4 of .bg-card) { --glow: var(--glow-green); }
+  [data-tone='gold'] { --tone: var(--glow-gold); }
+  [data-tone='pink'] { --tone: var(--glow-pink); }
+  [data-tone='blue'] { --tone: var(--glow-blue); }
+  [data-tone] [role='tab'], .tone-nav { --glow: var(--tone); }
+  .bg-card.border:hover, .bg-card.rounded-xl:hover {
+    border-color: hsl(var(--glow) / 0.7);
+    box-shadow: 0 0 0 1px hsl(var(--glow) / 0.25), 0 0 18px -2px hsl(var(--glow) / 0.35);
+  }
+  [role='tab']:hover, .tone-nav:hover {
+    background-color: hsl(var(--glow) / 0.35);
+    color: hsl(var(--foreground));
+  }
+  [data-tone] [role='tab'][data-state='active'], .tone-nav.is-active {
+    background-color: hsl(var(--tone));
+    color: hsl(0 0% 8%);
+    box-shadow: 0 0 14px -3px hsl(var(--tone) / 0.7);
+  }
+  .gold-btn:hover {
+    background-color: hsl(var(--glow-gold)) !important;
+    color: hsl(0 0% 8%) !important;
+  }
+  /* Page header bars pick up the page tone as a solid tint */
+  [data-tone] .sticky.top-0.border-b { border-bottom-color: hsl(var(--tone)); }
 }
