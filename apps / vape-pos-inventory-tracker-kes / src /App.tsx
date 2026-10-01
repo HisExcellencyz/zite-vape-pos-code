@@ -1,6 +1,6 @@
-import { useEffect, useState, ReactElement } from 'react';
+import { useEffect, ReactElement } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { useAuth, logout } from 'zitejs/auth';
+import { useAuth, logout, loginWithRedirect } from 'zitejs/auth';
 import { Toaster } from '@project/components/ui/sonner';
 import { Button } from '@project/components/ui/button';
 import { ShieldAlert } from 'lucide-react';
@@ -18,9 +18,9 @@ import SettingsPage from './pages/SettingsPage';
 import CategoriesPage from './pages/CategoriesPage';
 import UsersPage from './pages/UsersPage';
 import AddressesPage from './pages/AddressesPage';
-import LandingPage from './pages/LandingPage';
 import { PermissionsProvider, usePermissions } from './hooks/usePermissions';
 import { BranchProvider } from './hooks/useBranch';
+import { applyStoredTheme } from './hooks/useTheme';
 
 // Each screen belongs to a permission "area" (see the roles matrix on the Users page).
 const ROUTES: { path: string; area: string; element: ReactElement }[] = [
@@ -98,19 +98,16 @@ function AppRoutes() {
 
 export default function App() {
   const { user, isLoading } = useAuth();
-  const [showLanding, setShowLanding] = useState(true);
 
   useEffect(() => {
-    document.documentElement.classList.add('dark');
+    applyStoredTheme();
   }, []);
 
   useEffect(() => {
-    if (!isLoading && user) {
-      setShowLanding(false);
-    }
+    if (!isLoading && !user) loginWithRedirect();
   }, [isLoading, user]);
 
-  if (isLoading) {
+  if (isLoading || !user) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
@@ -118,15 +115,6 @@ export default function App() {
           <p className="text-muted-foreground text-sm">Loading...</p>
         </div>
       </div>
-    );
-  }
-
-  if (!user || showLanding) {
-    return (
-      <>
-        <LandingPage />
-        <Toaster />
-      </>
     );
   }
 
