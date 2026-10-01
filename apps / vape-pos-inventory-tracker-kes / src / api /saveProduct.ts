@@ -17,6 +17,7 @@ export default createEndpoint({
     taxRate: z.number().optional(),
     description: z.string().optional(),
     status: z.string().optional(),
+    branchId: z.string().optional(),
   }),
   outputSchema: z.object({ success: z.boolean(), product: z.any() }),
   execute: async ({ input }) => {
@@ -49,6 +50,7 @@ export default createEndpoint({
       const updated = await zite.products.update({ id: input.id, record });
       return { success: true, product: updated };
     } else {
+      if (input.branchId) record.branch = input.branchId;
       const created = await zite.products.create({ record });
       return { success: true, product: created };
     }
