@@ -144,7 +144,8 @@ export default function AddressesPage() {
     .filter(a => a.coordinates)
     .map(a => {
       const [lat, lng] = (a.coordinates || '').split(',').map(Number);
-      return { lat: lat || 0, lng: lng || 0, label: a.addressName || '' };
+      const color = a.type === 'pickup' ? '#3b82f6' : a.type === 'delivery' ? '#22c55e' : a.type === 'branch' ? '#a855f7' : '#6b7280';
+      return { lat: lat || 0, lng: lng || 0, label: a.addressName || '', color };
     })
     .filter(p => p.lat !== 0 && p.lng !== 0);
 
@@ -167,7 +168,7 @@ export default function AddressesPage() {
     <div className="p-6 space-y-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Addresses & Pickup Points</h1>
+          <h1 className="text-2xl font-bold text-foreground">Addresses</h1>
           <p className="text-sm text-muted-foreground">{addresses.length} addresses saved</p>
         </div>
         <div className="flex items-center gap-2">
@@ -178,7 +179,7 @@ export default function AddressesPage() {
 
       {/* Map overview */}
       {mapPins.length > 0 && (
-        <MapView pins={mapPins} className="h-[280px]" />
+        <MapView pins={mapPins} fitToPins plainPins className="h-[320px]" />
       )}
 
       {viewMode === 'grid' ? (
