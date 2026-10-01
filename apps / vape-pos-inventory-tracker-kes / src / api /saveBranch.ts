@@ -17,6 +17,7 @@ export default createEndpoint({
     coverPhotoUrl: z.string().optional(),
     plusCode: z.string().optional(),
     coordinates: z.string().optional(),
+    commissions: z.array(z.object({ name: z.string(), type: z.enum(['percent', 'fixed']), value: z.number() })).optional(),
   }),
   outputSchema: z.object({ success: z.boolean(), branch: z.any() }),
   execute: async ({ input }) => {
@@ -37,6 +38,7 @@ export default createEndpoint({
       plusCode: input.plusCode || null,
       coordinates: input.coordinates || null,
     };
+    if (input.commissions) record.commissionRates = JSON.stringify(input.commissions.filter(c => c.name.trim()));
     if (input.active !== undefined) record.active = input.active;
 
     // Only one outlet can be the main outlet at a time.
