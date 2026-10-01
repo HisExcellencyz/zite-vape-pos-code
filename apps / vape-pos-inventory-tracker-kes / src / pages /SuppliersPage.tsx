@@ -22,6 +22,10 @@ interface Supplier {
   depositBalance?: number;
 }
 
+import { useTableControls, TableControls, SortTh, FieldDef } from '../components/TableControls';
+
+const FIELDS: FieldDef<Supplier>[] = [{ key: 'supplierName', label: 'Name' }, { key: 'phone', label: 'Phone' }, { key: 'email', label: 'Email' }, { key: 'address', label: 'Address' }, { key: 'depositBalance', label: 'Deposit Balance' }];
+
 export default function SuppliersPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,6 +40,7 @@ export default function SuppliersPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const tc = useTableControls(suppliers, FIELDS);
   const [viewMode, setViewMode] = useViewMode('suppliers', 'list');
 
   const load = async () => {
@@ -149,6 +154,7 @@ export default function SuppliersPage() {
 
   return (
     <div className="p-6 space-y-6">
+      <div className="sticky top-0 z-20 -mx-6 -mt-6 px-6 pt-6 pb-4 space-y-4 bg-background/95 backdrop-blur border-b border-border">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Suppliers</h1>
@@ -181,9 +187,7 @@ export default function SuppliersPage() {
         </div>
       </div>
 
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input placeholder="Search suppliers..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+      <TableControls c={tc} />
       </div>
 
       {viewMode === 'list' ? (
@@ -194,10 +198,10 @@ export default function SuppliersPage() {
                 <thead className="sticky top-0 z-10 bg-card">
                   <tr className="border-b border-border text-muted-foreground bg-card">
                     <th className="p-3 w-8"><input type="checkbox" checked={selectedIds.size === suppliers.length && suppliers.length > 0} onChange={toggleSelectAll} className="rounded" /></th>
-                    <th className="text-left p-3 font-medium">Name</th>
-                    <th className="text-left p-3 font-medium">Phone</th>
-                    <th className="text-left p-3 font-medium">Email</th>
-                    <th className="text-right p-3 font-medium">Deposit Balance</th>
+                    <SortTh c={tc} k="supplierName" className="text-left">Name</SortTh>
+                    <SortTh c={tc} k="phone" className="text-left">Phone</SortTh>
+                    <SortTh c={tc} k="email" className="text-left">Email</SortTh>
+                    <SortTh c={tc} k="depositBalance" className="text-right">Deposit Balance</SortTh>
                     <th className="text-right p-3 font-medium">Actions</th>
                   </tr>
                 </thead>
@@ -209,14 +213,14 @@ export default function SuppliersPage() {
                         {[...Array(5)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}
                       </tr>
                     ))
-                  ) : suppliers.length === 0 ? (
+                  ) : tc.view.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="text-center py-12 text-muted-foreground">
                         <Truck className="w-10 h-10 mx-auto mb-2 opacity-40" />
                         No suppliers found
                       </td>
                     </tr>
-                  ) : suppliers.map(s => (
+                  ) : tc.view.map(s => (
                     <tr key={s.id} className="border-b border-border hover:bg-muted/30">
                       <td className="p-3"><input type="checkbox" checked={selectedIds.has(s.id)} onChange={() => toggleSelect(s.id)} className="rounded" /></td>
                       <td className="p-3 font-medium text-foreground break-words whitespace-normal">{s.supplierName}</td>
@@ -244,14 +248,14 @@ export default function SuppliersPage() {
               [...Array(4)].map((_, i) => (
                 <Card key={i} className="bg-card border-border"><CardContent className="p-4"><div className="h-24 bg-muted rounded animate-pulse" /></CardContent></Card>
               ))
-            ) : suppliers.length === 0 ? (
+            ) : tc.view.length === 0 ? (
               <Card className="col-span-full bg-card border-border">
                 <CardContent className="py-12 text-center text-muted-foreground">
                   <Truck className="w-10 h-10 mx-auto mb-2 opacity-40" />
                   No suppliers found
                 </CardContent>
               </Card>
-            ) : suppliers.map(s => (
+            ) : tc.view.map(s => (
               <Card key={s.id} className={`bg-card ${selectedIds.has(s.id) ? 'border-primary' : 'border-border'}`}>
                 <CardContent className="p-4 space-y-3">
                   <div className="flex items-start gap-2">
