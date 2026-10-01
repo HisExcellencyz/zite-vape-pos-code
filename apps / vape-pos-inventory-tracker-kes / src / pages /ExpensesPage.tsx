@@ -14,10 +14,23 @@ import { downloadCsv } from '../lib/exportHelper';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
 import OtherIncomeDialog from '../components/OtherIncomeDialog';
 import { useBranch } from '../hooks/useBranch';
+import { useTableControls, TableControls, SortTh, FieldDef } from '../components/TableControls';
+import DateRangeFilter, { Range, inRange } from '../components/DateRangeFilter';
+import SummaryTiles from '../components/SummaryTiles';
 
 interface Expense { id: string; expenseNumber?: number; expenseDate?: string; description?: string; amount?: number; notes?: string; }
 interface Purchase { id: string; purchaseNumber?: number; purchaseDate?: string; total?: number; paymentType?: string; }
 interface Income { id: string; incomeNumber?: number; incomeDate?: string; description?: string; amount?: number; notes?: string; }
+
+const PF: FieldDef<Purchase>[] = [
+  { key: 'purchaseNumber', label: '#' }, { key: 'purchaseDate', label: 'Date' }, { key: 'paymentType', label: 'Payment' }, { key: 'total', label: 'Total' },
+];
+const EF: FieldDef<Expense>[] = [
+  { key: 'expenseNumber', label: '#' }, { key: 'expenseDate', label: 'Date' }, { key: 'description', label: 'Description' }, { key: 'amount', label: 'Amount' }, { key: 'notes', label: 'Notes' },
+];
+const IF: FieldDef<Income>[] = [
+  { key: 'incomeNumber', label: '#' }, { key: 'incomeDate', label: 'Date' }, { key: 'description', label: 'Description' }, { key: 'amount', label: 'Amount' }, { key: 'notes', label: 'Notes' },
+];
 
 export default function ExpensesPage() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -33,18 +46,25 @@ export default function ExpensesPage() {
   const [saving, setSaving] = useState(false);
   const [viewMode, setViewMode] = useViewMode('expenses', 'list');
   const { currentBranch } = useBranch();
+  const [range, setRange] = useState<Range>({});
+  const dP = purchases.filter(x => inRange(range, x.purchaseDate));
+  const dE = expenses.filter(x => inRange(range, x.expenseDate));
+  const dI = income.filter(x => inRange(range, x.incomeDate));
+  const tcP = useTableControls(dP, PF);
+  const tcE = useTableControls(dE, EF);
+  const tcI = useTableControls(dI, IF);
 
   const load = async () => {
     setLoading(true);
     try {
-      const [e, p, i] = await Promise.all([getExpenses({}), getPurchases({}), getIncome({})]);
+      const [e, p, i] = await Promise.all([getExpenses({ branchId: currentBranch?.id }), getPurchases({ branchId: currentBranch?.id }), getIncome({ branchId: currentBranch?.id })]);
       setExpenses(e.expenses as Expense[]);
       setPurchases(p.purchases as Purchase[]);
       setIncome(i.income as Income[]);
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [currentBranch?.id]);
 
   const handleSave = async () => {
     if (!formDesc) return toast.error('Description is required');
@@ -67,9 +87,9 @@ export default function ExpensesPage() {
   };
 
   const fmt = (n?: number) => `KES ${(n || 0).toLocaleString()}`;
-  const totalExpenses = expenses.reduce((s, e) => s + (e.amount || 0), 0);
-  const totalPurchases = purchases.reduce((s, p) => s + (p.total || 0), 0);
-  const totalIncome = income.reduce((s, i) => s + (i.amount || 0), 0);
+  const totalExpenses = dE.reduce((s, e) => s + (e.amount || 0), 0);
+  const totalPurchases = dP.reduce((s, p) => s + (p.total || 0), 0);
+  const totalIncome = dI.reduce((s, i) => s + (i.amount || 0), 0);
 
   const paymentBadge = (p: Purchase) => (
     <Badge variant="secondary" className={p.paymentType === 'From Deposit' ? 'bg-primary/10 text-primary' : 'bg-emerald-500/10 text-emerald-400'}>
@@ -79,6 +99,7 @@ export default function ExpensesPage() {
 
   return (
     <div className="p-6 space-y-6">
+      <div className="sticky top-0 z-20 -mx-6 -mt-6 px-6 pt-6 pb-4 space-y-4 bg-background/95 backdrop-blur border-b border-border">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Expenses</h1>
@@ -92,33 +113,23 @@ export default function ExpensesPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="bg-card border-border"><CardContent className="pt-6">
-          <p className="text-xs text-muted-foreground uppercase">Purchases</p>
-          <p className="text-xl font-bold text-foreground mt-1 break-words">{fmt(totalPurchases)}</p>
-          <p className="text-xs text-muted-foreground">{purchases.length} records</p>
-        </CardContent></Card>
-        <Card className="bg-card border-border"><CardContent className="pt-6">
-          <p className="text-xs text-muted-foreground uppercase">Other Expenses</p>
-          <p className="text-xl font-bold text-foreground mt-1 break-words">{fmt(totalExpenses)}</p>
-          <p className="text-xs text-muted-foreground">{expenses.length} records</p>
-        </CardContent></Card>
-        <Card className="bg-card border-border"><CardContent className="pt-6">
-          <p className="text-xs text-muted-foreground uppercase">Grand Total</p>
-          <p className="text-xl font-bold text-secondary mt-1 break-words">{fmt(totalExpenses + totalPurchases)}</p>
-        </CardContent></Card>
-        <Card className="bg-card border-border"><CardContent className="pt-6">
-          <p className="text-xs text-muted-foreground uppercase">Other Income</p>
-          <p className="text-xl font-bold text-emerald-400 mt-1 break-words">{fmt(totalIncome)}</p>
-          <p className="text-xs text-muted-foreground">{income.length} records</p>
-        </CardContent></Card>
+      <div className="flex flex-wrap gap-2 items-center">
+        <DateRangeFilter value={range} onChange={setRange} />
+        <TableControls c={(tab === 'purchases' ? tcP : tab === 'other' ? tcE : tcI) as any} />
+      </div>
+      <SummaryTiles items={[
+        { label: 'Purchases', value: fmt(totalPurchases), sub: `${dP.length} records` },
+        { label: 'Other Expenses', value: fmt(totalExpenses), sub: `${dE.length} records` },
+        { label: 'Grand Total', value: fmt(totalExpenses + totalPurchases) },
+        { label: 'Other Income', value: fmt(totalIncome), sub: `${dI.length} records` },
+      ]} />
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="bg-muted">
-          <TabsTrigger value="purchases">Purchases ({purchases.length})</TabsTrigger>
-          <TabsTrigger value="other">Other Expenses ({expenses.length})</TabsTrigger>
-          <TabsTrigger value="income">Other Income ({income.length})</TabsTrigger>
+          <TabsTrigger value="purchases">Purchases ({dP.length})</TabsTrigger>
+          <TabsTrigger value="other">Other Expenses ({dE.length})</TabsTrigger>
+          <TabsTrigger value="income">Other Income ({dI.length})</TabsTrigger>
         </TabsList>
 
         <TabsContent value="purchases" className="mt-4">
@@ -126,15 +137,15 @@ export default function ExpensesPage() {
             <Card className="bg-card border-border"><CardContent className="p-0"><div className="overflow-auto max-h-[65vh]">
               <table className="w-full text-sm">
                 <thead className="sticky top-0 z-10 bg-card"><tr className="border-b border-border text-muted-foreground bg-card">
-                  <th className="text-left p-3 font-medium">#</th>
-                  <th className="text-left p-3 font-medium">Date</th>
-                  <th className="text-left p-3 font-medium">Payment</th>
-                  <th className="text-right p-3 font-medium">Total</th>
+                  <SortTh c={tcP} k="purchaseNumber" className="text-left">#</SortTh>
+                  <SortTh c={tcP} k="purchaseDate" className="text-left">Date</SortTh>
+                  <SortTh c={tcP} k="paymentType" className="text-left">Payment</SortTh>
+                  <SortTh c={tcP} k="total" className="text-right">Total</SortTh>
                 </tr></thead>
                 <tbody>
-                  {purchases.length === 0 ? (
+                  {tcP.view.length === 0 ? (
                     <tr><td colSpan={4} className="text-center py-8 text-muted-foreground">{loading ? 'Loading...' : 'No purchases'}</td></tr>
-                  ) : purchases.map(p => (
+                  ) : tcP.view.map(p => (
                     <tr key={p.id} className="border-b border-border hover:bg-muted/30">
                       <td className="p-3 font-mono text-xs text-muted-foreground">#{p.purchaseNumber}</td>
                       <td className="p-3 text-foreground">{p.purchaseDate ? format(new Date(p.purchaseDate), 'dd MMM yyyy') : '-'}</td>
@@ -147,9 +158,9 @@ export default function ExpensesPage() {
             </div></CardContent></Card>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
-              {purchases.length === 0 ? (
+              {tcP.view.length === 0 ? (
                 <Card className="col-span-full bg-card border-border"><CardContent className="py-8 text-center text-muted-foreground">No purchases</CardContent></Card>
-              ) : purchases.map(p => (
+              ) : tcP.view.map(p => (
                 <Card key={p.id} className="bg-card border-border"><CardContent className="p-4 space-y-3">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
@@ -173,15 +184,15 @@ export default function ExpensesPage() {
             <Card className="bg-card border-border"><CardContent className="p-0"><div className="overflow-auto max-h-[65vh]">
               <table className="w-full text-sm">
                 <thead className="sticky top-0 z-10 bg-card"><tr className="border-b border-border text-muted-foreground bg-card">
-                  <th className="text-left p-3 font-medium">#</th>
-                  <th className="text-left p-3 font-medium">Date</th>
-                  <th className="text-left p-3 font-medium">Description</th>
-                  <th className="text-right p-3 font-medium">Amount</th>
+                  <SortTh c={tcE} k="expenseNumber" className="text-left">#</SortTh>
+                  <SortTh c={tcE} k="expenseDate" className="text-left">Date</SortTh>
+                  <SortTh c={tcE} k="description" className="text-left">Description</SortTh>
+                  <SortTh c={tcE} k="amount" className="text-right">Amount</SortTh>
                 </tr></thead>
                 <tbody>
-                  {expenses.length === 0 ? (
+                  {tcE.view.length === 0 ? (
                     <tr><td colSpan={4} className="text-center py-8 text-muted-foreground">No expenses</td></tr>
-                  ) : expenses.map(e => (
+                  ) : tcE.view.map(e => (
                     <tr key={e.id} className="border-b border-border hover:bg-muted/30">
                       <td className="p-3 font-mono text-xs text-muted-foreground">#{e.expenseNumber}</td>
                       <td className="p-3 text-foreground">{e.expenseDate ? format(new Date(e.expenseDate), 'dd MMM yyyy') : '-'}</td>
@@ -194,9 +205,9 @@ export default function ExpensesPage() {
             </div></CardContent></Card>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
-              {expenses.length === 0 ? (
+              {tcE.view.length === 0 ? (
                 <Card className="col-span-full bg-card border-border"><CardContent className="py-8 text-center text-muted-foreground">No expenses</CardContent></Card>
-              ) : expenses.map(e => (
+              ) : tcE.view.map(e => (
                 <Card key={e.id} className="bg-card border-border"><CardContent className="p-4 space-y-3">
                   <div className="flex items-start justify-between gap-2">
                     <p className="font-mono text-sm font-semibold text-foreground">#{e.expenseNumber}</p>
@@ -219,15 +230,15 @@ export default function ExpensesPage() {
             <Card className="bg-card border-border"><CardContent className="p-0"><div className="overflow-auto max-h-[65vh]">
               <table className="w-full text-sm">
                 <thead className="sticky top-0 z-10 bg-card"><tr className="border-b border-border text-muted-foreground bg-card">
-                  <th className="text-left p-3 font-medium">#</th>
-                  <th className="text-left p-3 font-medium">Date</th>
-                  <th className="text-left p-3 font-medium">Description</th>
-                  <th className="text-right p-3 font-medium">Amount</th>
+                  <SortTh c={tcI} k="incomeNumber" className="text-left">#</SortTh>
+                  <SortTh c={tcI} k="incomeDate" className="text-left">Date</SortTh>
+                  <SortTh c={tcI} k="description" className="text-left">Description</SortTh>
+                  <SortTh c={tcI} k="amount" className="text-right">Amount</SortTh>
                 </tr></thead>
                 <tbody>
-                  {income.length === 0 ? (
+                  {tcI.view.length === 0 ? (
                     <tr><td colSpan={4} className="text-center py-8 text-muted-foreground">No other income recorded</td></tr>
-                  ) : income.map(i => (
+                  ) : tcI.view.map(i => (
                     <tr key={i.id} className="border-b border-border hover:bg-muted/30">
                       <td className="p-3 font-mono text-xs text-muted-foreground">#{i.incomeNumber}</td>
                       <td className="p-3 text-foreground">{i.incomeDate ? format(new Date(i.incomeDate), 'dd MMM yyyy') : '-'}</td>
@@ -240,9 +251,9 @@ export default function ExpensesPage() {
             </div></CardContent></Card>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
-              {income.length === 0 ? (
+              {tcI.view.length === 0 ? (
                 <Card className="col-span-full bg-card border-border"><CardContent className="py-8 text-center text-muted-foreground">No other income recorded</CardContent></Card>
-              ) : income.map(i => (
+              ) : tcI.view.map(i => (
                 <Card key={i.id} className="bg-card border-border"><CardContent className="p-4 space-y-3">
                   <div className="flex items-start justify-between gap-2">
                     <p className="font-mono text-sm font-semibold text-foreground">#{i.incomeNumber}</p>
