@@ -7,13 +7,25 @@ import { Label } from '@project/components/ui/label';
 import { Badge } from '@project/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
-import { Plus, Download, Upload, ShoppingBag, Trash2, Search } from 'lucide-react';
+import { Plus, Download, Upload, ShoppingBag, Trash2, Search, FileText } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { downloadCsv } from '../lib/exportHelper';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
 import ImportDialog from '../components/ImportDialog';
 import { useBranch } from '../hooks/useBranch';
+import { useTableControls, TableControls, SortTh, FieldDef } from '../components/TableControls';
+import DateRangeFilter, { Range, inRange } from '../components/DateRangeFilter';
+import SummaryTiles from '../components/SummaryTiles';
+
+const FIELDS: FieldDef<Purchase>[] = [
+  { key: 'purchaseNumber', label: '#' },
+  { key: 'purchaseDate', label: 'Date', get: p => p.purchaseDate || '' },
+  { key: 'paymentType', label: 'Payment' },
+  { key: 'total', label: 'Total' },
+  { key: 'notes', label: 'Notes' },
+];
 
 interface Purchase {
   id: string;
@@ -43,18 +55,23 @@ export default function PurchasesPage() {
   const [saving, setSaving] = useState(false);
   const [viewMode, setViewMode] = useViewMode('purchases', 'list');
   const { currentBranch } = useBranch();
+  const [range, setRange] = useState<Range>({});
+  const dated = purchases.filter(x => inRange(range, x.purchaseDate));
+  const tc = useTableControls(dated, FIELDS);
+  const rows = tc.view;
+  const psum = (xs: Purchase[]) => xs.reduce((a, x) => a + (x.total || 0), 0);
 
   const load = async () => {
     setLoading(true);
     try {
-      const [p, prods, sups] = await Promise.all([getPurchases({}), getProducts({}), getSuppliers({})]);
+      const [p, prods, sups] = await Promise.all([getPurchases({ branchId: currentBranch?.id }), getProducts({ branchId: currentBranch?.id }), getSuppliers({})]);
       setPurchases(p.purchases as Purchase[]);
       setProducts(prods.products as Product[]);
       setSuppliers(sups.suppliers as Supplier[]);
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [currentBranch?.id]);
 
   const filteredProducts = products.filter(p =>
     (p.productName || '').toLowerCase().includes(productSearch.toLowerCase()) ||
@@ -119,17 +136,30 @@ export default function PurchasesPage() {
 
   return (
     <div className="p-6 space-y-6">
+      <div className="sticky top-0 z-20 -mx-6 -mt-6 px-6 pt-6 pb-4 space-y-4 bg-background/95 backdrop-blur border-b border-border">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Purchases</h1>
-          <p className="text-sm text-muted-foreground">{purchases.length} purchase records</p>
+          <p className="text-sm text-muted-foreground">{rows.length} of {purchases.length} purchase records</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <ViewToggle value={viewMode} onChange={setViewMode} />
           <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExport}><Download className="w-4 h-4 mr-1" /> Export</Button>
           <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10" onClick={() => setImportOpen(true)}><Upload className="w-4 h-4 mr-1" /> Import</Button>
+          <Button asChild variant="outline" size="sm"><Link to="/purchase-orders"><FileText className="w-4 h-4 mr-1" /> Purchase Orders</Link></Button>
           <Button size="sm" onClick={() => setShowForm(true)}><Plus className="w-4 h-4 mr-1" /> Add Purchase</Button>
         </div>
+      </div>
+      <div className="flex flex-wrap gap-2 items-center">
+        <DateRangeFilter value={range} onChange={setRange} />
+        <TableControls c={tc} />
+      </div>
+      <SummaryTiles items={[
+        { label: 'Total Purchases', value: fmt(psum(dated)), sub: `${dated.length} purchases` },
+        { label: 'Paid Cash', value: fmt(psum(dated.filter(x => x.paymentType !== 'From Deposit'))) },
+        { label: 'From Deposits', value: fmt(psum(dated.filter(x => x.paymentType === 'From Deposit'))) },
+        { label: 'Average Purchase', value: fmt(dated.length ? Math.round(psum(dated) / dated.length) : 0) },
+      ]} />
       </div>
 
       {viewMode === 'list' ? (
@@ -139,11 +169,11 @@ export default function PurchasesPage() {
               <table className="w-full text-sm">
                 <thead className="sticky top-0 z-10 bg-card">
                   <tr className="border-b border-border text-muted-foreground bg-card">
-                    <th className="text-left p-3 font-medium">#</th>
-                    <th className="text-left p-3 font-medium">Date</th>
-                    <th className="text-left p-3 font-medium">Payment</th>
-                    <th className="text-right p-3 font-medium">Total</th>
-                    <th className="text-left p-3 font-medium">Notes</th>
+                    <SortTh c={tc} k="purchaseNumber" className="text-left">#</SortTh>
+                    <SortTh c={tc} k="purchaseDate" className="text-left">Date</SortTh>
+                    <SortTh c={tc} k="paymentType" className="text-left">Payment</SortTh>
+                    <SortTh c={tc} k="total" className="text-right">Total</SortTh>
+                    <SortTh c={tc} k="notes" className="text-left">Notes</SortTh>
                   </tr>
                 </thead>
                 <tbody>
@@ -153,12 +183,12 @@ export default function PurchasesPage() {
                         {[...Array(5)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}
                       </tr>
                     ))
-                  ) : purchases.length === 0 ? (
+                  ) : rows.length === 0 ? (
                     <tr><td colSpan={5} className="text-center py-12 text-muted-foreground">
                       <ShoppingBag className="w-10 h-10 mx-auto mb-2 opacity-40" />
                       No purchases recorded yet
                     </td></tr>
-                  ) : purchases.map(p => (
+                  ) : rows.map(p => (
                     <tr key={p.id} className="border-b border-border hover:bg-muted/30">
                       <td className="p-3 font-mono text-xs text-muted-foreground">#{p.purchaseNumber}</td>
                       <td className="p-3 text-foreground">{p.purchaseDate ? format(new Date(p.purchaseDate), 'dd MMM yyyy HH:mm') : '-'}</td>
@@ -178,14 +208,14 @@ export default function PurchasesPage() {
             [...Array(4)].map((_, i) => (
               <Card key={i} className="bg-card border-border"><CardContent className="p-4"><div className="h-24 bg-muted rounded animate-pulse" /></CardContent></Card>
             ))
-          ) : purchases.length === 0 ? (
+          ) : rows.length === 0 ? (
             <Card className="col-span-full bg-card border-border">
               <CardContent className="py-12 text-center text-muted-foreground">
                 <ShoppingBag className="w-10 h-10 mx-auto mb-2 opacity-40" />
                 No purchases recorded yet
               </CardContent>
             </Card>
-          ) : purchases.map(p => (
+          ) : rows.map(p => (
             <Card key={p.id} className="bg-card border-border">
               <CardContent className="p-4 space-y-3">
                 <div className="flex items-start justify-between gap-2">
