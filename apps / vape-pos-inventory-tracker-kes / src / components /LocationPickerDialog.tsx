@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { numberedPin } from '../lib/pinIcon';
 import { Loader } from '@googlemaps/js-api-loader';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { Input } from '@project/components/ui/input';
@@ -31,7 +32,7 @@ export default function LocationPickerDialog({ open, onOpenChange, title = 'Set 
 
     const timer = setTimeout(() => {
       if (!mapRef.current) return;
-      const loader = new Loader({ apiKey, version: 'weekly' });
+      const loader = new Loader({ apiKey, version: 'weekly', libraries: ['places'] });
       Promise.all([
         loader.importLibrary('maps'),
         loader.importLibrary('geocoding'),
@@ -74,7 +75,7 @@ export default function LocationPickerDialog({ open, onOpenChange, title = 'Set 
       markerRef.current = new google.maps.Marker({
         position: { lat, lng },
         map,
-        icon: { url: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png' },
+        icon: numberedPin(1, '#3b82f6'),
       });
       map.panTo({ lat, lng });
       if (map.getZoom()! < 14) map.setZoom(15);
