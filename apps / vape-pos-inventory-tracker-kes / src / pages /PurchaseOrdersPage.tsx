@@ -83,14 +83,14 @@ export default function PurchaseOrdersPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const [o, p, s] = await Promise.all([getPurchaseOrders({}), getProducts({}), getSuppliers({})]);
+      const [o, p, s] = await Promise.all([getPurchaseOrders({ branchId: currentBranch?.id }), getProducts({ branchId: currentBranch?.id }), getSuppliers({})]);
       setOrders(o.orders as PurchaseOrder[]);
       setProducts(p.products as Product[]);
       setSuppliers(s.suppliers as Supplier[]);
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [currentBranch?.id]);
 
   const fmt = (n?: number) => `KES ${(n || 0).toLocaleString()}`;
 
