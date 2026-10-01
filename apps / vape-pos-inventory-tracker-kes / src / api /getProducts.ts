@@ -1,12 +1,14 @@
 import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
+import { branchFilter } from '../lib/branchScope';
 
 export default createEndpoint({
   description: 'List products with optional search, category filter and sorting',
   authenticated: true,
   inputSchema: z.object({
     search: z.string().optional(),
+    branchId: z.string().optional(),
     categoryId: z.string().optional(),
     status: z.string().optional(),
     offset: z.number().optional(),
@@ -33,10 +35,10 @@ export default createEndpoint({
       offset: input.offset || 0,
     });
 
-    let filtered = records;
+    let filtered = records.filter(await branchFilter(input.branchId));
     if (input.search) {
       const s = input.search.toLowerCase();
-      filtered = records.filter(p =>
+      filtered = filtered.filter(p =>
         (p.productName || '').toLowerCase().includes(s) ||
         (p.sku || '').toLowerCase().includes(s)
       );
