@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
+import { branchFilter } from '../lib/branchScope';
 
 export default createEndpoint({
   description: 'List sales with optional filters',
@@ -10,6 +11,7 @@ export default createEndpoint({
     startDate: z.string().optional(),
     endDate: z.string().optional(),
     status: z.string().optional(),
+    branchId: z.string().optional(),
     offset: z.number().optional(),
     limit: z.number().optional(),
   }),
@@ -24,6 +26,7 @@ export default createEndpoint({
       offset: input.offset || 0,
     });
 
-    return { sales: records, hasMore };
+    const keep = await branchFilter(input.branchId);
+    return { sales: records.filter(keep), hasMore };
   },
 });
