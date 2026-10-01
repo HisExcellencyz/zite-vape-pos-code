@@ -15,6 +15,8 @@
 //     sort is currently IGNORED here — it is stripped before the request.
 //       (it does work on zite.auth.findAllUsers). Order in SQL instead.
 //     limit defaults to 500, max 2000; offset is a row count (a number)
+//     a filter value of `undefined` is REJECTED (it would query unfiltered
+//       and match an arbitrary record). Check the value first.
 //   .findOne({ id?, filters?, fields? }) → T | undefined
 //   .create({ record }) → T
 //   .update({ id, record }) → { id: string, fields: Partial<T> }
@@ -161,6 +163,7 @@ export type BranchesRecordType = {
   purchaseOrders?: string | string[];
   plusCode?: string;
   coordinates?: string;
+  commissionRates?: string;
 };
 
 /** What you may write when creating or updating a record in the "Branches" table. */
@@ -181,6 +184,7 @@ export type BranchesRecordInput = {
   purchaseOrders: string | string[] | null;
   plusCode: string | null;
   coordinates: string | null;
+  commissionRates: string | null;
 };
 
 /** A record in the "Currencies" table, as it is read back. */
@@ -427,7 +431,7 @@ export type SalesRecordType = {
   customer?: string | string[];
   /** Links to branches ("Branches"). "Branch" */
   branch?: string | string[];
-  paymentMethod?: "Cash" | "M-Pesa" | "Card" | "Bank Transfer" | string;
+  paymentMethod?: "Cash" | "M-Pesa" | "Card" | "Bank Transfer" | "mpesa" | "bank_transfer" | string;
   /** "Subtotal". 2 decimal places, format: local (e.g. 1,000,000.50) */
   subtotal?: number;
   /** "Tax Amount". 2 decimal places, format: local (e.g. 1,000,000.50) */
@@ -447,6 +451,9 @@ export type SalesRecordType = {
   stops?: string;
   /** "Delivery Distance Km". 1 decimal places, format: local (e.g. 1,000,000.50) */
   deliveryDistanceKm?: number;
+  /** "Deductions". Value is a raw number; display as currency with symbol "KES", 2 decimal places, format: local (e.g. 1,000,000.50) */
+  deductions?: number;
+  deductionDetails?: string;
 };
 
 /** What you may write when creating or updating a record in the "Sales" table. */
@@ -454,7 +461,7 @@ export type SalesRecordInput = {
   saleDate: string | Date | null;
   customer: string | string[] | null;
   branch: string | string[] | null;
-  paymentMethod: "Cash" | "M-Pesa" | "Card" | "Bank Transfer" | string | null;
+  paymentMethod: "Cash" | "M-Pesa" | "Card" | "Bank Transfer" | "mpesa" | "bank_transfer" | string | null;
   subtotal: string | number | null;
   taxAmount: string | number | null;
   discount: string | number | null;
@@ -468,6 +475,8 @@ export type SalesRecordInput = {
   deliveryCoordinates: string | null;
   stops: string | null;
   deliveryDistanceKm: string | number | null;
+  deductions: string | number | null;
+  deductionDetails: string | null;
 };
 
 /** A record in the "Sale Items" table, as it is read back. */
@@ -766,7 +775,7 @@ export type AddressesRecordType = {
   id: string;
   /** Primary field. "Address Name" */
   addressName?: string;
-  type?: "Pickup Point" | "Delivery Address" | "Branch" | "Other" | string;
+  type?: "Pickup Point" | "Delivery Address" | "Branch" | "Other" | "pickup" | string;
   fullAddress?: string;
   plusCode?: string;
   coordinates?: string;
@@ -777,33 +786,13 @@ export type AddressesRecordType = {
 /** What you may write when creating or updating a record in the "Addresses" table. */
 export type AddressesRecordInput = {
   addressName: string | null;
-  type: "Pickup Point" | "Delivery Address" | "Branch" | "Other" | string | null;
+  type: "Pickup Point" | "Delivery Address" | "Branch" | "Other" | "pickup" | string | null;
   fullAddress: string | null;
   plusCode: string | null;
   coordinates: string | null;
   notes: string | null;
   active: string | boolean | null;
 };
-
-export interface NotificationLink {
-  path?: string;
-  params?: Record<string, string>;
-}
-
-export interface NotificationsCreateParams {
-  recipients: string[];
-  title: string;
-  body?: string;
-  link?: NotificationLink;
-  path?: string;
-  params?: Record<string, string>;
-  payload?: Record<string, unknown>;
-  idempotencyKey?: string;
-}
-
-export type NotificationsCreateResult =
-  | { created: number }
-  | { created: 0; preview: true; wouldCreate: number };
 
 export interface ZiteAuthUser {
   id: string;
