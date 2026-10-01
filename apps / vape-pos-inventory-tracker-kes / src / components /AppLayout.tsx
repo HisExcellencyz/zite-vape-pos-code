@@ -1,10 +1,10 @@
 import { ReactNode } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth, logout } from 'zitejs/auth';
 import {
   LayoutDashboard, ShoppingCart, Package, Users, Truck,
   Receipt, Settings, LogOut, ChevronLeft, ChevronRight,
-  ShoppingBag, Wallet, FolderTree, Shield, FileText, MapPin, Store, Check
+  ShoppingBag, Wallet, MapPin, Store, Check, Sun, Moon
 } from 'lucide-react';
 import { cn } from '@project/components/lib/utils';
 import { Button } from '@project/components/ui/button';
@@ -15,6 +15,7 @@ import {
 import { useState } from 'react';
 import { usePermissions } from '../hooks/usePermissions';
 import { useBranch } from '../hooks/useBranch';
+import { useTheme } from '../hooks/useTheme';
 
 const DEFAULT_LOGO = 'https://images.fillout.com/orgid-811092/flowpublicid-6hepsbbapu/widgetid-default/xmArbfbmsBwLWSE2d2Et7u/pasted-image-1788367385543-n4ulma8b.png';
 
@@ -23,30 +24,32 @@ const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard', area: 'reports' },
   { to: '/pos', icon: ShoppingCart, label: 'POS', area: 'pos' },
   { to: '/inventory', icon: Package, label: 'Inventory', area: 'inventory' },
-  { to: '/categories', icon: FolderTree, label: 'Categories', area: 'inventory' },
   { to: '/sales', icon: Receipt, label: 'Sales', area: 'pos' },
   { to: '/purchases', icon: ShoppingBag, label: 'Purchases', area: 'purchases' },
-  { to: '/purchase-orders', icon: FileText, label: 'Purchase Orders', area: 'purchases' },
   { to: '/expenses', icon: Wallet, label: 'Expenses', area: 'expenses' },
   { to: '/customers', icon: Users, label: 'Customers', area: 'customers' },
   { to: '/suppliers', icon: Truck, label: 'Suppliers', area: 'suppliers' },
   { to: '/addresses', icon: MapPin, label: 'Addresses', area: 'pos' },
-  { to: '/users', icon: Shield, label: 'Users', area: 'users' },
   { to: '/settings', icon: Settings, label: 'Settings', area: 'settings' },
 ];
+
+const TONES: Record<string, string> = { '/pos': 'blue', '/inventory': 'blue', '/sales': 'blue', '/customers': 'blue', '/purchases': 'pink', '/expenses': 'pink', '/suppliers': 'pink' };
+const toneFor = (path: string) => TONES['/' + (path.split('/')[1] || '')] || 'gold';
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const { can, roleName } = usePermissions();
   const { branches, currentBranch, setCurrentBranchId } = useBranch();
   const [collapsed, setCollapsed] = useState(false);
+  const { theme, toggle } = useTheme();
+  const location = useLocation();
 
   const visibleItems = navItems.filter(item => can(item.area, 'view'));
   const outletLogo = currentBranch?.logoUrl || DEFAULT_LOGO;
   const outletName = currentBranch?.branchName || 'Uptown Vapes';
 
   return (
-    <div className="min-h-screen bg-background flex">
+    <div className="h-screen overflow-hidden bg-background flex">
       {/* Sidebar */}
       <aside
         className={cn(
@@ -130,12 +133,11 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               key={item.to}
               to={item.to}
               end={item.to === '/'}
+              data-tone={toneFor(item.to)}
               className={({ isActive }) =>
                 cn(
-                  'flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
-                  isActive
-                    ? 'bg-primary/10 text-primary'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                  'tone-nav flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+                  isActive ? 'is-active' : 'text-muted-foreground',
                   collapsed && 'justify-center px-2'
                 )
               }
@@ -147,12 +149,22 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         </nav>
 
         {/* Collapse toggle */}
-        <div className="px-2 py-3 border-t border-border">
+        <div className="px-2 py-3 border-t border-border space-y-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={toggle}
+            className={cn('w-full gold-btn', collapsed ? 'px-2' : 'justify-start')}
+            title="Toggle light / dark mode"
+          >
+            {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            {!collapsed && <span className="ml-2">{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>}
+          </Button>
           <Button
             variant="ghost"
             size="sm"
             onClick={() => setCollapsed(!collapsed)}
-            className={cn('w-full', collapsed ? 'px-2' : 'justify-start')}
+            className={cn('w-full gold-btn', collapsed ? 'px-2' : 'justify-start')}
           >
             {collapsed ? <ChevronRight className="w-4 h-4" /> : <><ChevronLeft className="w-4 h-4 mr-2" /> Collapse</>}
           </Button>
@@ -160,7 +172,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 min-w-0 overflow-auto">
+      <main data-tone={toneFor(location.pathname)} className="flex-1 min-w-0 h-screen overflow-y-auto">
         {children}
       </main>
     </div>
