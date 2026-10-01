@@ -8,7 +8,7 @@ import { Label } from '@project/components/ui/label';
 import { Trash2, MapPin, BookMarked, Loader2 } from 'lucide-react';
 import LocationSearchBox from './LocationSearchBox';
 import { geocode } from '../lib/geocode';
-import { getShortestRidingDistanceKm, RoadDistanceResult } from '../lib/distance';
+import { numberedPin } from '../lib/pinIcon';
 
 export interface RoutePoint {
   id: string;
@@ -39,11 +39,32 @@ const tagLabels: Record<string, string> = {
   end: 'End',
 };
 
-const distanceModeLabels: Record<RoadDistanceResult['mode'], string> = {
-  TWO_WHEELER: 'shortest riding distance',
-  BICYCLE: 'shortest cycling distance',
-  'straight-line': 'straight-line estimate — road routing unavailable',
+type DistanceMode = 'DRIVE' | 'mixed';
+const distanceModeLabels: Record<DistanceMode, string> = {
+  DRIVE: 'shortest driving distance',
+  mixed: 'some legs had no road route — dashed lines are straight-line estimates',
 };
+
+function decodePolyline(str: string) {
+  const out: google.maps.LatLng[] = []; let i = 0, lat = 0, lng = 0;
+  while (i < str.length) {
+    for (const k of [0, 1]) {
+      let shift = 0, result = 0, byte: number;
+      do { byte = str.charCodeAt(i++) - 63; result |= (byte & 0x1f) << shift; shift += 5; } while (byte >= 0x20);
+      const d = result & 1 ? ~(result >> 1) : result >> 1;
+      if (k === 0) lat += d; else lng += d;
+    }
+    out.push(new google.maps.LatLng(lat / 1e5, lng / 1e5));
+  }
+  return out;
+}
+
+function haversineM(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
+  const R = 6371000, r = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * r, dLng = (b.lng - a.lng) * r;
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+}
 
 let nextId = 1;
 function genId() { return `rp_${nextId++}_${Date.now()}`; }
@@ -65,7 +86,7 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
   const [error, setError] = useState<string>();
   const [coordsInput, setCoordsInput] = useState('');
   const [savedAddresses, setSavedAddresses] = useState<SavedAddr[]>([]);
-  const [distanceMode, setDistanceMode] = useState<RoadDistanceResult['mode'] | null>(null);
+  const [distanceMode, setDistanceMode] = useState<DistanceMode | null>(null);
   const [calculatingDistance, setCalculatingDistance] = useState(false);
 
   const apiKey = import.meta.env.VITE_GOOGLEMAPS_API_KEY;
@@ -85,7 +106,7 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
     if (mapInstanceRef.current) { setIsLoading(false); return; }
 
     let mounted = true;
-    const loader = new Loader({ apiKey, version: 'weekly' });
+    const loader = new Loader({ apiKey, version: 'weekly', libraries: ['places'] });
 
     loader.importLibrary('maps').then(({ Map }) => {
       if (!mounted || !mapRef.current || mapInstanceRef.current) return;
@@ -117,23 +138,11 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
       const marker = new google.maps.Marker({
         position: { lat: pt.lat, lng: pt.lng },
         map,
-        label: { text: `${i + 1}`, color: 'white', fontWeight: 'bold', fontSize: '11px' },
-        icon: {
-          path: google.maps.SymbolPath.CIRCLE, scale: 14,
-          fillColor: color, fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2,
-        },
+        icon: numberedPin(i + 1, color),
         title: `${pt.tag ? tagLabels[pt.tag] + ': ' : ''}${pt.label}`,
       });
       markersRef.current.push(marker);
     });
-
-    if (points.length >= 2) {
-      const path = points.map(pt => ({ lat: pt.lat, lng: pt.lng }));
-      const polyline = new google.maps.Polyline({
-        path, geodesic: false, strokeColor: '#3b82f6', strokeOpacity: 0.8, strokeWeight: 3, map,
-      });
-      polylinesRef.current.push(polyline);
-    }
 
     if (points.length > 0) {
       const bounds = new google.maps.LatLngBounds();
@@ -143,38 +152,50 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
     }
   }, [points]);
 
-  // Recompute the actual road distance (not straight-line) whenever the
-  // stops change. This calls Google's Routes API with TWO_WHEELER first,
-  // falling back to BICYCLE, and finally to a labelled straight-line
-  // estimate if neither road mode is available for this route.
+  // Shortest driving route between each pair of consecutive stops (Directions API),
+  // drawn along the roads. Falls back to a dashed straight line if no route is found.
   useEffect(() => {
+    const map = mapInstanceRef.current;
     let cancelled = false;
-
-    if (points.length < 2) {
-      setDistanceMode(null);
-      onDistanceChange(0);
-      return;
-    }
-
+    if (points.length < 2) { setDistanceMode(null); onDistanceChange(0); return; }
+    if (!map) return;
     setCalculatingDistance(true);
-    getShortestRidingDistanceKm(points, apiKey)
-      .then(result => {
-        if (cancelled) return;
-        onDistanceChange(result.km);
-        setDistanceMode(result.mode);
+    const legs = points.slice(0, -1).map((a, i) => [a, points[i + 1]] as const);
+    const wp = (p: RoutePoint) => ({ location: { latLng: { latitude: p.lat, longitude: p.lng } } });
+    Promise.all(legs.map(([a, b]) =>
+      fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': apiKey,
+          'X-Goog-FieldMask': 'routes.distanceMeters,routes.polyline.encodedPolyline',
+        },
+        body: JSON.stringify({ origin: wp(a), destination: wp(b), travelMode: 'DRIVE', computeAlternativeRoutes: true }),
+      }).then(async r => {
+        if (!r.ok) { console.error('Routes API error', r.status, await r.text()); return null; }
+        const data: { routes?: { distanceMeters?: number; polyline?: { encodedPolyline?: string } }[] } = await r.json();
+        const best = (data.routes || []).filter(x => typeof x.distanceMeters === 'number' && x.polyline?.encodedPolyline)
+          .sort((x, y) => x.distanceMeters! - y.distanceMeters!)[0];
+        return best ? { meters: best.distanceMeters!, path: decodePolyline(best.polyline!.encodedPolyline!), road: true } : null;
+      }).catch(() => null).then(r => r || {
+        meters: haversineM(a, b), path: [new google.maps.LatLng(a.lat, a.lng), new google.maps.LatLng(b.lat, b.lng)], road: false,
       })
-      .catch(() => {
-        if (cancelled) return;
-        onDistanceChange(0);
-        setDistanceMode(null);
-      })
-      .finally(() => {
-        if (!cancelled) setCalculatingDistance(false);
+    )).then(results => {
+      if (cancelled) return;
+      results.forEach(r => {
+        polylinesRef.current.push(new google.maps.Polyline({
+          path: r.path, map, strokeColor: '#3b82f6', strokeWeight: 4,
+          strokeOpacity: r.road ? 0.85 : 0,
+          icons: r.road ? undefined : [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 0.8, scale: 3 }, offset: '0', repeat: '12px' }],
+        }));
       });
-
+      const total = results.reduce((s, r) => s + r.meters, 0);
+      onDistanceChange(Math.round(total / 10) / 100);
+      setDistanceMode(results.every(r => r.road) ? 'DRIVE' : 'mixed');
+    }).finally(() => { if (!cancelled) setCalculatingDistance(false); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [points, apiKey]);
+  }, [points, isLoading]);
 
   const handleCoordsAdd = () => {
     const parts = coordsInput.split(',').map(s => s.trim());
