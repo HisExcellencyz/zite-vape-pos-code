@@ -13,7 +13,13 @@ export interface Branch {
   coordinates?: string;
   logoUrl?: string;
   coverPhotoUrl?: string;
+  commissions?: Commission[];
 }
+
+export interface Commission { name: string; type: 'percent' | 'fixed'; value: number }
+
+export const commissionAmount = (c: Commission, base: number) =>
+  Math.round((c.type === 'percent' ? (base * c.value) / 100 : c.value) * 100) / 100;
 
 interface BranchContextType {
   branches: Branch[];
