@@ -2,5 +2,24 @@
   "project": {
     "name": "POS & Inventory Tracker",
     "basePublicIdentifier": "cf50e75140326e2f"
+  },
+  "integrations": {
+    "email": {
+      "type": "email",
+      "connectionId": "svc_518034",
+      "provider": "gmail"
+    },
+    "googlemaps": {
+      "type": "googlemaps",
+      "connectionId": "svc_532552"
+    },
+    "googlesheets": {
+      "type": "googlesheets",
+      "connectionId": "svc_518172"
+    },
+    "github": {
+      "type": "github",
+      "connectionId": "svc_553558"
+    }
   }
 }
