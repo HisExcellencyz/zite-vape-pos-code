@@ -3,11 +3,13 @@ import { Loader } from '@googlemaps/js-api-loader';
 import { Input } from '@project/components/ui/input';
 import { Button } from '@project/components/ui/button';
 import { Search, Navigation } from 'lucide-react';
+import { numberedPin, plainPin } from '../lib/pinIcon';
 
 interface MapPin {
   lat: number;
   lng: number;
   label?: string;
+  color?: string;
 }
 
 interface Props {
@@ -21,9 +23,13 @@ interface Props {
   onSearchSelect?: (lat: number, lng: number, address: string) => void;
   /** Show a "Plus Code" entry box (e.g. 6GCRMQFG+R8) alongside the search box, for places without a street address. */
   showPlusCode?: boolean;
+  /** Zoom/pan so every pin is visible at once. */
+  fitToPins?: boolean;
+  /** Use plain red pins with a white dot instead of numbered pins. */
+  plainPins?: boolean;
 }
 
-export default function MapView({ pins = [], center, zoom = 13, className = 'h-[300px]', onClick, selectedPin, showSearch = false, onSearchSelect, showPlusCode = false }: Props) {
+export default function MapView({ pins = [], center, zoom = 13, className = 'h-[300px]', onClick, selectedPin, showSearch = false, onSearchSelect, showPlusCode = false, fitToPins = false, plainPins = false }: Props) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<google.maps.Marker[]>([]);
@@ -52,14 +58,14 @@ export default function MapView({ pins = [], center, zoom = 13, className = 'h-[
     }
 
     let mounted = true;
-    const loader = new Loader({ apiKey, version: 'weekly' });
+    const loader = new Loader({ apiKey, version: 'weekly', libraries: ['places'] });
 
     Promise.all([
       loader.importLibrary('maps'),
       loader.importLibrary('geocoding'),
     ]).then(([{ Map }]) => {
       if (!mounted || !mapRef.current || mapInstanceRef.current) return;
-      const map = new Map(mapRef.current, { center: defaultCenter, zoom });
+      const map = new Map(mapRef.current, { center: defaultCenter, zoom, fullscreenControl: true });
       mapInstanceRef.current = map;
       geocoderRef.current = new google.maps.Geocoder();
 
@@ -83,15 +89,23 @@ export default function MapView({ pins = [], center, zoom = 13, className = 'h-[
     if (!map) return;
     markersRef.current.forEach(m => m.setMap(null));
     markersRef.current = [];
-    pins.forEach(pin => {
+    pins.forEach((pin, i) => {
       const marker = new google.maps.Marker({
         position: { lat: pin.lat, lng: pin.lng },
         map,
         title: pin.label,
+        icon: plainPins ? plainPin() : numberedPin(i + 1, pin.color || '#ef4444'),
       });
       markersRef.current.push(marker);
     });
-  }, [pins]);
+    if (fitToPins && pins.length > 0) {
+      const bounds = new google.maps.LatLngBounds();
+      pins.forEach(p => bounds.extend({ lat: p.lat, lng: p.lng }));
+      map.fitBounds(bounds, 40);
+      if (pins.length === 1) map.setZoom(15);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(pins), isLoading]);
 
   // Update selected pin marker and pan to it
   useEffect(() => {
@@ -105,12 +119,12 @@ export default function MapView({ pins = [], center, zoom = 13, className = 'h-[
       selectedMarkerRef.current = new google.maps.Marker({
         position: selectedPin,
         map,
-        icon: { url: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png' },
+        icon: numberedPin(1, '#3b82f6'),
       });
       map.panTo(selectedPin);
       if (map.getZoom()! < 14) map.setZoom(15);
     }
-  }, [selectedPin]);
+  }, [selectedPin, isLoading]);
 
   const handleSearch = useCallback(async () => {
     if (!searchQuery.trim() || !apiKey) return;
