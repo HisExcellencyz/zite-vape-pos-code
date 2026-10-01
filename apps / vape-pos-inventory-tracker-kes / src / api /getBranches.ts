@@ -25,6 +25,7 @@ export default createEndpoint({
         coordinates: b.coordinates || '',
         logoUrl: branding.logoUrl || '',
         coverPhotoUrl: branding.coverPhotoUrl || '',
+        commissions: (() => { try { return b.commissionRates ? JSON.parse(b.commissionRates) : []; } catch { return []; } })() as { name: string; type: 'percent' | 'fixed'; value: number }[],
       };
     });
 
@@ -51,6 +52,7 @@ export default createEndpoint({
         coordinates: '',
         logoUrl: '',
         coverPhotoUrl: '',
+        commissions: [],
       });
     }
 
