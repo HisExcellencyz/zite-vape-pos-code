@@ -8,21 +8,15 @@
     },
     "sessionDays": 7
   },
-  "integrations": {
-    "email": {
-      "type": "email",
-      "connectionId": "svc_518034",
-      "provider": "gmail"
-    },
-    "googlemaps": {
-      "type": "googlemaps",
-      "connectionId": "svc_532552"
-    }
-  },
   "seoSettings": {
-    "title": "Uptown Vapes POS",
-    "description": "Point of Sale & Inventory Management System for Uptown Vapes",
-    "thumbnailUrl": "https://images.fillout.com/orgid-811092/flowpublicid-6hepsbbapu/widgetid-default/bkTX9KzLg7aEnqi9UjFEps/pasted-image-1788367385641-4k68git5.png",
-    "faviconUrl": "https://images.fillout.com/orgid-811092/flowpublicid-6hepsbbapu/widgetid-default/xmArbfbmsBwLWSE2d2Et7u/pasted-image-1788367385543-n4ulma8b.png"
+    "title": "Uptown; Drinks - POS",
+    "description": "Uptown; Drinks - POS & Inventory System",
+    "thumbnailUrl": "https://images.fillout.com/orgid-811092/flowpublicid-6hepsbbapu/widgetid-default/7YaiTPiz77w2NYyXmDCR1z/Uptown-Drinks-Merged-Coverpic.png",
+    "faviconUrl": "https://images.fillout.com/orgid-811092/flowpublicid-6hepsbbapu/widgetid-default/sy773YJvziReVT64uKzBai/Uptown-Drinks-Merged-Logo.png"
+  },
+  "accessMode": "external",
+  "integrationSettings": {
+    "email": {},
+    "googlesheets": { "spreadsheet": "1bCRujv1eQXslPcZ7-yRWC4ExG75SSBri39b_-BEbDqg" }
   }
 }
