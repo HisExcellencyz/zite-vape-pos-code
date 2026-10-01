@@ -23,6 +23,7 @@ export default createEndpoint({
     deliveryCoordinates: z.string().optional(),
     stops: z.string().optional(),
     deliveryDistanceKm: z.number().optional(),
+    deductions: z.array(z.object({ name: z.string(), amount: z.number() })).optional(),
   }),
   outputSchema: z.object({ success: z.boolean(), sale: z.any() }),
   execute: async ({ input, context }) => {
@@ -56,6 +57,8 @@ export default createEndpoint({
         deliveryCoordinates: input.deliveryCoordinates || null,
         stops: input.stops || null,
         deliveryDistanceKm: input.deliveryDistanceKm || null,
+        deductions: (input.deductions || []).reduce((s, d) => s + d.amount, 0),
+        deductionDetails: input.deductions?.length ? JSON.stringify(input.deductions) : null,
       },
     });
 
