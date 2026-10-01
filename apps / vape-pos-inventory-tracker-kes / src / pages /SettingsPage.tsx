@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
-import { saveBranch, consolidateOutlets, getSettings, saveSettings, syncToGoogleSheets, monthlyArchival } from 'zitejs/api';
+import { saveBranch, getSettings, saveSettings, syncToGoogleSheets } from 'zitejs/api';
+import { Link } from 'react-router-dom';
+import DashboardPage from './DashboardPage';
+import { useTheme } from '../hooks/useTheme';
 import { Card, CardContent, CardHeader, CardTitle } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
@@ -7,8 +10,7 @@ import { Label } from '@project/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@project/components/ui/tabs';
 import { Switch } from '@project/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
-import { Palette, Store, Plus, Pencil, Check, Merge, FileSpreadsheet, Archive, Save } from 'lucide-react';
+import { Palette, Store, Plus, Pencil, Check, FileSpreadsheet, Save, Shield, Moon, Sun } from 'lucide-react';
 import { toast } from 'sonner';
 import { useBranch, Branch } from '../hooks/useBranch';
 
@@ -19,6 +21,9 @@ const DEFAULT_LOGO = 'https://images.fillout.com/orgid-811092/flowpublicid-6heps
 // integration config (Google Sheets webhook, archival email) is kept,
 // mirroring the same customFields pattern used elsewhere in this app.
 const FALLBACK_SETTINGS_NAME = 'App Settings';
+
+import CommissionEditor from '../components/CommissionEditor';
+import type { Commission } from '../hooks/useBranch';
 
 export default function SettingsPage() {
   const { branches, currentBranch, setCurrentBranchId, refresh: refreshBranches } = useBranch();
@@ -33,8 +38,8 @@ export default function SettingsPage() {
   const [outletIsMain, setOutletIsMain] = useState(false);
   const [outletActive, setOutletActive] = useState(true);
   const [savingOutlet, setSavingOutlet] = useState(false);
-  const [consolidating, setConsolidating] = useState(false);
-  const [mainOutletName, setMainOutletName] = useState('Uptown Vapes');
+  const [outletCommissions, setOutletCommissions] = useState<Commission[]>([]);
+  const { theme, setTheme } = useTheme();
 
   // Integrations tab
   const [settingsId, setSettingsId] = useState<string | undefined>();
@@ -42,10 +47,8 @@ export default function SettingsPage() {
   const [settingsEmail, setSettingsEmail] = useState('');
   const [sheetsWebhookUrl, setSheetsWebhookUrl] = useState('');
   const [archivalEmail, setArchivalEmail] = useState('');
-  const [loadingIntegrations, setLoadingIntegrations] = useState(true);
   const [savingIntegrations, setSavingIntegrations] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [sendingArchival, setSendingArchival] = useState(false);
 
   useEffect(() => {
     getSettings({}).then(res => {
@@ -59,14 +62,13 @@ export default function SettingsPage() {
         setSheetsWebhookUrl(cfg.googleSheetsWebhookUrl || '');
         setArchivalEmail(cfg.archivalEmail || '');
       }
-      setLoadingIntegrations(false);
-    }).catch(() => setLoadingIntegrations(false));
+    }).catch(() => {});
   }, []);
 
   const openNewOutlet = () => {
     setEditingOutlet(null);
     setOutletName(''); setOutletAddress(''); setOutletPhone(''); setOutletTaxId('');
-    setOutletLogoUrl(''); setOutletCoverUrl(''); setOutletIsMain(branches.length === 0); setOutletActive(true);
+    setOutletLogoUrl(''); setOutletCoverUrl(''); setOutletIsMain(branches.length === 0); setOutletActive(true); setOutletCommissions([]);
     setOutletDialogOpen(true);
   };
 
@@ -80,6 +82,7 @@ export default function SettingsPage() {
     setOutletCoverUrl(b.coverPhotoUrl || '');
     setOutletIsMain(!!b.isMainBranch);
     setOutletActive(b.active !== false);
+    setOutletCommissions(b.commissions || []);
     setOutletDialogOpen(true);
   };
 
@@ -97,6 +100,7 @@ export default function SettingsPage() {
         coverPhotoUrl: outletCoverUrl || undefined,
         isMainBranch: outletIsMain,
         active: outletActive,
+        commissions: outletCommissions.filter(c => c.name.trim() && c.value > 0),
       });
       toast.success(editingOutlet ? 'Outlet updated' : 'Outlet created');
       setOutletDialogOpen(false);
@@ -106,22 +110,6 @@ export default function SettingsPage() {
       toast.error(e.message || 'Failed to save outlet');
     } finally {
       setSavingOutlet(false);
-    }
-  };
-
-  const handleConsolidate = async () => {
-    if (!mainOutletName.trim()) return toast.error('Enter the outlet name to consolidate into');
-    setConsolidating(true);
-    try {
-      const res = await consolidateOutlets({ mainOutletName: mainOutletName.trim() });
-      const movedTotal = Object.values(res.moved).reduce((a, b) => a + b, 0);
-      toast.success(`Moved ${movedTotal} records to "${mainOutletName.trim()}". ${res.resetOutlets} other outlet(s) reset to blank.`);
-      await refreshBranches();
-      setCurrentBranchId(res.branchId);
-    } catch (e: any) {
-      toast.error(e.message || 'Failed to consolidate outlets');
-    } finally {
-      setConsolidating(false);
     }
   };
 
@@ -135,7 +123,7 @@ export default function SettingsPage() {
         customFields: JSON.stringify({ googleSheetsWebhookUrl: sheetsWebhookUrl, archivalEmail }),
       });
       if (!settingsId && res.settings) setSettingsId((res.settings as any).id);
-      toast.success('Integration settings saved');
+      toast.success('Google Sheet link saved');
     } catch (e: any) {
       toast.error(e.message || 'Failed to save');
     } finally {
@@ -144,10 +132,9 @@ export default function SettingsPage() {
   };
 
   const handleSyncNow = async () => {
-    if (!sheetsWebhookUrl.trim()) return toast.error('Add a Google Sheets webhook URL first');
     setSyncing(true);
     try {
-      const res = await syncToGoogleSheets({ webhookUrl: sheetsWebhookUrl.trim() });
+      const res = await syncToGoogleSheets({});
       toast.success(res.message);
     } catch (e: any) {
       toast.error(e.message || 'Sync failed');
@@ -156,30 +143,20 @@ export default function SettingsPage() {
     }
   };
 
-  const handleSendArchivalNow = async () => {
-    if (!archivalEmail.trim()) return toast.error('Add an archival recipient email first');
-    setSendingArchival(true);
-    try {
-      const res = await monthlyArchival({ recipientEmail: archivalEmail.trim() });
-      toast.success(res.message);
-    } catch (e: any) {
-      toast.error(e.message || 'Failed to send archival');
-    } finally {
-      setSendingArchival(false);
-    }
-  };
-
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Settings</h1>
-        <p className="text-sm text-muted-foreground">Manage your outlets, integrations and appearance</p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Settings</h1>
+          <p className="text-sm text-muted-foreground">Manage your outlets, business overview and appearance</p>
+        </div>
+        <Button asChild variant="outline" size="sm"><Link to="/users"><Shield className="w-4 h-4 mr-1" /> Users</Link></Button>
       </div>
 
       <Tabs defaultValue="outlets">
         <TabsList className="bg-muted">
           <TabsTrigger value="outlets">Outlets</TabsTrigger>
-          <TabsTrigger value="integrations">Integrations</TabsTrigger>
+          <TabsTrigger value="business">Business Overview</TabsTrigger>
           <TabsTrigger value="theme">Theme</TabsTrigger>
         </TabsList>
 
@@ -220,43 +197,12 @@ export default function SettingsPage() {
             ))}
           </div>
 
-          <Card className="bg-card border-border max-w-2xl">
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Merge className="w-4 h-4 text-amber-400" /> Consolidate to one outlet
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                Moves every sale, purchase, purchase order, expense, income entry, deposit and product onto a single
-                named outlet (creating it if it doesn't exist yet, and making it the main outlet). Every other
-                outlet is reset — name, address, phone, tax ID, logo and cover photo cleared — so it sits blank and
-                unused, ready to be set up fresh later. This cannot be undone.
-              </p>
-              <div>
-                <Label>Outlet to consolidate into</Label>
-                <Input value={mainOutletName} onChange={e => setMainOutletName(e.target.value)} placeholder="Uptown Vapes" />
-              </div>
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button variant="outline" className="border-amber-500 text-amber-400 hover:bg-amber-500/10" disabled={consolidating}>
-                    <Merge className="w-4 h-4 mr-1" /> {consolidating ? 'Consolidating...' : 'Consolidate Now'}
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Move all records to "{mainOutletName.trim() || 'this outlet'}"?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      Every branch-linked record across the app will be reassigned to this outlet, and every other
-                      outlet will be reset to blank. This cannot be undone.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={handleConsolidate} className="bg-amber-500 hover:bg-amber-600">Consolidate</AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+          <Card className="bg-card border-border w-full max-w-[403px]">
+            <CardContent className="p-3 space-y-2">
+              <p className="text-sm font-semibold flex items-center gap-2"><FileSpreadsheet className="w-4 h-4 text-emerald-400" /> Archive to Google Sheets</p>
+              <p className="text-xs text-muted-foreground">Copies products, customers, suppliers, sales, purchases, expenses and income from every outlet to your connected Google Sheet.</p>
+              <p className="text-[11px] text-muted-foreground">Sends to your connected "Uptown; Drinks POS Database" sheet. Sales, purchases, expenses and income older than 3 months are removed from the app after each archive.</p>
+              <Button size="sm" className="h-8 w-full" onClick={handleSyncNow} disabled={syncing}>{syncing ? 'Archiving...' : 'Archive Now'}</Button>
             </CardContent>
           </Card>
 
@@ -298,6 +244,7 @@ export default function SettingsPage() {
                     <img src={outletCoverUrl} alt="Cover preview" className="mt-2 w-full h-24 rounded-lg object-cover border border-border" onError={e => (e.currentTarget.style.display = 'none')} />
                   )}
                 </div>
+                <CommissionEditor value={outletCommissions} onChange={setOutletCommissions} />
                 <div className="flex items-center gap-3">
                   <Switch checked={outletIsMain} onCheckedChange={setOutletIsMain} />
                   <Label className="text-sm">Set as the main outlet (default view)</Label>
@@ -315,95 +262,25 @@ export default function SettingsPage() {
           </Dialog>
         </TabsContent>
 
-        <TabsContent value="integrations" className="mt-4 space-y-4">
-          {loadingIntegrations ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-            </div>
-          ) : (
-            <>
-              <Card className="bg-card border-border max-w-2xl">
-                <CardHeader>
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <FileSpreadsheet className="w-4 h-4 text-emerald-400" /> Google Sheets export
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <p className="text-sm text-muted-foreground">
-                    One-way push of products, customers, suppliers, sales, purchases, expenses and income to a
-                    Google Sheet. This app has no built-in Google Sheets connection, so it posts to a webhook URL —
-                    set up a Google Apps Script "Web App" bound to your Sheet that accepts a POST and appends the
-                    rows, then paste its URL here.
-                  </p>
-                  <div>
-                    <Label>Google Sheets webhook URL</Label>
-                    <Input value={sheetsWebhookUrl} onChange={e => setSheetsWebhookUrl(e.target.value)} placeholder="https://script.google.com/macros/s/.../exec" />
-                  </div>
-                  <div className="flex gap-2 flex-wrap">
-                    <Button size="sm" onClick={handleSaveIntegrations} disabled={savingIntegrations}>
-                      <Save className="w-3.5 h-3.5 mr-1" /> {savingIntegrations ? 'Saving...' : 'Save'}
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={handleSyncNow} disabled={syncing}>
-                      {syncing ? 'Syncing...' : 'Sync Now'}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="bg-card border-border max-w-2xl">
-                <CardHeader>
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Archive className="w-4 h-4 text-secondary" /> Monthly archival
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <p className="text-sm text-muted-foreground">
-                    Emails a CSV snapshot of sales, purchases, other expenses, other income and stock levels,
-                    automatically on the 1st of each month, to the address below. You can also send one immediately.
-                  </p>
-                  <div>
-                    <Label>Archival recipient email</Label>
-                    <Input value={archivalEmail} onChange={e => setArchivalEmail(e.target.value)} placeholder="owner@example.com" type="email" />
-                  </div>
-                  <div className="flex gap-2 flex-wrap">
-                    <Button size="sm" onClick={handleSaveIntegrations} disabled={savingIntegrations}>
-                      <Save className="w-3.5 h-3.5 mr-1" /> {savingIntegrations ? 'Saving...' : 'Save'}
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={handleSendArchivalNow} disabled={sendingArchival}>
-                      {sendingArchival ? 'Sending...' : 'Send Archival Now'}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            </>
-          )}
+        <TabsContent value="business" className="mt-4 -mx-6">
+          <DashboardPage scope="business" />
         </TabsContent>
 
         <TabsContent value="theme" className="mt-4">
           <Card className="bg-card border-border max-w-2xl">
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
-                <Palette className="w-4 h-4 text-secondary" /> Theme Customization
+                <Palette className="w-4 h-4 text-secondary" /> Appearance
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-3 gap-4">
-                {[
-                  { name: 'Blue & Pink (Default)', colors: ['#3B82F6', '#EC4899', '#0F172A'] },
-                  { name: 'Green & Gold', colors: ['#22C55E', '#F59E0B', '#0F172A'] },
-                  { name: 'Purple & Teal', colors: ['#8B5CF6', '#14B8A6', '#0F172A'] },
-                ].map(theme => (
-                  <button key={theme.name} className="p-4 border border-border rounded-xl hover:border-primary/50 transition-colors text-left">
-                    <div className="flex gap-1.5 mb-3">
-                      {theme.colors.map((c, i) => (
-                        <div key={i} className="w-6 h-6 rounded-full" style={{ backgroundColor: c }} />
-                      ))}
-                    </div>
-                    <p className="text-xs font-medium text-foreground">{theme.name}</p>
+              <div className="grid grid-cols-2 gap-4 max-w-sm">
+                {([['light', 'Light', Sun], ['dark', 'Dark', Moon]] as const).map(([val, label, Icon]) => (
+                  <button key={val} onClick={() => setTheme(val)} className={`p-4 border rounded-xl transition-colors flex items-center gap-2 ${theme === val ? 'border-primary bg-primary/10 text-primary' : 'border-border text-foreground hover:border-primary/50'}`}>
+                    <Icon className="w-4 h-4" /> <span className="text-sm font-medium">{label} mode</span>
                   </button>
                 ))}
               </div>
-              <p className="text-xs text-muted-foreground mt-4">More theme options coming soon.</p>
             </CardContent>
           </Card>
         </TabsContent>
