@@ -1,11 +1,10 @@
 import { useState, useEffect } from 'react';
-import { getProducts, getCustomers, createSale, saveCustomer } from 'zitejs/api';
+import { getProducts, getCustomers, createSale, saveCustomer, getSales } from 'zitejs/api';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
 import { Badge } from '@project/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { Search, Plus, Minus, ShoppingCart, Trash2, UserPlus, X, Receipt, DollarSign, MapPin, Route, UserCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import DeliveryRouteMap from '../components/DeliveryRouteMap';
@@ -14,7 +13,10 @@ import ViewToggle, { useViewMode } from '../components/ViewToggle';
 import OtherIncomeDialog from '../components/OtherIncomeDialog';
 import ProductImage from '../components/ProductImage';
 import CustomerPicker, { PickableCustomer } from '../components/CustomerPicker';
-import { useBranch } from '../hooks/useBranch';
+import { useBranch, commissionAmount } from '../hooks/useBranch';
+import SummaryTiles from '../components/SummaryTiles';
+import DateRangeFilter, { Range, inRange } from '../components/DateRangeFilter';
+import { isCashPayment } from '../lib/payments';
 
 interface Product {
   id: string;
@@ -46,7 +48,7 @@ export default function POSPage() {
   const [search, setSearch] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [paymentMethod, setPaymentMethod] = useState('Cash/M-PESA');
   const [showCustomerDialog, setShowCustomerDialog] = useState(false);
   const [newCustName, setNewCustName] = useState('');
   const [newCustPhone, setNewCustPhone] = useState('');
@@ -61,13 +63,17 @@ export default function POSPage() {
   const [showDeliveryMap, setShowDeliveryMap] = useState(false);
   const [routePoints, setRoutePoints] = useState<any[]>([]);
   const [distanceKm, setDistanceKm] = useState(0);
+  const [range, setRange] = useState<Range>({});
+  const [recentSales, setRecentSales] = useState<any[]>([]);
+  const loadSales = () => getSales({ branchId: currentBranch?.id }).then(r => setRecentSales(r.sales)).catch(() => {});
+  useEffect(() => { loadSales(); }, [currentBranch?.id]);
 
   useEffect(() => {
-    Promise.all([getProducts({ status: 'Active' }), getCustomers({})]).then(([prods, custs]) => {
+    Promise.all([getProducts({ status: 'Active', branchId: currentBranch?.id }), getCustomers({})]).then(([prods, custs]) => {
       setProducts(prods.products as Product[]);
       setCustomers(custs.customers as Customer[]);
     });
-  }, []);
+  }, [currentBranch?.id]);
 
   const filtered = products.filter(p =>
     (p.productName || '').toLowerCase().includes(search.toLowerCase()) ||
@@ -114,12 +120,13 @@ export default function POSPage() {
         deliveryCoordinates: routePoints.length > 0 ? routePoints.map((p: any) => `${p.lat},${p.lng}`).join(' → ') : undefined,
         stops: [...otherStops, ...pickups, ...dropoffs].map((p: any) => p.label).join('; ') || undefined,
         deliveryDistanceKm: distanceKm || undefined,
+        deductions: (currentBranch?.commissions || []).map(d => ({ name: d.name, amount: commissionAmount(d, total) })),
       });
       toast.success('Sale completed!');
       setCart([]);
       setSelectedCustomer(null);
-      setRoutePoints([]); setDistanceKm(0);
-      const prods = await getProducts({ status: 'Active' });
+      setRoutePoints([]); setDistanceKm(0); loadSales();
+      const prods = await getProducts({ status: 'Active', branchId: currentBranch?.id });
       setProducts(prods.products as Product[]);
     } catch (e: any) {
       toast.error(e.message || 'Sale failed');
@@ -187,6 +194,21 @@ export default function POSPage() {
               <DollarSign className="w-4 h-4 mr-1" /> Other Income
             </Button>
           </div>
+        </div>
+
+        <div className="mb-3 space-y-2">
+          <DateRangeFilter value={range} onChange={setRange} />
+          <SummaryTiles small items={(() => {
+            const f = recentSales.filter(x => x.status !== 'Voided' && inRange(range, x.saleDate));
+            const sum = (xs: any[], k: string) => xs.reduce((a, x) => a + (x[k] || 0), 0);
+            const cash = f.filter(x => isCashPayment(x.paymentMethod));
+            return [
+              { label: 'Sales Made', value: fmt(sum(f, 'total')) },
+              { label: 'Deductions', value: fmt(sum(f, 'deductions')) },
+              { label: 'Platform Pay', value: fmt(sum(f, 'total') - sum(cash, 'total')) },
+              { label: 'Cash/M-PESA', value: fmt(sum(cash, 'total')) },
+            ];
+          })()} />
         </div>
 
         <div className="relative mb-4">
@@ -280,11 +302,11 @@ export default function POSPage() {
             ) : (
               <>
                 <CustomerPicker
-                  className="flex-1"
-                  placeholder="Link customer by name or phone..."
+                  className="w-1/2 min-w-0 rounded-md ring-1 ring-pink-400/70"
+                  placeholder="Link customer..."
                   onSelect={(c: PickableCustomer) => setSelectedCustomer(c as Customer)}
                 />
-                <Button size="sm" variant="outline" onClick={() => setShowCustomerDialog(true)} className="h-9 shrink-0"><UserPlus className="w-3.5 h-3.5" /></Button>
+                <Button size="sm" variant="outline" onClick={() => setShowCustomerDialog(true)} className="h-9 w-1/2 border-amber-400/80 hover:border-amber-400 hover:shadow-[0_0_12px_hsl(45_95%_55%/0.35)]"><UserPlus className="w-3.5 h-3.5 mr-1" /> Add Customer</Button>
               </>
             )}
           </div>
@@ -323,15 +345,14 @@ export default function POSPage() {
             <span className="text-primary">{fmt(total)}</span>
           </div>
 
-          <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="cash">Cash</SelectItem>
-              <SelectItem value="mpesa">M-Pesa</SelectItem>
-              <SelectItem value="card">Card</SelectItem>
-              <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="grid grid-cols-2 gap-1.5">
+            {['Platform Pay', 'Cash/M-PESA'].map(m => (
+              <button key={m} type="button" onClick={() => setPaymentMethod(m)}
+                className={`h-9 rounded-md border text-xs font-medium transition-all ${paymentMethod === m ? 'border-sky-500 bg-sky-500 text-white' : 'border-border text-muted-foreground hover:border-sky-500/60'}`}>
+                {m}
+              </button>
+            ))}
+          </div>
 
           <div className="space-y-2 border-t border-border pt-3">
             <div className="flex items-center justify-between">
