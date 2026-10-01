@@ -38,6 +38,10 @@ const SORT_LABELS: Record<SortBy, string> = {
 
 const fmt = (n?: number) => `KES ${(n || 0).toLocaleString()}`;
 
+import { useTableControls, TableControls, SortTh, FieldDef } from '../components/TableControls';
+
+const FIELDS: FieldDef<Customer>[] = [{ key: 'customerName', label: 'Name' }, { key: 'phoneNumber', label: 'Phone' }, { key: 'email', label: 'Email' }, { key: 'address', label: 'Address' }, { key: 'notes', label: 'Notes' }, { key: 'orderCount', label: 'Orders' }, { key: 'totalSpent', label: 'Total Spent' }];
+
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,6 +63,7 @@ export default function CustomersPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const tc = useTableControls(customers, FIELDS);
   const [viewMode, setViewMode] = useViewMode('customers', 'list');
 
   const load = async () => {
@@ -208,6 +213,7 @@ export default function CustomersPage() {
 
   return (
     <div className="p-6 space-y-6">
+      <div className="sticky top-0 z-20 -mx-6 -mt-6 px-6 pt-6 pb-4 space-y-4 bg-background/95 backdrop-blur border-b border-border">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Customers</h1>
@@ -240,24 +246,7 @@ export default function CustomersPage() {
         </div>
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative max-w-md flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input placeholder="Search by name or phone..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
-        </div>
-        <div className="flex items-center gap-2">
-          <Select value={sortBy} onValueChange={v => setSortBy(v as SortBy)}>
-            <SelectTrigger className="w-48"><SelectValue placeholder="Sort by" /></SelectTrigger>
-            <SelectContent>
-              {(Object.keys(SORT_LABELS) as SortBy[]).map(key => (
-                <SelectItem key={key} value={key}>Sort: {SORT_LABELS[key]}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button variant="outline" size="icon" onClick={toggleSortDir} title={sortDir === 'asc' ? 'Ascending' : 'Descending'}>
-            {sortDir === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />}
-          </Button>
-        </div>
+      <TableControls c={tc} />
       </div>
 
       {viewMode === 'list' ? (
@@ -268,11 +257,11 @@ export default function CustomersPage() {
                 <thead className="sticky top-0 z-10 bg-card">
                   <tr className="border-b border-border text-muted-foreground bg-card">
                     <th className="p-3 w-8"><input type="checkbox" checked={selectedIds.size === customers.length && customers.length > 0} onChange={toggleSelectAll} className="rounded" /></th>
-                    <th className="text-left p-3 font-medium">Name</th>
-                    <th className="text-left p-3 font-medium">Phone</th>
-                    <th className="text-left p-3 font-medium">Email</th>
-                    <th className="text-right p-3 font-medium">Orders</th>
-                    <th className="text-right p-3 font-medium">Total Spent</th>
+                    <SortTh c={tc} k="customerName" className="text-left">Name</SortTh>
+                    <SortTh c={tc} k="phoneNumber" className="text-left">Phone</SortTh>
+                    <SortTh c={tc} k="email" className="text-left">Email</SortTh>
+                    <SortTh c={tc} k="orderCount" className="text-right">Orders</SortTh>
+                    <SortTh c={tc} k="totalSpent" className="text-right">Total Spent</SortTh>
                     <th className="text-right p-3 font-medium">Actions</th>
                   </tr>
                 </thead>
@@ -284,14 +273,14 @@ export default function CustomersPage() {
                         {[...Array(6)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}
                       </tr>
                     ))
-                  ) : customers.length === 0 ? (
+                  ) : tc.view.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="text-center py-12 text-muted-foreground">
                         <Users className="w-10 h-10 mx-auto mb-2 opacity-40" />
                         No customers found
                       </td>
                     </tr>
-                  ) : customers.map(c => (
+                  ) : tc.view.map(c => (
                     <tr key={c.id} className="border-b border-border hover:bg-muted/30">
                       <td className="p-3"><input type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} className="rounded" /></td>
                       <td className="p-3 font-medium text-foreground break-words whitespace-normal">{c.customerName}</td>
@@ -320,14 +309,14 @@ export default function CustomersPage() {
               [...Array(4)].map((_, i) => (
                 <Card key={i} className="bg-card border-border"><CardContent className="p-4"><div className="h-24 bg-muted rounded animate-pulse" /></CardContent></Card>
               ))
-            ) : customers.length === 0 ? (
+            ) : tc.view.length === 0 ? (
               <Card className="col-span-full bg-card border-border">
                 <CardContent className="py-12 text-center text-muted-foreground">
                   <Users className="w-10 h-10 mx-auto mb-2 opacity-40" />
                   No customers found
                 </CardContent>
               </Card>
-            ) : customers.map(c => (
+            ) : tc.view.map(c => (
               <Card key={c.id} className={`bg-card ${selectedIds.has(c.id) ? 'border-primary' : 'border-border'}`}>
                 <CardContent className="p-4 space-y-3">
                   <div className="flex items-start gap-2">
