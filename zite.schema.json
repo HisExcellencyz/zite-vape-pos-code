@@ -279,6 +279,15 @@
             "type": "single_line_text",
             "template": {}
           }
+        },
+        {
+          "id": "faKpgytd1Uk",
+          "sdkName": "commissionRates",
+          "definition": {
+            "name": "Commission Rates",
+            "type": "long_text",
+            "template": {}
+          }
         }
       ]
     },
@@ -1145,6 +1154,16 @@
                   "value": "qVmq",
                   "label": "Bank Transfer",
                   "color": "orange"
+                },
+                {
+                  "value": "i6eg",
+                  "label": "mpesa",
+                  "color": "gray"
+                },
+                {
+                  "value": "3zRY",
+                  "label": "bank_transfer",
+                  "color": "red"
                 }
               ],
               "disableColors": false
@@ -1310,6 +1329,28 @@
               "numberFormat": "local",
               "decimalPlaces": 1
             }
+          }
+        },
+        {
+          "id": "fkucPFk9pC7",
+          "sdkName": "deductions",
+          "definition": {
+            "name": "Deductions",
+            "type": "currency",
+            "template": {
+              "numberFormat": "local",
+              "decimalPlaces": 2,
+              "currencySymbol": "KES"
+            }
+          }
+        },
+        {
+          "id": "fr26y6ofamT",
+          "sdkName": "deductionDetails",
+          "definition": {
+            "name": "Deduction Details",
+            "type": "long_text",
+            "template": {}
           }
         }
       ]
@@ -2383,6 +2424,11 @@
                   "value": "pDPy",
                   "label": "Other",
                   "color": "gray"
+                },
+                {
+                  "value": "2nfa",
+                  "label": "pickup",
+                  "color": "orange"
                 }
               ],
               "disableColors": false
