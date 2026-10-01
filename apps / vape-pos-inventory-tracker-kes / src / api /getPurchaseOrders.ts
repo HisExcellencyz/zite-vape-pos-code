@@ -1,18 +1,21 @@
 import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
+import { branchFilter } from '../lib/branchScope';
 
 export default createEndpoint({
   description: 'List purchase orders with supplier info',
   authenticated: true,
   inputSchema: z.object({
     status: z.string().optional(),
+    branchId: z.string().optional(),
   }),
   outputSchema: z.object({ orders: z.array(z.any()) }),
   execute: async ({ input }) => {
     const filters: any = {};
     if (input.status) filters.status = input.status;
-    const { records } = await zite.purchaseOrders.findAll({ filters, limit: 500 });
+    const { records: all } = await zite.purchaseOrders.findAll({ filters, limit: 500 });
+    const records = all.filter(await branchFilter(input.branchId));
 
     // Enrich with supplier names
     const supplierIds = [...new Set(records.map(r => r.supplier?.[0]).filter((x): x is string => !!x))];
