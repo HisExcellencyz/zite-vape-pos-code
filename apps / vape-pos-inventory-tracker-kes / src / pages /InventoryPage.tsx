@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useBranch } from '../hooks/useBranch';
 import { getProducts, getCategories, saveProduct, deleteRecord, exportCsv, importCsv, bulkUpdateProducts, bulkDeleteRecords, uploadProductImage } from 'zitejs/api';
 import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
@@ -8,13 +9,18 @@ import { Badge } from '@project/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
-import { Search, Plus, Download, Upload, Package, Pencil, Trash2, CheckSquare, ArrowUp, ArrowDown } from 'lucide-react';
+import { Search, Plus, Download, Upload, Package, Pencil, Trash2, CheckSquare, ArrowUp, ArrowDown, FolderTree } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { downloadCsv } from '../lib/exportHelper';
 import { normalizeImageUrl, isDirectImageUrl, isHttpUrl } from '../lib/imageUrl';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
 import ImportDialog from '../components/ImportDialog';
 import ProductImage from '../components/ProductImage';
+import { getInventoryValuation, GetInventoryValuationOutputType } from 'zitejs/api';
+import { useTableControls, TableControls, SortTh, FieldDef } from '../components/TableControls';
+import DateRangeFilter, { Range, eatBounds } from '../components/DateRangeFilter';
+import SummaryTiles from '../components/SummaryTiles';
 
 interface Product {
   id: string;
@@ -24,6 +30,7 @@ interface Product {
   sellingPrice?: number;
   stockQuantity?: number;
   status?: string;
+  reorderLevel?: number;
   category?: string | string[];
   images?: { url: string }[];
 }
@@ -45,7 +52,24 @@ const SORT_LABELS: Record<SortBy, string> = {
 
 const photoOf = (p: Product) => p.images?.[0]?.url;
 
+const FIELDS: FieldDef<any>[] = [
+  { key: 'productName', label: 'Product' }, { key: 'sku', label: 'SKU' }, { key: 'costPrice', label: 'Cost' },
+  { key: 'sellingPrice', label: 'Selling' }, { key: 'stockQuantity', label: 'Stock' }, { key: 'reorderLevel', label: 'Reorder Level' },
+  { key: 'status', label: 'Status' }, { key: 'description', label: 'Description' },
+];
+
 export default function InventoryPage() {
+  const { currentBranch } = useBranch();
+  const [range, setRange] = useState<Range>({});
+  const [valuation, setValuation] = useState<GetInventoryValuationOutputType | null>(null);
+  useEffect(() => {
+    const b = eatBounds(range);
+    getInventoryValuation({
+      branchId: currentBranch?.id,
+      start: range.start ? new Date(b.from - 1).toISOString() : undefined,
+      end: range.end ? new Date(b.to).toISOString() : undefined,
+    }).then(setValuation).catch(() => setValuation(null));
+  }, [range.start?.getTime(), range.end?.getTime(), currentBranch?.id]);
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -81,6 +105,7 @@ export default function InventoryPage() {
     try {
       const [prods, cats] = await Promise.all([
         getProducts({
+          branchId: currentBranch?.id,
           search,
           status: statusFilter && statusFilter !== 'all' ? statusFilter : undefined,
           sortBy,
@@ -97,7 +122,7 @@ export default function InventoryPage() {
     }
   };
 
-  useEffect(() => { load(); }, [search, statusFilter, sortBy, sortDir]);
+  useEffect(() => { load(); }, [search, statusFilter, sortBy, sortDir, currentBranch?.id]);
 
   const openEdit = (p: Product) => {
     setEditing(p);
@@ -127,6 +152,7 @@ export default function InventoryPage() {
     setSaving(true);
     try {
       const res: any = await saveProduct({
+        branchId: currentBranch?.id,
         id: editing?.id,
         productName: formName,
         sku: formSku,
@@ -228,6 +254,7 @@ export default function InventoryPage() {
     setSelectedIds(selectedIds.size === products.length ? new Set() : new Set(products.map(p => p.id)));
   };
 
+  const tc = useTableControls(products, FIELDS);
   const fmt = (n?: number) => n != null ? `KES ${n.toLocaleString()}` : 'KES 0';
 
   const toggleSortDir = () => setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
@@ -261,6 +288,7 @@ export default function InventoryPage() {
 
   return (
     <div className="p-6 space-y-6">
+      <div className="sticky top-0 z-20 -mx-6 -mt-6 px-6 pt-6 pb-4 space-y-4 bg-background/95 backdrop-blur border-b border-border">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Inventory</h1>
@@ -275,14 +303,15 @@ export default function InventoryPage() {
           )}
           <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExport}><Download className="w-4 h-4 mr-1" /> Export</Button>
           <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10" onClick={() => setImportOpen(true)}><Upload className="w-4 h-4 mr-1" /> Import</Button>
+          <Button asChild variant="outline" size="sm"><Link to="/categories"><FolderTree className="w-4 h-4 mr-1" /> Categories</Link></Button>
           <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" /> Add Product</Button>
         </div>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input placeholder="Search products..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+        <div className="flex-1 flex flex-wrap gap-2 items-center">
+          <DateRangeFilter value={range} onChange={setRange} />
+          <TableControls c={tc} />
         </div>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="w-40"><SelectValue placeholder="All Status" /></SelectTrigger>
@@ -292,19 +321,20 @@ export default function InventoryPage() {
             <SelectItem value="Inactive">Inactive</SelectItem>
           </SelectContent>
         </Select>
-        <div className="flex items-center gap-2">
-          <Select value={sortBy} onValueChange={v => setSortBy(v as SortBy)}>
-            <SelectTrigger className="w-44"><SelectValue placeholder="Sort by" /></SelectTrigger>
-            <SelectContent>
-              {(Object.keys(SORT_LABELS) as SortBy[]).map(key => (
-                <SelectItem key={key} value={key}>Sort: {SORT_LABELS[key]}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button variant="outline" size="icon" onClick={toggleSortDir} title={sortDir === 'asc' ? 'Ascending' : 'Descending'}>
-            {sortDir === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />}
-          </Button>
-        </div>
+      </div>
+      {valuation && (
+        <SummaryTiles items={range.start || range.end ? [
+          { label: 'Opening Inventory', value: fmt(valuation.start?.value ?? valuation.current.value), sub: `${(valuation.start?.units ?? valuation.current.units).toLocaleString()} units` },
+          { label: 'Closing Inventory', value: fmt(valuation.end?.value ?? valuation.current.value), sub: `${(valuation.end?.units ?? valuation.current.units).toLocaleString()} units` },
+          { label: 'Change', value: fmt((valuation.end?.value ?? valuation.current.value) - (valuation.start?.value ?? valuation.current.value)) },
+          { label: 'Current Value', value: fmt(valuation.current.value), sub: `${valuation.current.units.toLocaleString()} units` },
+        ] : [
+          { label: 'Inventory Value', value: fmt(valuation.current.value), sub: 'At cost price' },
+          { label: 'Units in Stock', value: valuation.current.units.toLocaleString() },
+          { label: 'Products', value: String(products.length) },
+          { label: 'Low Stock', value: String(products.filter(p => (p.stockQuantity || 0) <= (p.reorderLevel || 0)).length) },
+        ]} />
+      )}
       </div>
 
       {viewMode === 'list' ? (
@@ -315,12 +345,12 @@ export default function InventoryPage() {
                 <thead className="sticky top-0 z-10 bg-card">
                   <tr className="border-b border-border text-muted-foreground bg-card">
                     <th className="p-3 w-8"><input type="checkbox" checked={selectedIds.size === products.length && products.length > 0} onChange={toggleAll} className="rounded" /></th>
-                    <th className="text-left p-3 font-medium">Product</th>
-                    <th className="text-left p-3 font-medium">SKU</th>
-                    <th className="text-right p-3 font-medium">Cost</th>
-                    <th className="text-right p-3 font-medium">Selling</th>
-                    <th className="text-right p-3 font-medium">Stock</th>
-                    <th className="text-center p-3 font-medium">Status</th>
+                    <SortTh c={tc} k="productName" className="text-left">Product</SortTh>
+                    <SortTh c={tc} k="sku" className="text-left">SKU</SortTh>
+                    <SortTh c={tc} k="costPrice" className="text-right">Cost</SortTh>
+                    <SortTh c={tc} k="sellingPrice" className="text-right">Selling</SortTh>
+                    <SortTh c={tc} k="stockQuantity" className="text-right">Stock</SortTh>
+                    <SortTh c={tc} k="status" className="text-center">Status</SortTh>
                     <th className="text-right p-3 font-medium">Actions</th>
                   </tr>
                 </thead>
@@ -332,7 +362,7 @@ export default function InventoryPage() {
                         {[...Array(7)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}
                       </tr>
                     ))
-                  ) : products.length === 0 ? (
+                  ) : tc.view.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="text-center py-12 text-muted-foreground">
                         <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
@@ -340,7 +370,7 @@ export default function InventoryPage() {
                       </td>
                     </tr>
                   ) : (
-                    products.map(p => (
+                    tc.view.map((p: Product) => (
                       <tr key={p.id} className="border-b border-border hover:bg-muted/30 transition-colors">
                         <td className="p-3"><input type="checkbox" checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} className="rounded" /></td>
                         <td className="p-3 font-medium text-foreground max-w-xs">
@@ -376,20 +406,20 @@ export default function InventoryPage() {
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 items-stretch">
             {loading ? (
               [...Array(5)].map((_, i) => (
-                <Card key={i} className="bg-card border-border"><CardContent className="p-4"><div className="aspect-square bg-muted rounded animate-pulse" /></CardContent></Card>
+                <Card key={i} className="bg-card border-border"><CardContent className="p-2.5"><div className="aspect-[16/9] bg-muted rounded animate-pulse" /></CardContent></Card>
               ))
-            ) : products.length === 0 ? (
+            ) : tc.view.length === 0 ? (
               <Card className="col-span-full bg-card border-border">
                 <CardContent className="py-12 text-center text-muted-foreground">
                   <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
                   No products found
                 </CardContent>
               </Card>
-            ) : products.map(p => (
+            ) : tc.view.map((p: Product) => (
               <Card key={p.id} className={`bg-card flex flex-col ${selectedIds.has(p.id) ? 'border-primary' : 'border-border'}`}>
-                <CardContent className="p-3 space-y-3 flex flex-col flex-1">
+                <CardContent className="p-2.5 space-y-2 flex flex-col flex-1">
                   <div className="relative">
-                    <ProductImage src={photoOf(p)} alt={p.productName} className="w-full" />
+                    <ProductImage src={photoOf(p)} alt={p.productName} className="w-full !aspect-[16/9]" />
                     <input type="checkbox" checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} className="absolute top-2 left-2 rounded" />
                     <div className="absolute top-2 right-2">{statusBadge(p)}</div>
                   </div>
@@ -397,7 +427,7 @@ export default function InventoryPage() {
                     <p className="font-medium text-foreground break-words whitespace-normal leading-snug [overflow-wrap:anywhere]">{p.productName}</p>
                     <p className="text-xs text-muted-foreground font-mono break-all mt-0.5">{p.sku}</p>
                   </div>
-                  <div className="grid grid-cols-3 gap-2 text-xs mt-auto">
+                  <div className="grid grid-cols-3 gap-1.5 text-xs leading-tight mt-auto">
                     <div className="min-w-0">
                       <p className="text-muted-foreground">Cost</p>
                       <p className="font-medium text-foreground break-words">{fmt(p.costPrice)}</p>
@@ -411,7 +441,7 @@ export default function InventoryPage() {
                       <p className={`font-semibold ${p.stockQuantity && p.stockQuantity > 0 ? 'text-emerald-400' : 'text-red-400'}`}>{p.stockQuantity || 0}</p>
                     </div>
                   </div>
-                  <div className="border-t border-border pt-2">{renderActions(p)}</div>
+                  <div className="border-t border-border pt-1.5">{renderActions(p)}</div>
                 </CardContent>
               </Card>
             ))}
