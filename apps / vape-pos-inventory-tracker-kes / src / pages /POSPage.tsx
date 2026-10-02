@@ -60,6 +60,9 @@ export default function POSPage() {
   const [catalogView, setCatalogView] = useViewMode('pos', 'grid');
   const { currentBranch } = useBranch();
 
+  // Names of the outlet deductions the cashier has ticked for the current order.
+  const [selectedDeductions, setSelectedDeductions] = useState<string[]>([]);
+
   const [showDeliveryMap, setShowDeliveryMap] = useState(false);
   const [routePoints, setRoutePoints] = useState<any[]>([]);
   const [distanceKm, setDistanceKm] = useState(0);
@@ -67,6 +70,9 @@ export default function POSPage() {
   const [recentSales, setRecentSales] = useState<any[]>([]);
   const loadSales = () => getSales({ branchId: currentBranch?.id }).then(r => setRecentSales(r.sales)).catch(() => {});
   useEffect(() => { loadSales(); }, [currentBranch?.id]);
+
+  // Switching outlet changes the available deductions, so start fresh.
+  useEffect(() => { setSelectedDeductions([]); }, [currentBranch?.id]);
 
   useEffect(() => {
     Promise.all([getProducts({ status: 'Active', branchId: currentBranch?.id }), getCustomers({})]).then(([prods, custs]) => {
@@ -102,6 +108,13 @@ export default function POSPage() {
   const subtotal = cart.reduce((sum, c) => sum + c.unitPrice * c.quantity, 0);
   const total = subtotal;
 
+  // Deductions are defined per outlet in Settings; the cashier only chooses which apply.
+  const outletDeductions = currentBranch?.commissions || [];
+  const appliedDeductions = outletDeductions.filter(d => selectedDeductions.includes(d.name));
+  const deductionsTotal = appliedDeductions.reduce((s, d) => s + commissionAmount(d, total), 0);
+  const toggleDeduction = (name: string) =>
+    setSelectedDeductions(prev => prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name]);
+
   const handleCheckout = async () => {
     if (cart.length === 0) return toast.error('Cart is empty');
     setProcessing(true);
@@ -120,11 +133,12 @@ export default function POSPage() {
         deliveryCoordinates: routePoints.length > 0 ? routePoints.map((p: any) => `${p.lat},${p.lng}`).join(' → ') : undefined,
         stops: [...otherStops, ...pickups, ...dropoffs].map((p: any) => p.label).join('; ') || undefined,
         deliveryDistanceKm: distanceKm || undefined,
-        deductions: (currentBranch?.commissions || []).map(d => ({ name: d.name, amount: commissionAmount(d, total) })),
+        deductions: appliedDeductions.map(d => ({ name: d.name, amount: commissionAmount(d, total) })),
       });
       toast.success('Sale completed!');
       setCart([]);
       setSelectedCustomer(null);
+      setSelectedDeductions([]);
       setRoutePoints([]); setDistanceKm(0); loadSales();
       const prods = await getProducts({ status: 'Active', branchId: currentBranch?.id });
       setProducts(prods.products as Product[]);
@@ -353,6 +367,27 @@ export default function POSPage() {
               </button>
             ))}
           </div>
+
+          {/* Outlet deductions: set up in Settings > Outlets, picked per order here */}
+          {outletDeductions.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-[11px] font-medium text-muted-foreground">Deductions (select all that apply)</p>
+              <div className="flex flex-wrap gap-1.5">
+                {outletDeductions.map(d => {
+                  const on = selectedDeductions.includes(d.name);
+                  return (
+                    <button key={d.name} type="button" onClick={() => toggleDeduction(d.name)}
+                      className={`h-7 px-2 rounded-md border text-[11px] font-medium transition-all ${on ? 'border-pink-500 bg-pink-500 text-white' : 'border-border text-muted-foreground hover:border-pink-500/60'}`}>
+                      {d.name} · {d.type === 'percent' ? `${d.value}%` : `KES ${d.value.toLocaleString()}`}
+                    </button>
+                  );
+                })}
+              </div>
+              {appliedDeductions.length > 0 && (
+                <p className="text-[11px] text-pink-400">Deductions on this order: {fmt(deductionsTotal)}</p>
+              )}
+            </div>
+          )}
 
           <div className="space-y-2 border-t border-border pt-3">
             <div className="flex items-center justify-between">
