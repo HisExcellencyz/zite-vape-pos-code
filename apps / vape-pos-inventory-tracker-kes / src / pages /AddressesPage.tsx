@@ -11,7 +11,8 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Plus, MapPin, Trash2, Edit } from 'lucide-react';
 import { toast } from 'sonner';
 import MapView from '../components/MapView';
-import ViewToggle, { useViewMode } from '../components/ViewToggle';
+import LocationTabs, { PinStatus } from '../components/LocationTabs';
+import { parseCoordinates } from '../lib/geocode';
 
 interface Address {
   id: string;
@@ -24,12 +25,16 @@ interface Address {
   active?: boolean;
 }
 
+// Colour logic is unchanged: pickup = blue, delivery = green, branch = purple, other = grey.
 const typeColors: Record<string, string> = {
   pickup: 'bg-blue-500/10 text-blue-400',
   delivery: 'bg-green-500/10 text-green-400',
   branch: 'bg-purple-500/10 text-purple-400',
   other: 'bg-gray-500/10 text-gray-400',
 };
+
+const pinColor = (t?: string) =>
+  t === 'pickup' ? '#3b82f6' : t === 'delivery' ? '#22c55e' : t === 'branch' ? '#a855f7' : '#6b7280';
 
 const typeLabel = (t?: string) =>
   t === 'pickup' ? 'Pickup Point' : t === 'delivery' ? 'Delivery' : t === 'branch' ? 'Branch' : 'Other';
@@ -39,7 +44,8 @@ export default function AddressesPage() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [viewMode, setViewMode] = useViewMode('addresses', 'grid');
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [focus, setFocus] = useState<{ lat: number; lng: number } | null>(null);
 
   // Form
   const [editId, setEditId] = useState<string | undefined>();
@@ -74,11 +80,7 @@ export default function AddressesPage() {
     setPlusCode(a.plusCode || '');
     setCoordinates(a.coordinates || '');
     setNotes(a.notes || '');
-    if (a.coordinates) {
-      const [lat, lng] = a.coordinates.split(',').map(Number);
-      if (lat && lng) setSelectedPin({ lat, lng });
-      else setSelectedPin(null);
-    } else setSelectedPin(null);
+    setSelectedPin(parseCoordinates(a.coordinates));
     setShowForm(true);
   };
 
@@ -87,28 +89,18 @@ export default function AddressesPage() {
     setCoordinates(`${lat.toFixed(6)},${lng.toFixed(6)}`);
   };
 
-  // Handles both a place search and a Plus Code lookup — either way the
-  // shared LocationSearchBox (inside MapView) resolves it via Google Maps
-  // and hands back coordinates, the formatted address and, when available,
-  // the location's own Plus Code.
-  const handleSearchSelect = (lat: number, lng: number, address: string, plusCodeResult?: string) => {
+  // Called by the Search / Coordinates / Plus code ribbon.
+  const handlePick = (lat: number, lng: number, address?: string, plusCodeResult?: string) => {
     setSelectedPin({ lat, lng });
     setCoordinates(`${lat.toFixed(6)},${lng.toFixed(6)}`);
-    if (!fullAddress) setFullAddress(address);
+    if (address && !fullAddress) setFullAddress(address);
     if (plusCodeResult) setPlusCode(plusCodeResult);
   };
 
-  // Auto-pin when coordinates are typed
   const handleCoordsChange = (val: string) => {
     setCoordinates(val);
-    const parts = val.split(',').map(s => s.trim());
-    if (parts.length === 2) {
-      const lat = parseFloat(parts[0]);
-      const lng = parseFloat(parts[1]);
-      if (isFinite(lat) && isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
-        setSelectedPin({ lat, lng });
-      }
-    }
+    const p = parseCoordinates(val);
+    if (p) setSelectedPin(p);
   };
 
   const handleSave = async () => {
@@ -135,22 +127,24 @@ export default function AddressesPage() {
     try {
       await deleteRecord({ table: 'addresses', id });
       toast.success('Deleted');
+      if (activeId === id) setActiveId(null);
       load();
     } catch { toast.error('Delete failed'); }
   };
 
-  // Map pins from all addresses with coordinates
+  const selectTile = (a: Address) => {
+    setActiveId(a.id);
+    const p = parseCoordinates(a.coordinates);
+    if (p) setFocus({ ...p }); // new object each click so the map re-centres
+  };
+
   const mapPins = addresses
-    .filter(a => a.coordinates)
-    .map(a => {
-      const [lat, lng] = (a.coordinates || '').split(',').map(Number);
-      const color = a.type === 'pickup' ? '#3b82f6' : a.type === 'delivery' ? '#22c55e' : a.type === 'branch' ? '#a855f7' : '#6b7280';
-      return { lat: lat || 0, lng: lng || 0, label: a.addressName || '', color };
-    })
-    .filter(p => p.lat !== 0 && p.lng !== 0);
+    .map(a => ({ a, p: parseCoordinates(a.coordinates) }))
+    .filter(x => x.p)
+    .map(x => ({ lat: x.p!.lat, lng: x.p!.lng, label: x.a.addressName || '', color: pinColor(x.a.type) }));
 
   const renderActions = (a: Address) => (
-    <div className="flex gap-1">
+    <div className="flex gap-0.5 shrink-0" onClick={e => e.stopPropagation()}>
       <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(a)}><Edit className="w-3.5 h-3.5" /></Button>
       <AlertDialog>
         <AlertDialogTrigger asChild>
@@ -165,105 +159,66 @@ export default function AddressesPage() {
   );
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-4">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Addresses</h1>
           <p className="text-sm text-muted-foreground">{addresses.length} addresses saved</p>
         </div>
-        <div className="flex items-center gap-2">
-          <ViewToggle value={viewMode} onChange={setViewMode} />
-          <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" /> Add Address</Button>
-        </div>
+        <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" /> Add Address</Button>
       </div>
 
-      {/* Map overview */}
-      {mapPins.length > 0 && (
-        <MapView pins={mapPins} fitToPins plainPins className="h-[320px]" />
-      )}
-
-      {viewMode === 'grid' ? (
-        <div className="grid gap-3 grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
+      <div className="grid gap-4 lg:grid-cols-[minmax(300px,380px)_1fr]">
+        {/* Left: address tiles */}
+        <div className="space-y-2 lg:max-h-[calc(100vh-170px)] lg:overflow-y-auto lg:pr-1 order-2 lg:order-1">
           {loading ? (
-            [...Array(3)].map((_, i) => (
-              <Card key={i} className="bg-card border-border"><CardContent className="p-4"><div className="h-16 bg-muted rounded animate-pulse" /></CardContent></Card>
+            [...Array(4)].map((_, i) => (
+              <Card key={i} className="bg-card border-border"><CardContent className="p-3"><div className="h-10 bg-muted rounded animate-pulse" /></CardContent></Card>
             ))
           ) : addresses.length === 0 ? (
-            <Card className="col-span-full bg-card border-border">
-              <CardContent className="p-12 text-center text-muted-foreground">
+            <Card className="bg-card border-border">
+              <CardContent className="p-10 text-center text-muted-foreground">
                 <MapPin className="w-10 h-10 mx-auto mb-2 opacity-40" />
                 No addresses yet. Add your commonly used pickup points and delivery addresses.
               </CardContent>
             </Card>
           ) : addresses.map(a => (
-            <Card key={a.id} className="bg-card border-border">
-              <CardContent className="p-4">
-                <div className="flex items-start justify-between gap-2">
+            <Card
+              key={a.id}
+              onClick={() => selectTile(a)}
+              className={`bg-card cursor-pointer transition-colors ${activeId === a.id ? 'border-primary' : 'border-border'}`}
+            >
+              <CardContent className="p-3">
+                <div className="flex items-start gap-2">
+                  <MapPin className="w-4 h-4 mt-0.5 shrink-0" style={{ color: pinColor(a.type) }} />
                   <div className="min-w-0 flex-1">
-                    <h3 className="font-semibold text-foreground break-words whitespace-normal leading-snug">{a.addressName}</h3>
-                    <Badge variant="secondary" className={`text-xs mt-1 ${typeColors[a.type || 'other']}`}>
-                      {typeLabel(a.type)}
-                    </Badge>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-semibold text-sm text-foreground break-words leading-snug">{a.addressName}</h3>
+                      <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 ${typeColors[a.type || 'other'] || typeColors.other}`}>
+                        {typeLabel(a.type)}
+                      </Badge>
+                    </div>
+                    {a.fullAddress && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2 break-words">{a.fullAddress}</p>}
+                    {a.notes && <p className="text-[11px] text-muted-foreground italic mt-0.5 line-clamp-1 break-words">{a.notes}</p>}
                   </div>
                   {renderActions(a)}
                 </div>
-                {a.fullAddress && <p className="text-xs text-muted-foreground mt-2 break-words whitespace-normal">{a.fullAddress}</p>}
-                {a.plusCode && <p className="text-xs text-muted-foreground mt-1 break-all">Plus Code: {a.plusCode}</p>}
-                {a.coordinates && <p className="text-xs text-muted-foreground mt-1 break-all">📍 {a.coordinates}</p>}
-                {a.notes && <p className="text-xs text-muted-foreground mt-1 italic break-words whitespace-normal">{a.notes}</p>}
               </CardContent>
             </Card>
           ))}
         </div>
-      ) : (
-        <Card className="bg-card border-border">
-          <CardContent className="p-0">
-            <div className="overflow-auto max-h-[65vh]">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 z-10 bg-card">
-                  <tr className="border-b border-border text-muted-foreground bg-card">
-                    <th className="text-left p-3 font-medium">Name</th>
-                    <th className="text-left p-3 font-medium">Type</th>
-                    <th className="text-left p-3 font-medium">Full Address</th>
-                    <th className="text-left p-3 font-medium">Plus Code</th>
-                    <th className="text-left p-3 font-medium">Coordinates</th>
-                    <th className="text-left p-3 font-medium">Notes</th>
-                    <th className="text-right p-3 font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loading ? (
-                    [...Array(4)].map((_, i) => (
-                      <tr key={i} className="border-b border-border">
-                        {[...Array(7)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}
-                      </tr>
-                    ))
-                  ) : addresses.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="text-center py-12 text-muted-foreground">
-                        <MapPin className="w-10 h-10 mx-auto mb-2 opacity-40" />
-                        No addresses yet. Add your commonly used pickup points and delivery addresses.
-                      </td>
-                    </tr>
-                  ) : addresses.map(a => (
-                    <tr key={a.id} className="border-b border-border hover:bg-muted/30 align-top">
-                      <td className="p-3 font-medium text-foreground break-words whitespace-normal">{a.addressName}</td>
-                      <td className="p-3">
-                        <Badge variant="secondary" className={`text-xs ${typeColors[a.type || 'other']}`}>{typeLabel(a.type)}</Badge>
-                      </td>
-                      <td className="p-3 text-muted-foreground break-words whitespace-normal max-w-xs">{a.fullAddress || '-'}</td>
-                      <td className="p-3 text-muted-foreground break-all">{a.plusCode || '-'}</td>
-                      <td className="p-3 text-muted-foreground break-all">{a.coordinates || '-'}</td>
-                      <td className="p-3 text-muted-foreground break-words whitespace-normal max-w-xs">{a.notes || '-'}</td>
-                      <td className="p-3"><div className="flex justify-end">{renderActions(a)}</div></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+
+        {/* Right: map overview */}
+        <div className="order-1 lg:order-2 lg:sticky lg:top-6 lg:self-start">
+          <MapView
+            pins={mapPins}
+            fitToPins
+            plainPins
+            focus={focus}
+            className="h-[280px] lg:h-[calc(100vh-170px)]"
+          />
+        </div>
+      </div>
 
       {/* Add/Edit Dialog */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
@@ -290,6 +245,22 @@ export default function AddressesPage() {
               <Label>Full Address</Label>
               <Input value={fullAddress} onChange={e => setFullAddress(e.target.value)} placeholder="Full street address" />
             </div>
+
+            {/* Search / Coordinates / Plus code ribbon */}
+            <LocationTabs onPick={handlePick} />
+
+            <MapView
+              compact
+              className="h-[220px]"
+              onClick={handleMapClick}
+              selectedPin={selectedPin}
+              center={selectedPin || undefined}
+            />
+            <PinStatus
+              text={selectedPin ? (fullAddress || coordinates) : null}
+              extra={selectedPin && fullAddress ? coordinates : null}
+            />
+
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label>Plus Code</Label>
@@ -299,21 +270,6 @@ export default function AddressesPage() {
                 <Label>Coordinates</Label>
                 <Input value={coordinates} onChange={e => handleCoordsChange(e.target.value)} placeholder="-1.2921,36.8219" />
               </div>
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">
-                Search a place, or find it by Plus Code — both offer suggestions as you type and use Google Maps.
-                You can also click directly on the map.
-              </Label>
-              <MapView
-                className="h-[200px]"
-                onClick={handleMapClick}
-                selectedPin={selectedPin}
-                center={selectedPin || undefined}
-                showSearch
-                showPlusCode
-                onSearchSelect={handleSearchSelect}
-              />
             </div>
             <div>
               <Label>Notes</Label>
