@@ -1,8 +1,5 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Loader } from '@googlemaps/js-api-loader';
-import { Input } from '@project/components/ui/input';
-import { Button } from '@project/components/ui/button';
-import { Search, Navigation } from 'lucide-react';
 import { numberedPin, plainPin } from '../lib/pinIcon';
 
 interface MapPin {
@@ -19,28 +16,32 @@ interface Props {
   className?: string;
   onClick?: (lat: number, lng: number) => void;
   selectedPin?: { lat: number; lng: number } | null;
-  showSearch?: boolean;
-  onSearchSelect?: (lat: number, lng: number, address: string) => void;
-  /** Show a "Plus Code" entry box (e.g. 6GCRMQFG+R8) alongside the search box, for places without a street address. */
-  showPlusCode?: boolean;
+  /** Pan/zoom to this spot whenever a new object is passed in. */
+  focus?: { lat: number; lng: number } | null;
   /** Zoom/pan so every pin is visible at once. */
   fitToPins?: boolean;
-  /** Use plain red pins with a white dot instead of numbered pins. */
+  /** Use plain pins with a dark dot instead of numbered pins. */
   plainPins?: boolean;
+  /** Small embedded maps (inside dialogs) show only the fullscreen button. */
+  compact?: boolean;
 }
 
-export default function MapView({ pins = [], center, zoom = 13, className = 'h-[300px]', onClick, selectedPin, showSearch = false, onSearchSelect, showPlusCode = false, fitToPins = false, plainPins = false }: Props) {
+/**
+ * A map with pins. Searching by place / Plus Code / coordinates is done by the
+ * LocationTabs ribbon placed above it, so this component only draws the map.
+ */
+export default function MapView({
+  pins = [], center, zoom = 13, className = 'h-[300px]', onClick, selectedPin,
+  focus = null, fitToPins = false, plainPins = false, compact = false,
+}: Props) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<google.maps.Marker[]>([]);
   const selectedMarkerRef = useRef<google.maps.Marker | null>(null);
+  const onClickRef = useRef(onClick);
+  onClickRef.current = onClick;
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string>();
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searching, setSearching] = useState(false);
-  const [plusCodeQuery, setPlusCodeQuery] = useState('');
-  const [geocodingPlusCode, setGeocodingPlusCode] = useState(false);
-  const geocoderRef = useRef<google.maps.Geocoder | null>(null);
 
   const apiKey = import.meta.env.VITE_GOOGLEMAPS_API_KEY;
   const defaultCenter = center || { lat: -1.2921, lng: 36.8219 };
@@ -60,20 +61,20 @@ export default function MapView({ pins = [], center, zoom = 13, className = 'h-[
     let mounted = true;
     const loader = new Loader({ apiKey, version: 'weekly', libraries: ['places'] });
 
-    Promise.all([
-      loader.importLibrary('maps'),
-      loader.importLibrary('geocoding'),
-    ]).then(([{ Map }]) => {
+    loader.importLibrary('maps').then(({ Map }) => {
       if (!mounted || !mapRef.current || mapInstanceRef.current) return;
-      const map = new Map(mapRef.current, { center: defaultCenter, zoom, fullscreenControl: true });
+      const map = new Map(mapRef.current, {
+        center: defaultCenter,
+        zoom,
+        fullscreenControl: true,
+        mapTypeControl: !compact,   // Map / Satellite switch
+        streetViewControl: !compact,
+      });
       mapInstanceRef.current = map;
-      geocoderRef.current = new google.maps.Geocoder();
 
-      if (onClick) {
-        map.addListener('click', (e: google.maps.MapMouseEvent) => {
-          if (e.latLng) onClick(e.latLng.lat(), e.latLng.lng());
-        });
-      }
+      map.addListener('click', (e: google.maps.MapMouseEvent) => {
+        if (e.latLng) onClickRef.current?.(e.latLng.lat(), e.latLng.lng());
+      });
 
       setIsLoading(false);
     }).catch(() => {
@@ -94,7 +95,7 @@ export default function MapView({ pins = [], center, zoom = 13, className = 'h-[
         position: { lat: pin.lat, lng: pin.lng },
         map,
         title: pin.label,
-        icon: plainPins ? plainPin() : numberedPin(i + 1, pin.color || '#ef4444'),
+        icon: plainPins ? plainPin(pin.color || '#ef4444') : numberedPin(i + 1, pin.color || '#ef4444'),
       });
       markersRef.current.push(marker);
     });
@@ -105,7 +106,7 @@ export default function MapView({ pins = [], center, zoom = 13, className = 'h-[
       if (pins.length === 1) map.setZoom(15);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(pins), isLoading]);
+  }, [JSON.stringify(pins), isLoading, plainPins]);
 
   // Update selected pin marker and pan to it
   useEffect(() => {
@@ -119,114 +120,34 @@ export default function MapView({ pins = [], center, zoom = 13, className = 'h-[
       selectedMarkerRef.current = new google.maps.Marker({
         position: selectedPin,
         map,
-        icon: numberedPin(1, '#3b82f6'),
+        icon: plainPin('#3b82f6'),
       });
       map.panTo(selectedPin);
       if (map.getZoom()! < 14) map.setZoom(15);
     }
   }, [selectedPin, isLoading]);
 
-  const handleSearch = useCallback(async () => {
-    if (!searchQuery.trim() || !apiKey) return;
-    setSearching(true);
-    try {
-      // Use REST API for reliable geocoding
-      const resp = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(searchQuery)}&key=${apiKey}`);
-      const data = await resp.json();
-      if (data.results && data.results.length > 0) {
-        const loc = data.results[0].geometry.location;
-        const lat = loc.lat;
-        const lng = loc.lng;
-        const addr = data.results[0].formatted_address || searchQuery;
-
-        if (onClick) onClick(lat, lng);
-        if (onSearchSelect) onSearchSelect(lat, lng, addr);
-
-        const map = mapInstanceRef.current;
-        if (map) {
-          map.panTo({ lat, lng });
-          map.setZoom(16);
-        }
-      }
-    } catch { /* no results */ }
-    setSearching(false);
-  }, [searchQuery, onClick, onSearchSelect, apiKey]);
-
-  const handlePlusCodeSearch = useCallback(async () => {
-    if (!plusCodeQuery.trim() || !apiKey) return;
-    setGeocodingPlusCode(true);
-    try {
-      const resp = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(plusCodeQuery)}&key=${apiKey}`);
-      const data = await resp.json();
-      if (data.results && data.results.length > 0) {
-        const loc = data.results[0].geometry.location;
-        const lat = loc.lat;
-        const lng = loc.lng;
-        const addr = data.results[0].formatted_address || plusCodeQuery;
-
-        if (onClick) onClick(lat, lng);
-        if (onSearchSelect) onSearchSelect(lat, lng, addr);
-
-        const map = mapInstanceRef.current;
-        if (map) {
-          map.panTo({ lat, lng });
-          map.setZoom(16);
-        }
-        setPlusCodeQuery('');
-      }
-    } catch { /* no results */ }
-    setGeocodingPlusCode(false);
-  }, [plusCodeQuery, onClick, onSearchSelect, apiKey]);
+  // Jump to a spot (e.g. when an address tile is clicked)
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !focus) return;
+    map.panTo(focus);
+    if ((map.getZoom() || 0) < 16) map.setZoom(16);
+  }, [focus, isLoading]);
 
   return (
-    <div className="space-y-2">
-      {showSearch && (
-        <div className="flex gap-2">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              placeholder="Search location..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleSearch()}
-              className="pl-9 h-8 text-xs"
-            />
-          </div>
-          <Button size="sm" variant="outline" onClick={handleSearch} disabled={searching} className="h-8 text-xs">
-            {searching ? '...' : 'Search'}
-          </Button>
+    <div className={`relative w-full rounded-lg overflow-hidden ${className}`}>
+      <div ref={mapRef} className="w-full h-full" />
+      {isLoading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-background/80 text-muted-foreground">
+          Loading map...
         </div>
       )}
-      {showPlusCode && (
-        <div className="flex gap-2">
-          <div className="relative flex-1">
-            <Navigation className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-            <Input
-              placeholder="Plus Code (e.g. 6GCRMQFG+R8)"
-              value={plusCodeQuery}
-              onChange={e => setPlusCodeQuery(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handlePlusCodeSearch()}
-              className="pl-9 h-8 text-xs"
-            />
-          </div>
-          <Button size="sm" variant="outline" onClick={handlePlusCodeSearch} disabled={geocodingPlusCode} className="h-8 text-xs">
-            {geocodingPlusCode ? '...' : 'Add'}
-          </Button>
+      {error && (
+        <div className="absolute inset-0 flex items-center justify-center bg-background text-red-500 p-4 text-sm">
+          {error}
         </div>
       )}
-      <div className={`relative w-full rounded-lg overflow-hidden ${className}`}>
-        <div ref={mapRef} className="w-full h-full" />
-        {isLoading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-background/80 text-muted-foreground">
-            Loading map...
-          </div>
-        )}
-        {error && (
-          <div className="absolute inset-0 flex items-center justify-center bg-background text-red-500 p-4 text-sm">
-            {error}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
