@@ -1,8 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Loader } from '@googlemaps/js-api-loader';
 import { getAddresses } from 'zitejs/api';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { Label } from '@project/components/ui/label';
+import { Switch } from '@project/components/ui/switch';
+import { cn } from '@project/components/lib/utils';
 import { Trash2, BookMarked, Loader2, Clock, Flag, RefreshCw } from 'lucide-react';
 import LocationTabs, { PinStatus } from './LocationTabs';
 import { geocode } from '../lib/geocode';
@@ -45,6 +47,11 @@ const distanceModeLabels: Record<DistanceMode, string> = {
 
 // Rough average speed (km/h) used only when Google can't return a road route for a leg.
 const FALLBACK_SPEED_KMH = 20;
+
+// Remembered between openings of the dialog (resets on page reload).
+let rememberedReturnToStart = true;
+
+type Target = 'start' | 'stops' | 'end';
 
 interface TripInfo {
   /** Total driving time including live traffic, in seconds. */
@@ -118,11 +125,34 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
   const [tripInfo, setTripInfo] = useState<TripInfo | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
 
+  // Which part of the route the next picked location (search, coordinates, plus code or map click) goes to.
+  const [target, setTargetState] = useState<Target>(() => (points.some(p => p.tag === 'start') ? 'stops' : 'start'));
+  const targetRef = useRef<Target>(target);
+  targetRef.current = target;
+  const setTarget = (t: Target) => { targetRef.current = t; setTargetState(t); };
+
+  const [diffEnd, setDiffEnd] = useState(() => points.some(p => p.tag === 'end'));
+  const [returnToStart, setReturnToStartState] = useState(rememberedReturnToStart);
+  const setReturnToStart = (v: boolean) => { rememberedReturnToStart = v; setReturnToStartState(v); };
+
   const apiKey = import.meta.env.VITE_GOOGLEMAPS_API_KEY;
 
-  const addPoint = useCallback((lat: number, lng: number, label?: string) => {
+  const placePoint = useCallback((lat: number, lng: number, label?: string) => {
+    const cur = pointsRef.current;
+    const t = targetRef.current;
     const pt: RoutePoint = { id: genId(), label: label || `${lat.toFixed(5)},${lng.toFixed(5)}`, lat, lng };
-    onPointsChangeRef.current([...pointsRef.current, pt]);
+    let next: RoutePoint[];
+    if (t === 'start') {
+      next = [{ ...pt, tag: 'start' }, ...cur.filter(p => p.tag !== 'start')];
+      targetRef.current = 'stops';
+      setTargetState('stops');
+    } else if (t === 'end') {
+      next = [...cur.filter(p => p.tag !== 'end'), { ...pt, tag: 'end' }];
+    } else {
+      const endIdx = cur.findIndex(p => p.tag === 'end');
+      next = endIdx >= 0 ? [...cur.slice(0, endIdx), pt, ...cur.slice(endIdx)] : [...cur, pt];
+    }
+    onPointsChangeRef.current(next);
   }, []);
 
   // Load saved addresses
@@ -149,7 +179,7 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
       mapInstanceRef.current = map;
 
       map.addListener('click', (e: google.maps.MapMouseEvent) => {
-        if (e.latLng) addPoint(e.latLng.lat(), e.latLng.lng());
+        if (e.latLng) placePoint(e.latLng.lat(), e.latLng.lng());
       });
 
       setIsLoading(false);
@@ -158,15 +188,13 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
     return () => { mounted = false; };
   }, [apiKey]);
 
-  // Update markers and polylines
+  // Update markers
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
 
     markersRef.current.forEach(m => m.setMap(null));
     markersRef.current = [];
-    polylinesRef.current.forEach(p => p.setMap(null));
-    polylinesRef.current = [];
 
     points.forEach((pt, i) => {
       const color = pt.tag ? tagColors[pt.tag] : '#6b7280';
@@ -185,7 +213,17 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
       map.fitBounds(bounds, 50);
       if (points.length === 1) map.setZoom(15);
     }
-  }, [points]);
+  }, [points, isLoading]);
+
+  // The stops actually driven. When "Return to start" is on (and no different end is set),
+  // a final leg back to the start location is added to the calculation.
+  const startPt = points.find(p => p.tag === 'start');
+  const routePts = useMemo<RoutePoint[]>(() => {
+    if (returnToStart && !diffEnd && startPt && points.length >= 2 && points[points.length - 1].id !== startPt.id) {
+      return [...points, { ...startPt, id: 'return-to-start', label: 'Return to start' }];
+    }
+    return points;
+  }, [points, returnToStart, diffEnd, startPt]);
 
   // Shortest driving route between each pair of consecutive stops (Routes API),
   // drawn along the roads. Each leg also returns its duration using LIVE traffic
@@ -194,14 +232,19 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
   useEffect(() => {
     const map = mapInstanceRef.current;
     let cancelled = false;
-    if (points.length < 2) { setDistanceMode(null); setTripInfo(null); onDistanceChange(0); return; }
+    if (routePts.length < 2) {
+      polylinesRef.current.forEach(p => p.setMap(null));
+      polylinesRef.current = [];
+      setDistanceMode(null); setTripInfo(null); onDistanceChange(0);
+      return;
+    }
     if (!map) return;
     setCalculatingDistance(true);
     // Remove any lines from a previous calculation (e.g. when refreshing live traffic).
     polylinesRef.current.forEach(p => p.setMap(null));
     polylinesRef.current = [];
     const calcAt = Date.now();
-    const legs = points.slice(0, -1).map((a, i) => [a, points[i + 1]] as const);
+    const legs = routePts.slice(0, -1).map((a, i) => [a, routePts[i + 1]] as const);
     const wp = (p: RoutePoint) => ({ location: { latLng: { latitude: p.lat, longitude: p.lng } } });
     // Routes API durations come back as strings like "1234s".
     const secs = (s?: string) => { const n = s ? parseInt(s, 10) : NaN; return Number.isFinite(n) ? n : NaN; };
@@ -267,7 +310,7 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
     }).finally(() => { if (!cancelled) setCalculatingDistance(false); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [points, isLoading, refreshTick]);
+  }, [routePts, isLoading, refreshTick]);
 
   const handleSavedAddress = async (addrId: string) => {
     const addr = savedAddresses.find(a => a.id === addrId);
@@ -277,7 +320,7 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
       if (parts.length === 2) {
         const lat = parseFloat(parts[0]), lng = parseFloat(parts[1]);
         if (isFinite(lat) && isFinite(lng)) {
-          addPoint(lat, lng, addr.addressName || addr.fullAddress || addr.coordinates);
+          placePoint(lat, lng, addr.addressName || addr.fullAddress || addr.coordinates);
           return;
         }
       }
@@ -287,7 +330,7 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
     if (text) {
       const out = await geocode(text);
       const r = out.results[0];
-      if (r) addPoint(r.lat, r.lng, addr.addressName || addr.fullAddress || r.address);
+      if (r) placePoint(r.lat, r.lng, addr.addressName || addr.fullAddress || r.address);
     }
   };
 
@@ -299,14 +342,38 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
     onPointsChange(points.filter(p => p.id !== id));
   };
 
+  const toggleDiffEnd = (on: boolean) => {
+    setDiffEnd(on);
+    if (on) {
+      setTarget('end');
+    } else {
+      onPointsChange(points.filter(p => p.tag !== 'end'));
+      if (targetRef.current === 'end') setTarget('stops');
+    }
+  };
+
   // Final drop-off = moment the route was calculated + live-traffic driving time.
   const arrivalMs = tripInfo ? tripInfo.calcAt + tripInfo.seconds * 1000 : 0;
   const arrivesNextDay = tripInfo ? new Date(arrivalMs).toDateString() !== new Date(tripInfo.calcAt).toDateString() : false;
   const trafficDelaySec = tripInfo ? tripInfo.seconds - tripInfo.staticSeconds : 0;
 
+  const endPt = points.find(p => p.tag === 'end');
+  const stopCount = points.filter(p => p.tag !== 'start' && p.tag !== 'end').length;
+  const panelTitle = target === 'start' ? 'Start location' : target === 'end' ? 'End location' : 'Stops (pick-ups & drop-offs)';
+  const statusText =
+    target === 'start' ? (startPt?.label ?? null)
+    : target === 'end' ? (endPt?.label ?? null)
+    : stopCount > 0 ? `${stopCount} stop${stopCount === 1 ? '' : 's'} added — search or click the map to add more` : null;
+
+  const chips: { key: Target; label: string }[] = [
+    { key: 'start', label: 'Start' },
+    { key: 'stops', label: 'Stops' },
+    ...(diffEnd ? [{ key: 'end' as Target, label: 'End' }] : []),
+  ];
+
   return (
     <div className="space-y-3">
-      {/* Saved addresses quick-add */}
+      {/* Saved addresses quick-add (goes to whichever part is selected below) */}
       {savedAddresses.length > 0 && (
         <div>
           <Label className="text-xs text-muted-foreground flex items-center gap-1 mb-1"><BookMarked className="w-3 h-3" /> Saved Addresses</Label>
@@ -321,17 +388,52 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
         </div>
       )}
 
-      {/* Search / Coordinates / Plus code ribbon */}
-      <LocationTabs onPick={(lat, lng, address) => addPoint(lat, lng, address)} />
+      {/* Location panel: title, Search / Coordinates / Plus code ribbon, map, pin status, toggles */}
+      <div className="rounded-xl border border-border bg-card/60 p-3 space-y-3">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <p className="text-sm font-semibold text-foreground">{panelTitle}</p>
+          <div className="flex gap-1">
+            {chips.map(c => (
+              <button
+                key={c.key}
+                type="button"
+                onClick={() => setTarget(c.key)}
+                aria-pressed={target === c.key}
+                className={cn(
+                  'h-6 px-2 rounded-full text-[10px] font-medium border transition-colors',
+                  target === c.key ? 'border-pink-500 bg-pink-500 text-white' : 'border-border text-muted-foreground hover:border-pink-500/60',
+                )}
+              >
+                {c.label}
+              </button>
+            ))}
+          </div>
+        </div>
 
-      {/* Map */}
-      <div className="relative w-full rounded-lg overflow-hidden h-[250px]">
-        <div ref={mapRef} className="w-full h-full" />
-        {isLoading && <div className="absolute inset-0 flex items-center justify-center bg-background/80 text-muted-foreground text-sm">Loading map...</div>}
-        {error && <div className="absolute inset-0 flex items-center justify-center bg-background text-red-500 text-sm">{error}</div>}
+        <LocationTabs onPick={(lat, lng, address) => placePoint(lat, lng, address)} />
+
+        {/* Map */}
+        <div className="relative w-full rounded-lg overflow-hidden h-[250px]">
+          <div ref={mapRef} className="w-full h-full" />
+          {isLoading && <div className="absolute inset-0 flex items-center justify-center bg-background/80 text-muted-foreground text-sm">Loading map...</div>}
+          {error && <div className="absolute inset-0 flex items-center justify-center bg-background text-red-500 text-sm">{error}</div>}
+        </div>
+
+        <PinStatus text={statusText} />
+
+        <div className="space-y-2.5 pt-1">
+          <div className="flex items-center justify-between gap-3">
+            <Label htmlFor="diff-end" className="text-sm font-normal text-foreground">Set a different end location</Label>
+            <Switch id="diff-end" checked={diffEnd} onCheckedChange={toggleDiffEnd} className="data-[state=checked]:bg-pink-500" />
+          </div>
+          {!diffEnd && (
+            <div className="flex items-center justify-between gap-3">
+              <Label htmlFor="return-start" className="text-sm font-normal text-foreground">Return to start</Label>
+              <Switch id="return-start" checked={returnToStart} onCheckedChange={setReturnToStart} className="data-[state=checked]:bg-pink-500" />
+            </div>
+          )}
+        </div>
       </div>
-
-      <PinStatus text={points.length > 0 ? `${points.length} stop${points.length === 1 ? '' : 's'} added — click the map to add more` : null} />
 
       {/* Point list */}
       {points.length > 0 && (
@@ -363,7 +465,7 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
       )}
 
       {/* Trip summary: distance, live-traffic duration and final drop-off time */}
-      {points.length >= 2 && (
+      {routePts.length >= 2 && (
         <div className="rounded-md bg-primary/10 px-3 py-2 space-y-1.5">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-foreground">Total Distance</span>
@@ -374,7 +476,7 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
           </div>
           {distanceMode && !calculatingDistance && (
             <p className="text-[10px] text-muted-foreground text-right">
-              {distanceModeLabels[distanceMode]}
+              {distanceModeLabels[distanceMode]}{routePts !== points ? ' · includes return to start' : ''}
             </p>
           )}
 
