@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Loader } from '@googlemaps/js-api-loader';
 import { Input } from '@project/components/ui/input';
 import { Button } from '@project/components/ui/button';
-import { Search, Navigation, MapPin } from 'lucide-react';
+import { Search, MapPin, Loader2 } from 'lucide-react';
 import { geocode, GeoResult } from '../lib/geocode';
 
 interface Props {
@@ -32,11 +32,11 @@ function getAutocompleteService(apiKey: string): Promise<google.maps.places.Auto
 }
 
 /**
- * Two entry boxes — place search and Plus Code — both answered by Google Maps.
- * As the person types, matching suggestions appear below the box (so they
- * don't need to type the full name or code); picking one, or pressing Enter /
- * the button, resolves it to a location. A single geocoded hit is applied
- * straight away; several hits are listed to choose from.
+ * Place search and Plus Code entry, both answered by Google Maps.
+ * As the person types, matching suggestions appear below the box; picking one,
+ * or pressing Enter / the search button, resolves it to a location. A single
+ * geocoded hit is applied straight away; several hits are listed to choose from.
+ * (Normally used through LocationTabs, which shows one box at a time.)
  */
 export default function LocationSearchBox({ onPick, showSearch = true, showPlusCode = true, className = '' }: Props) {
   const apiKey = import.meta.env.VITE_GOOGLEMAPS_API_KEY;
@@ -126,79 +126,61 @@ export default function LocationSearchBox({ onPick, showSearch = true, showPlusC
     run(description, kind);
   };
 
+  const suggestionList = (items: Prediction[], kind: 'search' | 'plus') => (
+    <div className="absolute z-50 mt-1 w-full rounded-md border border-border bg-popover shadow-md max-h-48 overflow-y-auto">
+      {items.map(s => (
+        <button
+          key={s.placeId}
+          type="button"
+          onClick={() => choosePrediction(s.description, kind)}
+          className="w-full text-left px-3 py-2 text-xs hover:bg-muted flex items-start gap-2 border-b border-border last:border-0"
+        >
+          <MapPin className="w-3.5 h-3.5 mt-0.5 shrink-0 text-amber-400" />
+          <span className="break-words min-w-0">{s.description}</span>
+        </button>
+      ))}
+    </div>
+  );
+
   return (
     <div ref={wrapperRef} className={`space-y-2 ${className}`}>
       {showSearch && (
         <div className="relative">
           <div className="flex gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-              <Input
-                placeholder="Search a place or address (Google Maps)..."
-                value={query}
-                onChange={e => handleSearchChange(e.target.value)}
-                onFocus={() => { if (query && searchSuggestions.length > 0) setShowSearchSuggestions(true); }}
-                onKeyDown={e => e.key === 'Enter' && run(query, 'search')}
-                className="pl-8 h-8 text-xs"
-                autoComplete="off"
-              />
-            </div>
-            <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => run(query, 'search')} disabled={!!busy}>
-              {busy === 'search' ? '...' : 'Search'}
+            <Input
+              placeholder="Search a place or address, e.g. Westlands"
+              value={query}
+              onChange={e => handleSearchChange(e.target.value)}
+              onFocus={() => { if (query && searchSuggestions.length > 0) setShowSearchSuggestions(true); }}
+              onKeyDown={e => e.key === 'Enter' && run(query, 'search')}
+              className="h-9 flex-1"
+              autoComplete="off"
+            />
+            <Button type="button" size="icon" variant="outline" className="h-9 w-9 shrink-0" onClick={() => run(query, 'search')} disabled={!!busy} aria-label="Search" title="Search">
+              {busy === 'search' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
             </Button>
           </div>
-          {showSearchSuggestions && searchSuggestions.length > 0 && (
-            <div className="absolute z-50 mt-1 w-full rounded-md border border-border bg-popover shadow-md max-h-48 overflow-y-auto">
-              {searchSuggestions.map(s => (
-                <button
-                  key={s.placeId}
-                  type="button"
-                  onClick={() => choosePrediction(s.description, 'search')}
-                  className="w-full text-left px-3 py-2 text-xs hover:bg-muted flex items-start gap-2 border-b border-border last:border-0"
-                >
-                  <MapPin className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary" />
-                  <span className="break-words min-w-0">{s.description}</span>
-                </button>
-              ))}
-            </div>
-          )}
+          {showSearchSuggestions && searchSuggestions.length > 0 && suggestionList(searchSuggestions, 'search')}
         </div>
       )}
 
       {showPlusCode && (
         <div className="relative">
           <div className="flex gap-2">
-            <div className="relative flex-1">
-              <Navigation className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-              <Input
-                placeholder="Plus Code (e.g. 6GCRMQFG+R8 or MQFG+R8)"
-                value={plus}
-                onChange={e => handlePlusChange(e.target.value)}
-                onFocus={() => { if (plus && plusSuggestions.length > 0) setShowPlusSuggestions(true); }}
-                onKeyDown={e => e.key === 'Enter' && run(plus, 'plus')}
-                className="pl-8 h-8 text-xs"
-                autoComplete="off"
-              />
-            </div>
-            <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => run(plus, 'plus')} disabled={!!busy}>
-              {busy === 'plus' ? '...' : 'Find'}
+            <Input
+              placeholder="Plus Code, e.g. 6GCRMQFG+R8 or MQFG+R8"
+              value={plus}
+              onChange={e => handlePlusChange(e.target.value)}
+              onFocus={() => { if (plus && plusSuggestions.length > 0) setShowPlusSuggestions(true); }}
+              onKeyDown={e => e.key === 'Enter' && run(plus, 'plus')}
+              className="h-9 flex-1"
+              autoComplete="off"
+            />
+            <Button type="button" size="icon" variant="outline" className="h-9 w-9 shrink-0" onClick={() => run(plus, 'plus')} disabled={!!busy} aria-label="Find Plus Code" title="Find Plus Code">
+              {busy === 'plus' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
             </Button>
           </div>
-          {showPlusSuggestions && plusSuggestions.length > 0 && (
-            <div className="absolute z-50 mt-1 w-full rounded-md border border-border bg-popover shadow-md max-h-48 overflow-y-auto">
-              {plusSuggestions.map(s => (
-                <button
-                  key={s.placeId}
-                  type="button"
-                  onClick={() => choosePrediction(s.description, 'plus')}
-                  className="w-full text-left px-3 py-2 text-xs hover:bg-muted flex items-start gap-2 border-b border-border last:border-0"
-                >
-                  <Navigation className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary" />
-                  <span className="break-words min-w-0">{s.description}</span>
-                </button>
-              ))}
-            </div>
-          )}
+          {showPlusSuggestions && plusSuggestions.length > 0 && suggestionList(plusSuggestions, 'plus')}
           <p className="text-[10px] text-muted-foreground mt-1">
             Short codes are looked up in Nairobi. For another town add its name, e.g. "MQFG+R8 Mombasa".
           </p>
@@ -216,7 +198,7 @@ export default function LocationSearchBox({ onPick, showSearch = true, showPlusC
               onClick={() => choose(r)}
               className="w-full text-left px-3 py-2 text-xs hover:bg-muted flex items-start gap-2 border-b border-border last:border-0"
             >
-              <MapPin className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary" />
+              <MapPin className="w-3.5 h-3.5 mt-0.5 shrink-0 text-amber-400" />
               <span className="break-words min-w-0">{r.address}</span>
             </button>
           ))}
