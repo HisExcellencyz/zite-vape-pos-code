@@ -1,12 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Loader } from '@googlemaps/js-api-loader';
 import { getAddresses } from 'zitejs/api';
-import { Input } from '@project/components/ui/input';
-import { Button } from '@project/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { Label } from '@project/components/ui/label';
-import { Trash2, MapPin, BookMarked, Loader2 } from 'lucide-react';
-import LocationSearchBox from './LocationSearchBox';
+import { Trash2, BookMarked, Loader2, Clock, Flag, RefreshCw } from 'lucide-react';
+import LocationTabs, { PinStatus } from './LocationTabs';
 import { geocode } from '../lib/geocode';
 import { numberedPin } from '../lib/pinIcon';
 
@@ -44,6 +42,36 @@ const distanceModeLabels: Record<DistanceMode, string> = {
   DRIVE: 'shortest driving distance',
   mixed: 'some legs had no road route — dashed lines are straight-line estimates',
 };
+
+// Rough average speed (km/h) used only when Google can't return a road route for a leg.
+const FALLBACK_SPEED_KMH = 20;
+
+interface TripInfo {
+  /** Total driving time including live traffic, in seconds. */
+  seconds: number;
+  /** Total driving time with no traffic, in seconds. */
+  staticSeconds: number;
+  /** When the calculation was made (ms since epoch); the trip is assumed to leave then. */
+  calcAt: number;
+  /** True if any leg used a straight-line estimate instead of a real route. */
+  estimated: boolean;
+}
+
+function formatDuration(totalSeconds: number): string {
+  const mins = Math.max(1, Math.round(totalSeconds / 60));
+  if (mins < 60) return `${mins} min`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m === 0 ? `${h} hr` : `${h} hr ${m} min`;
+}
+
+function formatClock(ms: number, withDate: boolean): string {
+  const d = new Date(ms);
+  const time = d.toLocaleTimeString('en-KE', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Africa/Nairobi' });
+  if (!withDate) return time;
+  const day = d.toLocaleDateString('en-KE', { day: 'numeric', month: 'short', timeZone: 'Africa/Nairobi' });
+  return `${time} (${day})`;
+}
 
 function decodePolyline(str: string) {
   const out: google.maps.LatLng[] = []; let i = 0, lat = 0, lng = 0;
@@ -84,10 +112,11 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string>();
-  const [coordsInput, setCoordsInput] = useState('');
   const [savedAddresses, setSavedAddresses] = useState<SavedAddr[]>([]);
   const [distanceMode, setDistanceMode] = useState<DistanceMode | null>(null);
   const [calculatingDistance, setCalculatingDistance] = useState(false);
+  const [tripInfo, setTripInfo] = useState<TripInfo | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
 
   const apiKey = import.meta.env.VITE_GOOGLEMAPS_API_KEY;
 
@@ -110,7 +139,13 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
 
     loader.importLibrary('maps').then(({ Map }) => {
       if (!mounted || !mapRef.current || mapInstanceRef.current) return;
-      const map = new Map(mapRef.current, { center: { lat: -1.2921, lng: 36.8219 }, zoom: 12 });
+      const map = new Map(mapRef.current, {
+        center: { lat: -1.2921, lng: 36.8219 },
+        zoom: 12,
+        fullscreenControl: true,
+        mapTypeControl: false,
+        streetViewControl: false,
+      });
       mapInstanceRef.current = map;
 
       map.addListener('click', (e: google.maps.MapMouseEvent) => {
@@ -152,34 +187,65 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
     }
   }, [points]);
 
-  // Shortest driving route between each pair of consecutive stops (Directions API),
-  // drawn along the roads. Falls back to a dashed straight line if no route is found.
+  // Shortest driving route between each pair of consecutive stops (Routes API),
+  // drawn along the roads. Each leg also returns its duration using LIVE traffic
+  // (routingPreference TRAFFIC_AWARE, departing now). Falls back to a dashed
+  // straight line if no route is found.
   useEffect(() => {
     const map = mapInstanceRef.current;
     let cancelled = false;
-    if (points.length < 2) { setDistanceMode(null); onDistanceChange(0); return; }
+    if (points.length < 2) { setDistanceMode(null); setTripInfo(null); onDistanceChange(0); return; }
     if (!map) return;
     setCalculatingDistance(true);
+    // Remove any lines from a previous calculation (e.g. when refreshing live traffic).
+    polylinesRef.current.forEach(p => p.setMap(null));
+    polylinesRef.current = [];
+    const calcAt = Date.now();
     const legs = points.slice(0, -1).map((a, i) => [a, points[i + 1]] as const);
     const wp = (p: RoutePoint) => ({ location: { latLng: { latitude: p.lat, longitude: p.lng } } });
+    // Routes API durations come back as strings like "1234s".
+    const secs = (s?: string) => { const n = s ? parseInt(s, 10) : NaN; return Number.isFinite(n) ? n : NaN; };
     Promise.all(legs.map(([a, b]) =>
       fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': apiKey,
-          'X-Goog-FieldMask': 'routes.distanceMeters,routes.polyline.encodedPolyline',
+          'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration,routes.staticDuration,routes.polyline.encodedPolyline',
         },
-        body: JSON.stringify({ origin: wp(a), destination: wp(b), travelMode: 'DRIVE', computeAlternativeRoutes: true }),
+        body: JSON.stringify({
+          origin: wp(a),
+          destination: wp(b),
+          travelMode: 'DRIVE',
+          routingPreference: 'TRAFFIC_AWARE',
+          computeAlternativeRoutes: true,
+        }),
       }).then(async r => {
         if (!r.ok) { console.error('Routes API error', r.status, await r.text()); return null; }
-        const data: { routes?: { distanceMeters?: number; polyline?: { encodedPolyline?: string } }[] } = await r.json();
+        const data: { routes?: { distanceMeters?: number; duration?: string; staticDuration?: string; polyline?: { encodedPolyline?: string } }[] } = await r.json();
         const best = (data.routes || []).filter(x => typeof x.distanceMeters === 'number' && x.polyline?.encodedPolyline)
           .sort((x, y) => x.distanceMeters! - y.distanceMeters!)[0];
-        return best ? { meters: best.distanceMeters!, path: decodePolyline(best.polyline!.encodedPolyline!), road: true } : null;
-      }).catch(() => null).then(r => r || {
-        meters: haversineM(a, b), path: [new google.maps.LatLng(a.lat, a.lng), new google.maps.LatLng(b.lat, b.lng)], road: false,
-      })
+        if (!best) return null;
+        const meters = best.distanceMeters!;
+        const estSeconds = (meters / 1000 / FALLBACK_SPEED_KMH) * 3600;
+        const live = secs(best.duration);
+        const stat = secs(best.staticDuration);
+        return {
+          meters,
+          path: decodePolyline(best.polyline!.encodedPolyline!),
+          road: true,
+          seconds: Number.isFinite(live) ? live : estSeconds,
+          staticSeconds: Number.isFinite(stat) ? stat : (Number.isFinite(live) ? live : estSeconds),
+          durationEstimated: !Number.isFinite(live),
+        };
+      }).catch(() => null).then(r => r || (() => {
+        const meters = haversineM(a, b);
+        const est = (meters / 1000 / FALLBACK_SPEED_KMH) * 3600;
+        return {
+          meters, path: [new google.maps.LatLng(a.lat, a.lng), new google.maps.LatLng(b.lat, b.lng)], road: false,
+          seconds: est, staticSeconds: est, durationEstimated: true,
+        };
+      })())
     )).then(results => {
       if (cancelled) return;
       results.forEach(r => {
@@ -192,21 +258,16 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
       const total = results.reduce((s, r) => s + r.meters, 0);
       onDistanceChange(Math.round(total / 10) / 100);
       setDistanceMode(results.every(r => r.road) ? 'DRIVE' : 'mixed');
+      setTripInfo({
+        seconds: results.reduce((s, r) => s + r.seconds, 0),
+        staticSeconds: results.reduce((s, r) => s + r.staticSeconds, 0),
+        calcAt,
+        estimated: results.some(r => r.durationEstimated),
+      });
     }).finally(() => { if (!cancelled) setCalculatingDistance(false); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [points, isLoading]);
-
-  const handleCoordsAdd = () => {
-    const parts = coordsInput.split(',').map(s => s.trim());
-    if (parts.length === 2) {
-      const lat = parseFloat(parts[0]), lng = parseFloat(parts[1]);
-      if (isFinite(lat) && isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
-        addPoint(lat, lng);
-        setCoordsInput('');
-      }
-    }
-  };
+  }, [points, isLoading, refreshTick]);
 
   const handleSavedAddress = async (addrId: string) => {
     const addr = savedAddresses.find(a => a.id === addrId);
@@ -238,6 +299,11 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
     onPointsChange(points.filter(p => p.id !== id));
   };
 
+  // Final drop-off = moment the route was calculated + live-traffic driving time.
+  const arrivalMs = tripInfo ? tripInfo.calcAt + tripInfo.seconds * 1000 : 0;
+  const arrivesNextDay = tripInfo ? new Date(arrivalMs).toDateString() !== new Date(tripInfo.calcAt).toDateString() : false;
+  const trafficDelaySec = tripInfo ? tripInfo.seconds - tripInfo.staticSeconds : 0;
+
   return (
     <div className="space-y-3">
       {/* Saved addresses quick-add */}
@@ -255,24 +321,17 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
         </div>
       )}
 
-      {/* Google Maps place search + Plus Code */}
-      <LocationSearchBox onPick={(lat, lng, address) => addPoint(lat, lng, address)} />
-
-      {/* Add via coords */}
-      <div className="flex gap-2">
-        <Input placeholder="Coordinates (lat,lng)" value={coordsInput} onChange={e => setCoordsInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleCoordsAdd()} className="flex-1 h-8 text-xs" />
-        <Button size="sm" variant="outline" onClick={handleCoordsAdd} className="h-8 text-xs"><MapPin className="w-3 h-3 mr-1" />Add</Button>
-      </div>
+      {/* Search / Coordinates / Plus code ribbon */}
+      <LocationTabs onPick={(lat, lng, address) => addPoint(lat, lng, address)} />
 
       {/* Map */}
       <div className="relative w-full rounded-lg overflow-hidden h-[250px]">
         <div ref={mapRef} className="w-full h-full" />
         {isLoading && <div className="absolute inset-0 flex items-center justify-center bg-background/80 text-muted-foreground text-sm">Loading map...</div>}
         {error && <div className="absolute inset-0 flex items-center justify-center bg-background text-red-500 text-sm">{error}</div>}
-        <div className="absolute bottom-0 left-0 right-0 bg-background/80 backdrop-blur-sm text-xs p-1 text-center text-muted-foreground">
-          Click on map to add a pin
-        </div>
       </div>
+
+      <PinStatus text={points.length > 0 ? `${points.length} stop${points.length === 1 ? '' : 's'} added — click the map to add more` : null} />
 
       {/* Point list */}
       {points.length > 0 && (
@@ -303,9 +362,9 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
         </div>
       )}
 
-      {/* Total distance */}
+      {/* Trip summary: distance, live-traffic duration and final drop-off time */}
       {points.length >= 2 && (
-        <div className="rounded-md bg-primary/10 px-3 py-2 space-y-1">
+        <div className="rounded-md bg-primary/10 px-3 py-2 space-y-1.5">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-foreground">Total Distance</span>
             <span className="text-sm font-bold text-primary flex items-center gap-1.5">
@@ -317,6 +376,39 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
             <p className="text-[10px] text-muted-foreground text-right">
               {distanceModeLabels[distanceMode]}
             </p>
+          )}
+
+          <div className="flex items-center justify-between border-t border-primary/20 pt-1.5">
+            <span className="text-xs font-medium text-foreground flex items-center gap-1"><Clock className="w-3 h-3" /> Estimated Duration</span>
+            <span className="text-sm font-bold text-primary">
+              {tripInfo ? formatDuration(tripInfo.seconds) : '—'}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-foreground flex items-center gap-1"><Flag className="w-3 h-3" /> Final Drop-off Time</span>
+            <span className="text-sm font-bold text-primary">
+              {tripInfo ? formatClock(arrivalMs, arrivesNextDay) : '—'}
+            </span>
+          </div>
+          {tripInfo && !calculatingDistance && (
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[10px] text-muted-foreground">
+                {tripInfo.estimated
+                  ? 'Includes straight-line estimates (no live traffic for some legs). '
+                  : trafficDelaySec >= 60
+                    ? `Live traffic adds about ${formatDuration(trafficDelaySec)}. `
+                    : 'Live traffic is light right now. '}
+                Assumes leaving at {formatClock(tripInfo.calcAt, false)}, excluding time spent at stops.
+              </p>
+              <button
+                type="button"
+                onClick={() => setRefreshTick(t => t + 1)}
+                className="shrink-0 flex items-center gap-1 text-[10px] text-primary hover:underline"
+                title="Recalculate with current traffic"
+              >
+                <RefreshCw className="w-3 h-3" /> Refresh
+              </button>
+            </div>
           )}
         </div>
       )}
