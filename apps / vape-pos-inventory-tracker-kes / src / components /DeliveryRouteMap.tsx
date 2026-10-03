@@ -4,11 +4,15 @@ import { getAddresses } from 'zitejs/api';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { Label } from '@project/components/ui/label';
 import { Switch } from '@project/components/ui/switch';
+import { Button } from '@project/components/ui/button';
+import { Checkbox } from '@project/components/ui/checkbox';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { cn } from '@project/components/lib/utils';
-import { Trash2, BookMarked, Loader2, Clock, Flag, RefreshCw } from 'lucide-react';
+import { Trash2, BookMarked, Loader2, Clock, Flag, RefreshCw, PackageCheck } from 'lucide-react';
 import LocationTabs, { PinStatus } from './LocationTabs';
 import { geocode } from '../lib/geocode';
 import { numberedPin } from '../lib/pinIcon';
+import { addrTypeLabel, defaultRouteTag, normalizeAddrType } from '../lib/addressTypes';
 
 export interface RoutePoint {
   id: string;
@@ -16,6 +20,17 @@ export interface RoutePoint {
   tag?: 'start' | 'pickup' | 'dropoff' | 'end';
   lat: number;
   lng: number;
+  /** Set when the point came from a Supplier-type saved location. */
+  supplierId?: string;
+  supplierName?: string;
+}
+
+/** An item in the active order (and merged orders) that can be picked up from a supplier. */
+export interface PickupItem {
+  productId: string;
+  name: string;
+  quantity: number;
+  unitCost: number;
 }
 
 interface Props {
@@ -23,6 +38,11 @@ interface Props {
   onPointsChange: (points: RoutePoint[]) => void;
   totalDistance: number;
   onDistanceChange: (km: number) => void;
+  /** Items in the POS cart plus any merged pending orders. */
+  pickupItems?: PickupItem[];
+  /** Selected product ids per route point id. */
+  pickupSelections?: Record<string, string[]>;
+  onPickupSelectionsChange?: (s: Record<string, string[]>) => void;
 }
 
 const tagColors: Record<string, string> = {
@@ -104,9 +124,14 @@ function haversineM(a: { lat: number; lng: number }, b: { lat: number; lng: numb
 let nextId = 1;
 function genId() { return `rp_${nextId++}_${Date.now()}`; }
 
-interface SavedAddr { id: string; addressName?: string; type?: string; coordinates?: string; fullAddress?: string; }
+interface SavedAddr { id: string; addressName?: string; type?: string; coordinates?: string; fullAddress?: string; supplierId?: string | null; supplierName?: string; }
 
-export default function DeliveryRouteMap({ points, onPointsChange, totalDistance, onDistanceChange }: Props) {
+interface PointExtra { supplierId?: string; supplierName?: string; tag?: 'pickup' | 'dropoff'; }
+
+export default function DeliveryRouteMap({
+  points, onPointsChange, totalDistance, onDistanceChange,
+  pickupItems = [], pickupSelections = {}, onPickupSelectionsChange,
+}: Props) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<google.maps.Marker[]>([]);
@@ -124,6 +149,7 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
   const [calculatingDistance, setCalculatingDistance] = useState(false);
   const [tripInfo, setTripInfo] = useState<TripInfo | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
+  const [pickupFor, setPickupFor] = useState<RoutePoint | null>(null);
 
   // Which part of the route the next picked location (search, coordinates, plus code or map click) goes to.
   const [target, setTargetState] = useState<Target>(() => (points.some(p => p.tag === 'start') ? 'stops' : 'start'));
@@ -137,10 +163,15 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
 
   const apiKey = import.meta.env.VITE_GOOGLEMAPS_API_KEY;
 
-  const placePoint = useCallback((lat: number, lng: number, label?: string) => {
+  const placePoint = useCallback((lat: number, lng: number, label?: string, extra?: PointExtra) => {
     const cur = pointsRef.current;
     const t = targetRef.current;
-    const pt: RoutePoint = { id: genId(), label: label || `${lat.toFixed(5)},${lng.toFixed(5)}`, lat, lng };
+    const pt: RoutePoint = {
+      id: genId(),
+      label: label || `${lat.toFixed(5)},${lng.toFixed(5)}`,
+      lat, lng,
+      ...(extra?.supplierId ? { supplierId: extra.supplierId, supplierName: extra.supplierName } : {}),
+    };
     let next: RoutePoint[];
     if (t === 'start') {
       next = [{ ...pt, tag: 'start' }, ...cur.filter(p => p.tag !== 'start')];
@@ -149,13 +180,14 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
     } else if (t === 'end') {
       next = [...cur.filter(p => p.tag !== 'end'), { ...pt, tag: 'end' }];
     } else {
+      const stop: RoutePoint = extra?.tag ? { ...pt, tag: extra.tag } : pt;
       const endIdx = cur.findIndex(p => p.tag === 'end');
-      next = endIdx >= 0 ? [...cur.slice(0, endIdx), pt, ...cur.slice(endIdx)] : [...cur, pt];
+      next = endIdx >= 0 ? [...cur.slice(0, endIdx), stop, ...cur.slice(endIdx)] : [...cur, stop];
     }
     onPointsChangeRef.current(next);
   }, []);
 
-  // Load saved addresses
+  // Load saved addresses (the locations saved on the Addresses > Branches tab)
   useEffect(() => {
     getAddresses({}).then(res => setSavedAddresses(res.addresses as SavedAddr[])).catch(() => {});
   }, []);
@@ -315,12 +347,18 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
   const handleSavedAddress = async (addrId: string) => {
     const addr = savedAddresses.find(a => a.id === addrId);
     if (!addr) return;
+    const isSupplier = normalizeAddrType(addr.type) === 'supplier' && !!addr.supplierId;
+    const extra: PointExtra = {
+      tag: defaultRouteTag(addr.type),
+      ...(isSupplier ? { supplierId: addr.supplierId!, supplierName: addr.supplierName } : {}),
+    };
+    const label = addr.addressName || addr.fullAddress || addr.coordinates;
     if (addr.coordinates) {
       const parts = addr.coordinates.split(',').map(s => s.trim());
       if (parts.length === 2) {
         const lat = parseFloat(parts[0]), lng = parseFloat(parts[1]);
         if (isFinite(lat) && isFinite(lng)) {
-          placePoint(lat, lng, addr.addressName || addr.fullAddress || addr.coordinates);
+          placePoint(lat, lng, label, extra);
           return;
         }
       }
@@ -330,7 +368,7 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
     if (text) {
       const out = await geocode(text);
       const r = out.results[0];
-      if (r) placePoint(r.lat, r.lng, addr.addressName || addr.fullAddress || r.address);
+      if (r) placePoint(r.lat, r.lng, addr.addressName || addr.fullAddress || r.address, extra);
     }
   };
 
@@ -351,6 +389,17 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
       if (targetRef.current === 'end') setTarget('stops');
     }
   };
+
+  // ── Picked-up items (supplier pick-up points only) ──
+  const selectedFor = (id: string) =>
+    (pickupSelections[id] || []).filter(pid => pickupItems.some(i => i.productId === pid));
+  const dialogSel = pickupFor ? selectedFor(pickupFor.id) : [];
+  const setDialogSel = (ids: string[]) => {
+    if (pickupFor && onPickupSelectionsChange) onPickupSelectionsChange({ ...pickupSelections, [pickupFor.id]: ids });
+  };
+  const allPicked = pickupItems.length > 0 && dialogSel.length === pickupItems.length;
+  const toggleItem = (pid: string) =>
+    setDialogSel(dialogSel.includes(pid) ? dialogSel.filter(x => x !== pid) : [...dialogSel, pid]);
 
   // Final drop-off = moment the route was calculated + live-traffic driving time.
   const arrivalMs = tripInfo ? tripInfo.calcAt + tripInfo.seconds * 1000 : 0;
@@ -381,7 +430,7 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
             <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Add from saved addresses..." /></SelectTrigger>
             <SelectContent>
               {savedAddresses.map(a => (
-                <SelectItem key={a.id} value={a.id}>{a.addressName} {a.type ? `(${a.type})` : ''}</SelectItem>
+                <SelectItem key={a.id} value={a.id}>{a.addressName} ({addrTypeLabel(a.type)}{a.supplierName ? ` · ${a.supplierName}` : ''})</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -438,29 +487,46 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
       {/* Point list */}
       {points.length > 0 && (
         <div className="space-y-1.5 max-h-[180px] overflow-y-auto">
-          {points.map((pt, i) => (
-            <div key={pt.id} className="flex items-center gap-2 bg-muted/50 rounded-md px-2 py-1.5 text-xs">
-              <span className="w-5 h-5 rounded-full text-white text-[10px] font-bold flex items-center justify-center shrink-0" style={{ background: pt.tag ? tagColors[pt.tag] : '#6b7280' }}>
-                {i + 1}
-              </span>
-              <Select value={pt.tag || 'none'} onValueChange={val => updateTag(pt.id, val)}>
-                <SelectTrigger className="w-[90px] h-6 text-[10px] border-dashed">
-                  <SelectValue placeholder="Tag" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No tag</SelectItem>
-                  <SelectItem value="start">Start</SelectItem>
-                  <SelectItem value="pickup">Pick-up</SelectItem>
-                  <SelectItem value="dropoff">Drop-off</SelectItem>
-                  <SelectItem value="end">End</SelectItem>
-                </SelectContent>
-              </Select>
-              <span className="flex-1 truncate text-foreground">{pt.label}</span>
-              <button onClick={() => removePoint(pt.id)} className="text-destructive hover:text-red-300">
-                <Trash2 className="w-3 h-3" />
-              </button>
-            </div>
-          ))}
+          {points.map((pt, i) => {
+            const isSupplierPickup = pt.tag === 'pickup' && !!pt.supplierId;
+            const picked = isSupplierPickup ? selectedFor(pt.id).length : 0;
+            return (
+              <div key={pt.id} className="flex items-center gap-2 bg-muted/50 rounded-md px-2 py-1.5 text-xs">
+                <span className="w-5 h-5 rounded-full text-white text-[10px] font-bold flex items-center justify-center shrink-0" style={{ background: pt.tag ? tagColors[pt.tag] : '#6b7280' }}>
+                  {i + 1}
+                </span>
+                <Select value={pt.tag || 'none'} onValueChange={val => updateTag(pt.id, val)}>
+                  <SelectTrigger className="w-[90px] h-6 text-[10px] border-dashed">
+                    <SelectValue placeholder="Tag" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No tag</SelectItem>
+                    <SelectItem value="start">Start</SelectItem>
+                    <SelectItem value="pickup">Pick-up</SelectItem>
+                    <SelectItem value="dropoff">Drop-off</SelectItem>
+                    <SelectItem value="end">End</SelectItem>
+                  </SelectContent>
+                </Select>
+                <span className="flex-1 truncate text-foreground">{pt.label}</span>
+                {isSupplierPickup && (
+                  <button
+                    type="button"
+                    onClick={() => setPickupFor(pt)}
+                    title={`Select items picked up from ${pt.supplierName || 'this supplier'}`}
+                    className="relative shrink-0 flex items-center text-amber-400 hover:text-amber-300"
+                  >
+                    <PackageCheck className="w-4 h-4" />
+                    {picked > 0 && (
+                      <span className="absolute -top-1.5 -right-2 min-w-[13px] h-[13px] px-0.5 rounded-full bg-amber-500 text-white text-[8px] font-bold flex items-center justify-center">{picked}</span>
+                    )}
+                  </button>
+                )}
+                <button onClick={() => removePoint(pt.id)} className="text-destructive hover:text-red-300 shrink-0">
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -514,6 +580,46 @@ export default function DeliveryRouteMap({ points, onPointsChange, totalDistance
           )}
         </div>
       )}
+
+      {/* Items picked up at a supplier (optional). Only items in the active cart and merged orders are listed. */}
+      <Dialog open={!!pickupFor} onOpenChange={o => { if (!o) setPickupFor(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="break-words pr-6">Items picked up — {pickupFor?.supplierName || pickupFor?.label}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Optional. Tick the items collected from this supplier. A bill for their cost price is added to the supplier's pending bills when you check out.
+            </p>
+            {pickupItems.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">No items in the cart yet. Add items to the POS cart first.</p>
+            ) : (
+              <div className="space-y-1.5">
+                <label className="flex items-center gap-2 rounded-md border border-border px-2 py-1.5 cursor-pointer text-xs font-medium">
+                  <Checkbox checked={allPicked} onCheckedChange={v => setDialogSel(v ? pickupItems.map(i => i.productId) : [])} />
+                  Select all
+                </label>
+                <div className="max-h-64 overflow-y-auto space-y-1.5">
+                  {pickupItems.map(i => (
+                    <label key={i.productId} className="flex items-center gap-2 rounded-md bg-muted/50 px-2 py-1.5 cursor-pointer text-xs">
+                      <Checkbox checked={dialogSel.includes(i.productId)} onCheckedChange={() => toggleItem(i.productId)} />
+                      <span className="flex-1 min-w-0 break-words">{i.name}</span>
+                      <span className="shrink-0 text-muted-foreground">×{i.quantity}</span>
+                    </label>
+                  ))}
+                </div>
+                <p className="text-[11px] text-muted-foreground text-right">
+                  Bill: KES {pickupItems.filter(i => dialogSel.includes(i.productId)).reduce((s, i) => s + i.unitCost * i.quantity, 0).toLocaleString()}
+                </p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDialogSel([])} disabled={dialogSel.length === 0}>Clear</Button>
+            <Button onClick={() => setPickupFor(null)}>Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
