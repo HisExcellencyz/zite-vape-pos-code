@@ -8,7 +8,6 @@ import { MapPin, Users, UserCheck, BookmarkPlus, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useBranch } from '../hooks/useBranch';
 import DateRangeFilter, { Range, inRange } from './DateRangeFilter';
-import SummaryTiles from './SummaryTiles';
 import DeliveryHeatMap, { HeatMetric, HeatPoint } from './DeliveryHeatMap';
 import { parseCoordinates } from '../lib/geocode';
 
@@ -182,8 +181,6 @@ export default function DeliveriesPanel() {
     toast.success(`Saved ${ok} customer address${ok === 1 ? '' : 'es'}`);
   };
 
-  const totalRevenue = drops.reduce((s, d) => s + d.revenue, 0);
-
   const selectSpot = (s: { key: string; lat: number; lng: number }) => {
     setActiveKey(s.key);
     setFocus({ lat: s.lat, lng: s.lng });
@@ -194,7 +191,7 @@ export default function DeliveriesPanel() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-3">
         <DateRangeFilter value={range} onChange={setRange} />
         <div className="flex rounded-md border border-border p-0.5">
@@ -220,26 +217,18 @@ export default function DeliveriesPanel() {
         </Button>
       </div>
 
-      <SummaryTiles
-        items={[
-          { label: 'Deliveries', value: String(drops.length) },
-          { label: 'Revenue', value: fmt(totalRevenue) },
-          { label: 'Drop-off Locations', value: String(spots.length) },
-          { label: 'Customers Served', value: String(new Set(drops.map(d => d.customerId).filter(Boolean)).size) },
-        ]}
-      />
-
-      <div className="grid gap-4 lg:grid-cols-[minmax(300px,380px)_1fr]">
-        <div className="space-y-2 lg:max-h-[calc(100vh-330px)] lg:overflow-y-auto lg:pr-1 order-2 lg:order-1">
+      {/* List column is 0.65 of its former width (300–380px → 195–247px); the map takes all the freed space. */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(195px,247px)_1fr]">
+        <div className="space-y-2 lg:max-h-[calc(100vh-190px)] lg:overflow-y-auto lg:pr-1 order-2 lg:order-1">
           {loading ? (
             [...Array(4)].map((_, i) => (
               <Card key={i} className="bg-card border-border"><CardContent className="p-3"><div className="h-12 bg-muted rounded animate-pulse" /></CardContent></Card>
             ))
           ) : spots.length === 0 ? (
             <Card className="bg-card border-border">
-              <CardContent className="p-10 text-center text-muted-foreground">
+              <CardContent className="p-6 text-center text-muted-foreground">
                 <MapPin className="w-10 h-10 mx-auto mb-2 opacity-40" />
-                No delivery drop-offs yet. Plan a route with a Drop-off pin at POS and complete the sale.
+                <p className="text-sm">No delivery drop-offs yet. Plan a route with a Drop-off pin at POS and complete the sale.</p>
               </CardContent>
             </Card>
           ) : spots.map(s => (
@@ -260,24 +249,26 @@ export default function DeliveriesPanel() {
                   </div>
                 </div>
                 {(s.customers.size > 0 || s.walkIns > 0) && (
-                  <div className="space-y-1 border-t border-border pt-2" onClick={e => e.stopPropagation()}>
+                  <div className="space-y-1.5 border-t border-border pt-2" onClick={e => e.stopPropagation()}>
                     {Array.from(s.customers.values()).map(c => {
                       const cust = customerMap.get(c.id);
                       const saved = isSaved(c.id, c.latest);
                       return (
-                        <div key={c.id} className="flex items-center gap-2 text-xs">
-                          <Users className="w-3 h-3 text-muted-foreground shrink-0" />
-                          <div className="min-w-0 flex-1">
-                            <p className="font-medium text-foreground truncate">{cust?.customerName || 'Customer'}</p>
-                            <p className="text-[10px] text-muted-foreground">{c.orders} order{c.orders === 1 ? '' : 's'} · {fmt(c.revenue)}</p>
+                        <div key={c.id} className="space-y-1 text-xs">
+                          <div className="flex items-start gap-1.5">
+                            <Users className="w-3 h-3 mt-0.5 text-muted-foreground shrink-0" />
+                            <div className="min-w-0 flex-1">
+                              <p className="font-medium text-foreground break-words leading-snug">{cust?.customerName || 'Customer'}</p>
+                              <p className="text-[10px] text-muted-foreground">{c.orders} order{c.orders === 1 ? '' : 's'} · {fmt(c.revenue)}</p>
+                            </div>
                           </div>
                           {saved ? (
-                            <span className="flex items-center gap-1 text-[10px] text-emerald-400 shrink-0"><UserCheck className="w-3 h-3" /> Saved</span>
+                            <span className="flex items-center gap-1 text-[10px] text-emerald-400 pl-[18px]"><UserCheck className="w-3 h-3" /> Saved</span>
                           ) : (
                             <Button
                               size="sm"
                               variant="outline"
-                              className="h-6 px-2 text-[10px] shrink-0 border-amber-400/70"
+                              className="h-6 px-2 text-[10px] ml-[18px] border-amber-400/70"
                               disabled={savingId === c.id + c.latest.date}
                               onClick={() => handleSave(c.id, c.latest)}
                               title="Save this pin as the customer's address"
@@ -298,13 +289,13 @@ export default function DeliveriesPanel() {
           ))}
         </div>
 
-        <div className="order-1 lg:order-2 lg:sticky lg:top-6 lg:self-start">
+        <div className="order-1 lg:order-2 lg:sticky lg:top-6 lg:self-start min-w-0">
           <DeliveryHeatMap
             points={heatPoints}
             metric={metric}
             focus={focus}
             onSelect={fromMarker}
-            className="h-[300px] lg:h-[calc(100vh-330px)]"
+            className="h-[300px] lg:h-[calc(100vh-190px)]"
           />
         </div>
       </div>
