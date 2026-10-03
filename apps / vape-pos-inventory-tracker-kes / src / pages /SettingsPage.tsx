@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { saveBranch, getSettings, saveSettings, syncToGoogleSheets } from 'zitejs/api';
+import { saveBranch } from 'zitejs/api';
 import { Link } from 'react-router-dom';
 import DashboardPage from './DashboardPage';
 import { Card, CardContent, CardHeader, CardTitle } from '@project/components/ui/card';
@@ -9,18 +9,12 @@ import { Label } from '@project/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@project/components/ui/tabs';
 import { Switch } from '@project/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
-import { Store, Plus, Pencil, Trash2, Check, FileSpreadsheet, Shield, Truck, Bike, Phone } from 'lucide-react';
+import { Store, Plus, Pencil, Trash2, Check, Shield, Truck, Bike, Phone } from 'lucide-react';
 import { toast } from 'sonner';
 import { useBranch, Branch } from '../hooks/useBranch';
 import { Rider, Riders, RiderType, RIDER_LABELS, DEFAULT_DELIVERY_FEE, loadRiders, persistRiders, newRiderId } from '../lib/delivery';
 
 const DEFAULT_LOGO = 'https://images.fillout.com/orgid-811092/flowpublicid-6hepsbbapu/widgetid-default/xmArbfbmsBwLWSE2d2Et7u/pasted-image-1788367385543-n4ulma8b.png';
-
-// businessSettings still exists as a table but is no longer presented as a
-// single "umbrella business" identity — it's now just where free-form
-// integration config (Google Sheets webhook, archival email, delivery riders) is kept,
-// mirroring the same customFields pattern used elsewhere in this app.
-const FALLBACK_SETTINGS_NAME = 'App Settings';
 
 import CommissionEditor from '../components/CommissionEditor';
 import type { Commission } from '../hooks/useBranch';
@@ -41,10 +35,6 @@ export default function SettingsPage() {
   const [savingOutlet, setSavingOutlet] = useState(false);
   const [outletCommissions, setOutletCommissions] = useState<Commission[]>([]);
 
-  // Integrations (kept for the archive feature)
-  const [settingsId, setSettingsId] = useState<string | undefined>();
-  const [syncing, setSyncing] = useState(false);
-
   // Delivery riders (shared by every outlet)
   const [riders, setRiders] = useState<Riders>({ threePl: [], own: [] });
   const [riderDialog, setRiderDialog] = useState<{ type: RiderType; id?: string } | null>(null);
@@ -54,10 +44,6 @@ export default function SettingsPage() {
   const [savingRider, setSavingRider] = useState(false);
 
   useEffect(() => {
-    getSettings({}).then(res => {
-      const s = res.settings as any;
-      if (s) setSettingsId(s.id);
-    }).catch(() => {});
     loadRiders().then(setRiders).catch(() => {});
   }, []);
 
@@ -111,18 +97,6 @@ export default function SettingsPage() {
       toast.error(e.message || 'Failed to save outlet');
     } finally {
       setSavingOutlet(false);
-    }
-  };
-
-  const handleSyncNow = async () => {
-    setSyncing(true);
-    try {
-      const res = await syncToGoogleSheets({});
-      toast.success(res.message);
-    } catch (e: any) {
-      toast.error(e.message || 'Sync failed');
-    } finally {
-      setSyncing(false);
     }
   };
 
@@ -208,7 +182,7 @@ export default function SettingsPage() {
             <p className="text-sm text-muted-foreground max-w-xl">
               Each outlet is independent, with its own name, address, logo and cover photo — there's no shared
               business name across outlets. Switch between them from the sidebar, and the Dashboard can be
-              filtered to a single outlet at a time.
+              filtered to a single outlet at a time. Suppliers, customers and addresses are shared by all outlets.
             </p>
             <Button size="sm" onClick={openNewOutlet}><Plus className="w-4 h-4 mr-1" /> Add Outlet</Button>
           </div>
@@ -240,15 +214,6 @@ export default function SettingsPage() {
               </Card>
             ))}
           </div>
-
-          <Card className="bg-card border-border w-full max-w-[403px]">
-            <CardContent className="p-3 space-y-2">
-              <p className="text-sm font-semibold flex items-center gap-2"><FileSpreadsheet className="w-4 h-4 text-emerald-400" /> Archive to Google Sheets</p>
-              <p className="text-xs text-muted-foreground">Copies products, customers, suppliers, sales, purchases, expenses and income from every outlet to your connected Google Sheet.</p>
-              <p className="text-[11px] text-muted-foreground">Sends to your connected "Uptown; Drinks POS Database" sheet. Sales, purchases, expenses and income older than 3 months are removed from the app after each archive.</p>
-              <Button size="sm" className="h-8 w-full" onClick={handleSyncNow} disabled={syncing}>{syncing ? 'Archiving...' : 'Archive Now'}</Button>
-            </CardContent>
-          </Card>
 
           <Dialog open={outletDialogOpen} onOpenChange={setOutletDialogOpen}>
             <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
