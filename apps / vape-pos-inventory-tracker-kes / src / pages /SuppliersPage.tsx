@@ -380,7 +380,7 @@ export default function SuppliersPage() {
                       <td className="p-3 text-muted-foreground whitespace-nowrap">{s.phone || '-'}</td>
                       <td className="p-3 text-muted-foreground break-all">{s.email || '-'}</td>
                       <td className="p-3 text-right font-semibold text-primary whitespace-nowrap">{fmt(s.depositBalance)}</td>
-                      <td className={`p-3 text-right font-semibold whitespace-nowrap ${(s.billsPending || 0) > 0 ? 'text-pink-400' : 'text-muted-foreground'}`}>{fmt(s.billsPending)}</td>
+                      <td className="p-3 text-right font-semibold whitespace-nowrap text-pink-400">{fmt(s.billsPending)}</td>
                       <td className="p-3 text-right">{renderActions(s)}</td>
                     </tr>
                   ))}
@@ -428,9 +428,10 @@ export default function SuppliersPage() {
                       <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Deposit Balance</p>
                       <p className="font-semibold text-primary break-words">{fmt(s.depositBalance)}</p>
                     </div>
-                    <div className={`rounded-md border px-2 py-1.5 ${(s.billsPending || 0) > 0 ? 'bg-pink-500/5 border-pink-500/30' : 'bg-muted/30 border-border'}`}>
+                    {/* Same design as the Deposit Balance tab, in pink */}
+                    <div className="rounded-md bg-pink-500/5 border border-pink-500/20 px-2 py-1.5">
                       <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Bills Pending{s.billCount ? ` (${s.billCount})` : ''}</p>
-                      <p className={`font-semibold break-words ${(s.billsPending || 0) > 0 ? 'text-pink-400' : 'text-muted-foreground'}`}>{fmt(s.billsPending)}</p>
+                      <p className="font-semibold text-pink-500 break-words">{fmt(s.billsPending)}</p>
                     </div>
                   </div>
                   <div className="border-t border-border pt-2">{renderActions(s)}</div>
@@ -495,7 +496,7 @@ export default function SuppliersPage() {
                 </div>
                 <div className="rounded-lg border border-pink-500/30 bg-pink-500/5 px-3 py-2">
                   <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Bills Pending</p>
-                  <p className="text-lg font-bold text-pink-400">{fmt(acctPending)}</p>
+                  <p className="text-lg font-bold text-pink-500">{fmt(acctPending)}</p>
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
