@@ -1,14 +1,15 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, ReactNode } from 'react';
 import { Loader } from '@googlemaps/js-api-loader';
 import { getAddresses } from 'zitejs/api';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
+import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
 import { Switch } from '@project/components/ui/switch';
 import { Button } from '@project/components/ui/button';
 import { Checkbox } from '@project/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { cn } from '@project/components/lib/utils';
-import { Trash2, BookMarked, Loader2, Clock, Flag, RefreshCw, PackageCheck } from 'lucide-react';
+import { Trash2, BookMarked, Loader2, Clock, Flag, RefreshCw, PackageCheck, Search } from 'lucide-react';
 import LocationTabs, { PinStatus } from './LocationTabs';
 import { geocode } from '../lib/geocode';
 import { numberedPin } from '../lib/pinIcon';
@@ -43,6 +44,8 @@ interface Props {
   /** Selected product ids per route point id. */
   pickupSelections?: Record<string, string[]>;
   onPickupSelectionsChange?: (s: Record<string, string[]>) => void;
+  /** Extra button(s) shown on the same row as the Saved Addresses button (e.g. Merge Orders). */
+  extraActions?: ReactNode;
 }
 
 const tagColors: Record<string, string> = {
@@ -130,7 +133,7 @@ interface PointExtra { supplierId?: string; supplierName?: string; tag?: 'pickup
 
 export default function DeliveryRouteMap({
   points, onPointsChange, totalDistance, onDistanceChange,
-  pickupItems = [], pickupSelections = {}, onPickupSelectionsChange,
+  pickupItems = [], pickupSelections = {}, onPickupSelectionsChange, extraActions,
 }: Props) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
@@ -145,6 +148,8 @@ export default function DeliveryRouteMap({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string>();
   const [savedAddresses, setSavedAddresses] = useState<SavedAddr[]>([]);
+  const [savedOpen, setSavedOpen] = useState(false);
+  const [savedQuery, setSavedQuery] = useState('');
   const [distanceMode, setDistanceMode] = useState<DistanceMode | null>(null);
   const [calculatingDistance, setCalculatingDistance] = useState(false);
   const [tripInfo, setTripInfo] = useState<TripInfo | null>(null);
@@ -372,6 +377,18 @@ export default function DeliveryRouteMap({
     }
   };
 
+  const pickSaved = (addrId: string) => {
+    setSavedOpen(false);
+    setSavedQuery('');
+    handleSavedAddress(addrId);
+  };
+
+  const filteredSaved = savedAddresses.filter(a => {
+    const q = savedQuery.trim().toLowerCase();
+    if (!q) return true;
+    return [a.addressName, a.fullAddress, a.supplierName, addrTypeLabel(a.type)].some(v => (v || '').toLowerCase().includes(q));
+  });
+
   const updateTag = (id: string, tag: string) => {
     onPointsChange(points.map(p => p.id === id ? { ...p, tag: tag === 'none' ? undefined : tag as any } : p));
   };
@@ -422,20 +439,15 @@ export default function DeliveryRouteMap({
 
   return (
     <div className="space-y-3">
-      {/* Saved addresses quick-add (goes to whichever part is selected below) */}
-      {savedAddresses.length > 0 && (
-        <div>
-          <Label className="text-xs text-muted-foreground flex items-center gap-1 mb-1"><BookMarked className="w-3 h-3" /> Saved Addresses</Label>
-          <Select onValueChange={handleSavedAddress}>
-            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Add from saved addresses..." /></SelectTrigger>
-            <SelectContent>
-              {savedAddresses.map(a => (
-                <SelectItem key={a.id} value={a.id}>{a.addressName} ({addrTypeLabel(a.type)}{a.supplierName ? ` · ${a.supplierName}` : ''})</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
+      {/* Saved Addresses + (Merge Orders) buttons, side by side */}
+      <div className="grid grid-cols-2 gap-2">
+        {savedAddresses.length > 0 && (
+          <Button type="button" variant="outline" className="h-9 text-xs border-amber-400/70 hover:border-amber-400" onClick={() => setSavedOpen(true)}>
+            <BookMarked className="w-3.5 h-3.5 mr-1.5 shrink-0" /> <span className="truncate">Saved Addresses</span>
+          </Button>
+        )}
+        {extraActions}
+      </div>
 
       {/* Location panel: title, Search / Coordinates / Plus code ribbon, map, pin status, toggles */}
       <div className="rounded-xl border border-border bg-card/60 p-3 space-y-3">
@@ -513,12 +525,10 @@ export default function DeliveryRouteMap({
                     type="button"
                     onClick={() => setPickupFor(pt)}
                     title={`Select items picked up from ${pt.supplierName || 'this supplier'}`}
-                    className="relative shrink-0 flex items-center text-amber-400 hover:text-amber-300"
+                    className="shrink-0 flex items-center gap-1 h-6 px-2 rounded-md bg-pink-500 text-white text-[10px] font-semibold shadow-sm hover:bg-pink-600 transition-colors"
                   >
-                    <PackageCheck className="w-4 h-4" />
-                    {picked > 0 && (
-                      <span className="absolute -top-1.5 -right-2 min-w-[13px] h-[13px] px-0.5 rounded-full bg-amber-500 text-white text-[8px] font-bold flex items-center justify-center">{picked}</span>
-                    )}
+                    <PackageCheck className="w-3.5 h-3.5" />
+                    Pick items{picked > 0 ? ` (${picked})` : ''}
                   </button>
                 )}
                 <button onClick={() => removePoint(pt.id)} className="text-destructive hover:text-red-300 shrink-0">
@@ -580,6 +590,44 @@ export default function DeliveryRouteMap({
           )}
         </div>
       )}
+
+      {/* Saved addresses picker */}
+      <Dialog open={savedOpen} onOpenChange={o => { setSavedOpen(o); if (!o) setSavedQuery(''); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><BookMarked className="w-5 h-5 text-amber-400" /> Saved Addresses</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Tap an address to add it to the route ({target === 'start' ? 'as the start' : target === 'end' ? 'as the end' : 'as a stop'}).
+            </p>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+              <Input value={savedQuery} onChange={e => setSavedQuery(e.target.value)} placeholder="Search saved addresses..." className="pl-8 h-9 text-xs" />
+            </div>
+            <div className="max-h-72 overflow-y-auto space-y-1.5">
+              {filteredSaved.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-6 text-center">No saved addresses found</p>
+              ) : filteredSaved.map(a => (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => pickSaved(a.id)}
+                  className="w-full text-left rounded-md bg-muted/50 hover:bg-muted px-3 py-2 text-xs transition-colors"
+                >
+                  <p className="font-medium text-foreground break-words">{a.addressName}</p>
+                  <p className="text-[10px] text-muted-foreground break-words">
+                    {addrTypeLabel(a.type)}{a.supplierName ? ` · ${a.supplierName}` : ''}{a.fullAddress ? ` · ${a.fullAddress}` : ''}
+                  </p>
+                </button>
+              ))}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSavedOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Items picked up at a supplier (optional). Only items in the active cart and merged orders are listed. */}
       <Dialog open={!!pickupFor} onOpenChange={o => { if (!o) setPickupFor(null); }}>
