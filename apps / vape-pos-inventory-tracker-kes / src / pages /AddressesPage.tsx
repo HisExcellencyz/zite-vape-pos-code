@@ -55,6 +55,7 @@ export default function AddressesPage() {
   const load = async () => {
     setLoading(true);
     try {
+      // Addresses and suppliers are shared by every outlet, so nothing is filtered by outlet here.
       const [res, sup] = await Promise.all([getAddresses({}), getSuppliers({})]);
       setAddresses(res.addresses as Address[]);
       setSuppliers(sup.suppliers as SupplierLite[]);
@@ -158,36 +159,36 @@ export default function AddressesPage() {
   );
 
   return (
-    <div className="p-4 space-y-3">
+    <div className="p-3 space-y-2">
       <Tabs value={tab} onValueChange={setTab}>
-        {/* One compact header row: title, tabs and the add button */}
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-xl font-bold text-foreground">Addresses</h1>
-            <TabsList className="bg-muted">
-              <TabsTrigger value="branches">Branches</TabsTrigger>
-              <TabsTrigger value="deliveries">Deliveries</TabsTrigger>
-            </TabsList>
+        {/* Row 1: title (and add button). Row 2: the ribbon tabs, below the title */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-baseline gap-3 flex-wrap">
+            <h1 className="text-xl font-bold text-foreground leading-tight">Addresses</h1>
             <span className="text-xs text-muted-foreground">
               {tab === 'branches' ? `${addresses.length} locations saved` : 'Where your orders are delivered'}
             </span>
           </div>
           {tab === 'branches' && (
-            <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" /> Add Location</Button>
+            <Button size="sm" className="h-8" onClick={openNew}><Plus className="w-4 h-4 mr-1" /> Add Location</Button>
           )}
         </div>
+        <TabsList className="bg-muted mt-1.5">
+          <TabsTrigger value="branches">Branches</TabsTrigger>
+          <TabsTrigger value="deliveries">Deliveries</TabsTrigger>
+        </TabsList>
 
-        <TabsContent value="branches" className="mt-3">
-          <div className="grid gap-3 lg:grid-cols-[minmax(210px,270px)_1fr]">
-            {/* Left: narrow location tiles (no type shown) */}
-            <div className="space-y-1.5 lg:max-h-[calc(100vh-96px)] lg:overflow-y-auto lg:pr-1 order-2 lg:order-1">
+        <TabsContent value="branches" className="mt-2">
+          <div className="grid gap-3 lg:grid-cols-[minmax(170px,220px)_1fr]">
+            {/* Left: narrow location tiles (type is not shown) */}
+            <div className="space-y-1.5 lg:max-h-[calc(100vh-112px)] lg:overflow-y-auto lg:pr-1 order-2 lg:order-1">
               {loading ? (
                 [...Array(5)].map((_, i) => (
                   <Card key={i} className="bg-card border-border"><CardContent className="p-2"><div className="h-8 bg-muted rounded animate-pulse" /></CardContent></Card>
                 ))
               ) : addresses.length === 0 ? (
                 <Card className="bg-card border-border">
-                  <CardContent className="p-8 text-center text-muted-foreground">
+                  <CardContent className="p-6 text-center text-muted-foreground">
                     <MapPin className="w-8 h-8 mx-auto mb-2 opacity-40" />
                     <p className="text-sm">No locations yet. Add your commonly used supplier, pick-up, drop-off and start/end points.</p>
                   </CardContent>
@@ -206,27 +207,27 @@ export default function AddressesPage() {
                         {a.fullAddress && <p className="text-[11px] text-muted-foreground line-clamp-2 break-words">{a.fullAddress}</p>}
                         {a.notes && <p className="text-[10px] text-muted-foreground italic line-clamp-1 break-words">{a.notes}</p>}
                       </div>
-                      {renderActions(a)}
                     </div>
+                    <div className="flex justify-end mt-0.5">{renderActions(a)}</div>
                   </CardContent>
                 </Card>
               ))}
             </div>
 
             {/* Right: large map overview */}
-            <div className="order-1 lg:order-2 lg:sticky lg:top-4 lg:self-start">
+            <div className="order-1 lg:order-2 lg:sticky lg:top-3 lg:self-start">
               <MapView
                 pins={mapPins}
                 fitToPins
                 plainPins
                 focus={focus}
-                className="h-[300px] lg:h-[calc(100vh-96px)]"
+                className="h-[320px] lg:h-[calc(100vh-112px)]"
               />
             </div>
           </div>
         </TabsContent>
 
-        <TabsContent value="deliveries" className="mt-3">
+        <TabsContent value="deliveries" className="mt-2">
           <DeliveriesPanel />
         </TabsContent>
       </Tabs>
