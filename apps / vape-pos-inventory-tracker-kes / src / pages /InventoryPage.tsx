@@ -403,10 +403,11 @@ export default function InventoryPage() {
               Select all
             </label>
           )}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 items-stretch">
+          {/* Six tiles per row on large screens */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 items-stretch">
             {loading ? (
-              [...Array(5)].map((_, i) => (
-                <Card key={i} className="bg-card border-border"><CardContent className="p-2.5"><div className="aspect-[16/9] bg-muted rounded animate-pulse" /></CardContent></Card>
+              [...Array(6)].map((_, i) => (
+                <Card key={i} className="bg-card border-border"><CardContent className="p-2"><div className="aspect-[2/1] bg-muted rounded animate-pulse" /></CardContent></Card>
               ))
             ) : tc.view.length === 0 ? (
               <Card className="col-span-full bg-card border-border">
@@ -417,17 +418,17 @@ export default function InventoryPage() {
               </Card>
             ) : tc.view.map((p: Product) => (
               <Card key={p.id} className={`bg-card flex flex-col ${selectedIds.has(p.id) ? 'border-primary' : 'border-border'}`}>
-                <CardContent className="p-2.5 space-y-2 flex flex-col flex-1">
+                <CardContent className="p-2 space-y-1.5 flex flex-col flex-1">
                   <div className="relative">
-                    <ProductImage src={photoOf(p)} alt={p.productName} className="w-full !aspect-[16/9]" />
-                    <input type="checkbox" checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} className="absolute top-2 left-2 rounded" />
-                    <div className="absolute top-2 right-2">{statusBadge(p)}</div>
+                    <ProductImage src={photoOf(p)} alt={p.productName} className="w-full !aspect-[2/1]" />
+                    <input type="checkbox" checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} className="absolute top-1.5 left-1.5 rounded" />
+                    <div className="absolute top-1.5 right-1.5 scale-90 origin-top-right">{statusBadge(p)}</div>
                   </div>
                   <div className="min-w-0">
-                    <p className="font-medium text-foreground break-words whitespace-normal leading-snug [overflow-wrap:anywhere]">{p.productName}</p>
-                    <p className="text-xs text-muted-foreground font-mono break-all mt-0.5">{p.sku}</p>
+                    <p className="text-[14.4px] font-medium text-foreground break-words whitespace-normal leading-snug [overflow-wrap:anywhere]">{p.productName}</p>
+                    <p className="text-[11px] text-muted-foreground font-mono break-all mt-0.5">{p.sku}</p>
                   </div>
-                  <div className="grid grid-cols-3 gap-1.5 text-xs leading-tight mt-auto">
+                  <div className="grid grid-cols-3 gap-1 text-[11px] leading-tight mt-auto">
                     <div className="min-w-0">
                       <p className="text-muted-foreground">Cost</p>
                       <p className="font-medium text-foreground break-words">{fmt(p.costPrice)}</p>
@@ -441,7 +442,7 @@ export default function InventoryPage() {
                       <p className={`font-semibold ${p.stockQuantity && p.stockQuantity > 0 ? 'text-emerald-400' : 'text-red-400'}`}>{p.stockQuantity || 0}</p>
                     </div>
                   </div>
-                  <div className="border-t border-border pt-1.5">{renderActions(p)}</div>
+                  <div className="border-t border-border pt-1">{renderActions(p)}</div>
                 </CardContent>
               </Card>
             ))}
