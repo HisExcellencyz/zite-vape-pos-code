@@ -10,8 +10,7 @@ import POSPage from './pages/POSPage';
 import InventoryPage from './pages/InventoryPage';
 import CustomersPage from './pages/CustomersPage';
 import SuppliersPage from './pages/SuppliersPage';
-import SalesPage from './pages/SalesPage';
-import PurchasesPage from './pages/PurchasesPage';
+import IncomePage from './pages/IncomePage';
 import PurchaseOrdersPage from './pages/PurchaseOrdersPage';
 import ExpensesPage from './pages/ExpensesPage';
 import SettingsPage from './pages/SettingsPage';
@@ -23,14 +22,14 @@ import { BranchProvider } from './hooks/useBranch';
 import { applyStoredTheme } from './hooks/useTheme';
 
 // Each screen belongs to a permission "area" (see the roles matrix on the Users page).
-const ROUTES: { path: string; area: string; element: ReactElement }[] = [
+// `alt` is an extra area that also unlocks the screen (Expenses now holds Purchases too).
+const ROUTES: { path: string; area: string; alt?: string; element: ReactElement }[] = [
   { path: '/', area: 'reports', element: <DashboardPage /> },
   { path: '/pos', area: 'pos', element: <POSPage /> },
   { path: '/inventory', area: 'inventory', element: <InventoryPage /> },
-  { path: '/sales', area: 'pos', element: <SalesPage /> },
-  { path: '/purchases', area: 'purchases', element: <PurchasesPage /> },
+  { path: '/income', area: 'pos', element: <IncomePage /> },
   { path: '/purchase-orders', area: 'purchases', element: <PurchaseOrdersPage /> },
-  { path: '/expenses', area: 'expenses', element: <ExpensesPage /> },
+  { path: '/expenses', area: 'expenses', alt: 'purchases', element: <ExpensesPage /> },
   { path: '/customers', area: 'customers', element: <CustomersPage /> },
   { path: '/suppliers', area: 'suppliers', element: <SuppliersPage /> },
   { path: '/categories', area: 'inventory', element: <CategoriesPage /> },
@@ -75,7 +74,8 @@ function AppRoutes() {
     );
   }
 
-  const visible = ROUTES.filter(r => can(r.area, 'view'));
+  const allowed = (r: { area: string; alt?: string }) => can(r.area, 'view') || (!!r.alt && can(r.alt, 'view'));
+  const visible = ROUTES.filter(allowed);
   if (pending || visible.length === 0) return <AccessPending />;
 
   const home = visible[0].path;
@@ -87,9 +87,12 @@ function AppRoutes() {
           <Route
             key={r.path}
             path={r.path}
-            element={can(r.area, 'view') ? r.element : <Navigate to={home} replace />}
+            element={allowed(r) ? r.element : <Navigate to={home} replace />}
           />
         ))}
+        {/* Old links keep working */}
+        <Route path="/sales" element={<Navigate to="/income" replace />} />
+        <Route path="/purchases" element={<Navigate to="/expenses" replace />} />
         <Route path="*" element={<Navigate to={home} replace />} />
       </Routes>
     </AppLayout>
