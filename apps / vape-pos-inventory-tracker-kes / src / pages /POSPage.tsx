@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getProducts, getCustomers, createSale, saveCustomer, getSales, manageHeldOrders } from 'zitejs/api';
+import { getProducts, getCustomers, createSale, saveCustomer, getSales, manageHeldOrders, manageSupplierBills } from 'zitejs/api';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { Search, Plus, Minus, ShoppingCart, Trash2, UserPlus, X, Receipt, DollarSign, MapPin, Route, UserCheck, Truck, Bike, Pause, Play, Clock, Layers } from 'lucide-react';
 import { toast } from 'sonner';
-import DeliveryRouteMap from '../components/DeliveryRouteMap';
+import DeliveryRouteMap, { PickupItem } from '../components/DeliveryRouteMap';
 import LocationPickerDialog from '../components/LocationPickerDialog';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
 import OtherIncomeDialog from '../components/OtherIncomeDialog';
@@ -66,6 +66,7 @@ interface HeldOrder {
   discountType: DiscountType;
   routePoints: any[];
   distanceKm: number;
+  pickupSelections?: Record<string, string[]>;
 }
 
 /** Discount in KES for a given subtotal, never more than the subtotal. */
@@ -177,6 +178,8 @@ export default function POSPage() {
   const [showDeliveryMap, setShowDeliveryMap] = useState(false);
   const [routePoints, setRoutePoints] = useState<any[]>([]);
   const [distanceKm, setDistanceKm] = useState(0);
+  // Items ticked as picked up, per route point id (supplier pick-up pins only).
+  const [pickupSelections, setPickupSelections] = useState<Record<string, string[]>>({});
   const [range, setRange] = useState<Range>({});
   const [recentSales, setRecentSales] = useState<any[]>([]);
   const loadSales = () => getSales({ branchId: currentBranch?.id }).then(r => setRecentSales(r.sales)).catch(() => {});
@@ -199,6 +202,21 @@ export default function POSPage() {
 
   // Orders merged into this checkout (ignores any that were resumed/deleted elsewhere in the meantime).
   const mergeList = heldOrders.filter(h => mergedIds.includes(h.id));
+
+  // Items that can be picked up from a supplier: the active cart plus every merged pending order,
+  // combined per product (with cost price, which is what the supplier bills).
+  const pickupItems: PickupItem[] = (() => {
+    const map = new Map<string, PickupItem>();
+    const add = (productId: string, name: string, quantity: number, fallbackCost: number) => {
+      const cur = map.get(productId);
+      if (cur) { cur.quantity += quantity; return; }
+      const cost = products.find(p => p.id === productId)?.costPrice ?? fallbackCost;
+      map.set(productId, { productId, name, quantity, unitCost: cost || 0 });
+    };
+    cart.forEach(c => add(c.product.id, c.product.productName || 'Item', c.quantity, c.product.costPrice || 0));
+    mergeList.forEach(h => h.items.forEach(i => add(i.productId, i.productName || 'Item', i.quantity, 0)));
+    return Array.from(map.values());
+  })();
 
   // Switching outlet changes the available deductions, so start fresh.
   useEffect(() => { setSelectedDeductions([]); }, [currentBranch?.id]);
@@ -260,6 +278,7 @@ export default function POSPage() {
     setDiscountType('KES');
     setRoutePoints([]);
     setDistanceKm(0);
+    setPickupSelections({});
     setMergedIds([]);
   };
 
@@ -288,6 +307,7 @@ export default function POSPage() {
         discountType,
         routePoints,
         distanceKm,
+        pickupSelections,
       };
       const res = await manageHeldOrders({ action: 'hold', branchId: currentBranch?.id, order });
       setHeldOrders(res.orders as HeldOrder[]);
@@ -323,6 +343,7 @@ export default function POSPage() {
       setDiscountType(h.discountType || 'KES');
       setRoutePoints(h.routePoints || []);
       setDistanceKm(h.distanceKm || 0);
+      setPickupSelections(h.pickupSelections || {});
       setMergedIds(prev => prev.filter(id => id !== h.id));
       setCartTab('cart');
       toast.success('Order resumed');
@@ -372,6 +393,21 @@ export default function POSPage() {
       // The distance covers the whole merged trip and is stored once, on the active sale.
       const rf = routeFields(routePoints.filter(p => !isMergedPoint(p)));
 
+      // Work out which supplier pick-ups have items ticked (before the cart is cleared).
+      const pickupBills = routePoints
+        .filter(p => p.tag === 'pickup' && p.supplierId && !isMergedPoint(p))
+        .map(p => {
+          const ids = pickupSelections[p.id] || [];
+          const items = pickupItems.filter(i => ids.includes(i.productId));
+          return {
+            supplierId: p.supplierId as string,
+            supplierName: (p.supplierName || p.label) as string,
+            items,
+            amount: items.reduce((s, i) => s + i.unitCost * i.quantity, 0),
+          };
+        })
+        .filter(b => b.items.length > 0);
+
       const activeRes = await createSale({
         items: cart.map(c => ({ productId: c.product.id, quantity: c.quantity, unitPrice: c.unitPrice })),
         customerId: selectedCustomer?.id,
@@ -415,7 +451,32 @@ export default function POSPage() {
         }
       }
 
+      // Add a pending bill (at cost price) for each supplier that items were picked up from.
+      let billsAdded = 0;
+      const billIssues: string[] = [];
+      for (const b of pickupBills) {
+        if (!(b.amount > 0)) { billIssues.push(`${b.supplierName} (items have no cost price)`); continue; }
+        try {
+          await manageSupplierBills({
+            action: 'add',
+            supplierId: b.supplierId,
+            amount: b.amount,
+            notes: saleNo ? `POS pick-up, Sale #${saleNo}` : 'POS pick-up',
+            date: new Date().toISOString(),
+            source: 'pickup',
+            items: b.items.map(i => ({ productId: i.productId, name: i.name, quantity: i.quantity, unitCost: i.unitCost })),
+            saleNumber: saleNo || undefined,
+            branchId: currentBranch?.id,
+          });
+          billsAdded++;
+        } catch {
+          billIssues.push(b.supplierName);
+        }
+      }
+
       toast.success(completed > 0 ? `Sale completed, plus ${completed} merged order${completed === 1 ? '' : 's'}!` : 'Sale completed!');
+      if (billsAdded > 0) toast.success(`${billsAdded} supplier bill${billsAdded === 1 ? '' : 's'} added to Suppliers`);
+      if (billIssues.length > 0) toast.error(`Could not add a bill for: ${billIssues.join(', ')}. Add it manually under Suppliers.`);
       if (failed.length > 0) toast.error(`Could not complete: ${failed.join(', ')}. They remain in Pending.`);
 
       resetOrder();
@@ -963,9 +1024,17 @@ export default function POSPage() {
             )}
           </div>
 
-          <DeliveryRouteMap points={routePoints} onPointsChange={setRoutePoints} totalDistance={distanceKm} onDistanceChange={setDistanceKm} />
+          <DeliveryRouteMap
+            points={routePoints}
+            onPointsChange={setRoutePoints}
+            totalDistance={distanceKm}
+            onDistanceChange={setDistanceKm}
+            pickupItems={pickupItems}
+            pickupSelections={pickupSelections}
+            onPickupSelectionsChange={setPickupSelections}
+          />
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setRoutePoints([]); setDistanceKm(0); setMergedIds([]); }}>Clear All</Button>
+            <Button variant="outline" onClick={() => { setRoutePoints([]); setDistanceKm(0); setMergedIds([]); setPickupSelections({}); }}>Clear All</Button>
             <Button onClick={() => setShowDeliveryMap(false)}>Done</Button>
           </DialogFooter>
         </DialogContent>
