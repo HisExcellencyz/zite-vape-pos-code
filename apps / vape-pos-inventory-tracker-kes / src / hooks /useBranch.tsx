@@ -13,6 +13,8 @@ export interface Branch {
   coordinates?: string;
   logoUrl?: string;
   coverPhotoUrl?: string;
+  /** Default delivery fee charged per order at this outlet (KES). */
+  deliveryFee?: number;
   commissions?: Commission[];
 }
 
