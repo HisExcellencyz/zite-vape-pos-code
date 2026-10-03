@@ -7,11 +7,13 @@ import { Label } from '@project/components/ui/label';
 import { Badge } from '@project/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@project/components/ui/tabs';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
 import { Plus, MapPin, Trash2, Edit } from 'lucide-react';
 import { toast } from 'sonner';
 import MapView from '../components/MapView';
 import LocationTabs, { PinStatus } from '../components/LocationTabs';
+import DeliveriesPanel from '../components/DeliveriesPanel';
 import { parseCoordinates } from '../lib/geocode';
 
 interface Address {
@@ -40,6 +42,7 @@ const typeLabel = (t?: string) =>
   t === 'pickup' ? 'Pickup Point' : t === 'delivery' ? 'Delivery' : t === 'branch' ? 'Branch' : 'Other';
 
 export default function AddressesPage() {
+  const [tab, setTab] = useState('suppliers');
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -163,62 +166,79 @@ export default function AddressesPage() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Addresses</h1>
-          <p className="text-sm text-muted-foreground">{addresses.length} addresses saved</p>
+          <p className="text-sm text-muted-foreground">
+            {tab === 'suppliers' ? `${addresses.length} addresses saved` : 'Where your orders are delivered'}
+          </p>
         </div>
-        <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" /> Add Address</Button>
+        {tab === 'suppliers' && (
+          <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" /> Add Address</Button>
+        )}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(300px,380px)_1fr]">
-        {/* Left: address tiles */}
-        <div className="space-y-2 lg:max-h-[calc(100vh-170px)] lg:overflow-y-auto lg:pr-1 order-2 lg:order-1">
-          {loading ? (
-            [...Array(4)].map((_, i) => (
-              <Card key={i} className="bg-card border-border"><CardContent className="p-3"><div className="h-10 bg-muted rounded animate-pulse" /></CardContent></Card>
-            ))
-          ) : addresses.length === 0 ? (
-            <Card className="bg-card border-border">
-              <CardContent className="p-10 text-center text-muted-foreground">
-                <MapPin className="w-10 h-10 mx-auto mb-2 opacity-40" />
-                No addresses yet. Add your commonly used pickup points and delivery addresses.
-              </CardContent>
-            </Card>
-          ) : addresses.map(a => (
-            <Card
-              key={a.id}
-              onClick={() => selectTile(a)}
-              className={`bg-card cursor-pointer transition-colors ${activeId === a.id ? 'border-primary' : 'border-border'}`}
-            >
-              <CardContent className="p-3">
-                <div className="flex items-start gap-2">
-                  <MapPin className="w-4 h-4 mt-0.5 shrink-0" style={{ color: pinColor(a.type) }} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="font-semibold text-sm text-foreground break-words leading-snug">{a.addressName}</h3>
-                      <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 ${typeColors[a.type || 'other'] || typeColors.other}`}>
-                        {typeLabel(a.type)}
-                      </Badge>
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList className="bg-muted">
+          <TabsTrigger value="suppliers">Suppliers</TabsTrigger>
+          <TabsTrigger value="deliveries">Deliveries</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="suppliers" className="mt-4">
+          <div className="grid gap-4 lg:grid-cols-[minmax(300px,380px)_1fr]">
+            {/* Left: address tiles */}
+            <div className="space-y-2 lg:max-h-[calc(100vh-220px)] lg:overflow-y-auto lg:pr-1 order-2 lg:order-1">
+              {loading ? (
+                [...Array(4)].map((_, i) => (
+                  <Card key={i} className="bg-card border-border"><CardContent className="p-3"><div className="h-10 bg-muted rounded animate-pulse" /></CardContent></Card>
+                ))
+              ) : addresses.length === 0 ? (
+                <Card className="bg-card border-border">
+                  <CardContent className="p-10 text-center text-muted-foreground">
+                    <MapPin className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                    No addresses yet. Add your commonly used pickup points and delivery addresses.
+                  </CardContent>
+                </Card>
+              ) : addresses.map(a => (
+                <Card
+                  key={a.id}
+                  onClick={() => selectTile(a)}
+                  className={`bg-card cursor-pointer transition-colors ${activeId === a.id ? 'border-primary' : 'border-border'}`}
+                >
+                  <CardContent className="p-3">
+                    <div className="flex items-start gap-2">
+                      <MapPin className="w-4 h-4 mt-0.5 shrink-0" style={{ color: pinColor(a.type) }} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-semibold text-sm text-foreground break-words leading-snug">{a.addressName}</h3>
+                          <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 ${typeColors[a.type || 'other'] || typeColors.other}`}>
+                            {typeLabel(a.type)}
+                          </Badge>
+                        </div>
+                        {a.fullAddress && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2 break-words">{a.fullAddress}</p>}
+                        {a.notes && <p className="text-[11px] text-muted-foreground italic mt-0.5 line-clamp-1 break-words">{a.notes}</p>}
+                      </div>
+                      {renderActions(a)}
                     </div>
-                    {a.fullAddress && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2 break-words">{a.fullAddress}</p>}
-                    {a.notes && <p className="text-[11px] text-muted-foreground italic mt-0.5 line-clamp-1 break-words">{a.notes}</p>}
-                  </div>
-                  {renderActions(a)}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
 
-        {/* Right: map overview */}
-        <div className="order-1 lg:order-2 lg:sticky lg:top-6 lg:self-start">
-          <MapView
-            pins={mapPins}
-            fitToPins
-            plainPins
-            focus={focus}
-            className="h-[280px] lg:h-[calc(100vh-170px)]"
-          />
-        </div>
-      </div>
+            {/* Right: map overview */}
+            <div className="order-1 lg:order-2 lg:sticky lg:top-6 lg:self-start">
+              <MapView
+                pins={mapPins}
+                fitToPins
+                plainPins
+                focus={focus}
+                className="h-[280px] lg:h-[calc(100vh-220px)]"
+              />
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="deliveries" className="mt-4">
+          <DeliveriesPanel />
+        </TabsContent>
+      </Tabs>
 
       {/* Add/Edit Dialog */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
