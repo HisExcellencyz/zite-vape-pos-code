@@ -1,10 +1,11 @@
 import { ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth, logout } from 'zitejs/auth';
+import { syncToGoogleSheets } from 'zitejs/api';
 import {
   LayoutDashboard, ShoppingCart, Package, Users, Truck,
   Receipt, Settings, LogOut, ChevronLeft, ChevronRight,
-  Wallet, MapPin, Store, Check, Sun, Moon
+  Wallet, MapPin, Store, Check, Sun, Moon, FileSpreadsheet, Loader2
 } from 'lucide-react';
 import { cn } from '@project/components/lib/utils';
 import { Button } from '@project/components/ui/button';
@@ -13,6 +14,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator, DropdownMenuLabel
 } from '@project/components/ui/dropdown-menu';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { usePermissions } from '../hooks/usePermissions';
 import { useBranch } from '../hooks/useBranch';
 import { useTheme } from '../hooks/useTheme';
@@ -41,12 +43,28 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const { can, roleName } = usePermissions();
   const { branches, currentBranch, setCurrentBranchId } = useBranch();
   const [collapsed, setCollapsed] = useState(false);
+  const [archiving, setArchiving] = useState(false);
   const { theme, toggle } = useTheme();
   const location = useLocation();
 
   const visibleItems = navItems.filter(item => can(item.area, 'view') || (!!item.alt && can(item.alt, 'view')));
   const outletLogo = currentBranch?.logoUrl || DEFAULT_LOGO;
   const outletName = currentBranch?.branchName || 'Uptown Vapes';
+  const canArchive = can('settings', 'view');
+
+  const handleArchive = async () => {
+    if (archiving) return;
+    if (!window.confirm('Archive all data to Google Sheets now? Sales, purchases, expenses and income older than 3 months will be removed from the app after the archive.')) return;
+    setArchiving(true);
+    try {
+      const res = await syncToGoogleSheets({});
+      toast.success(res.message);
+    } catch (e: any) {
+      toast.error(e.message || 'Archive failed');
+    } finally {
+      setArchiving(false);
+    }
+  };
 
   return (
     <div className="h-screen overflow-hidden bg-background flex">
@@ -148,25 +166,55 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           ))}
         </nav>
 
-        {/* Collapse toggle */}
-        <div className="px-2 py-3 border-t border-border space-y-1">
+        {/* Bottom row: theme icon (far left), Archive Now (middle), collapse icon (far right) */}
+        <div className={cn('px-2 py-3 border-t border-border flex gap-1', collapsed ? 'flex-col items-center' : 'flex-row items-center')}>
           <Button
             variant="ghost"
-            size="sm"
+            size="icon"
             onClick={toggle}
-            className={cn('w-full gold-btn', collapsed ? 'px-2' : 'justify-start')}
+            className="gold-btn h-8 w-8 shrink-0"
             title="Toggle light / dark mode"
           >
             {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            {!collapsed && <span className="ml-2">{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>}
           </Button>
+
+          {canArchive && (
+            collapsed ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleArchive}
+                disabled={archiving}
+                className="gold-btn h-8 w-8 shrink-0"
+                title="Archive Now (to Google Sheets)"
+              >
+                {archiving ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleArchive}
+                disabled={archiving}
+                className="gold-btn h-8 flex-1 min-w-0 text-xs px-2"
+                title="Copy all data to your Google Sheet; transactions older than 3 months are then removed from the app"
+              >
+                {archiving ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin shrink-0" /> : <FileSpreadsheet className="w-3.5 h-3.5 mr-1 shrink-0 text-emerald-400" />}
+                <span className="truncate">{archiving ? 'Archiving...' : 'Archive Now'}</span>
+              </Button>
+            )
+          )}
+
+          {!collapsed && !canArchive && <div className="flex-1" />}
+
           <Button
             variant="ghost"
-            size="sm"
+            size="icon"
             onClick={() => setCollapsed(!collapsed)}
-            className={cn('w-full gold-btn', collapsed ? 'px-2' : 'justify-start')}
+            className="gold-btn h-8 w-8 shrink-0"
+            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
-            {collapsed ? <ChevronRight className="w-4 h-4" /> : <><ChevronLeft className="w-4 h-4 mr-2" /> Collapse</>}
+            {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
           </Button>
         </div>
       </aside>
