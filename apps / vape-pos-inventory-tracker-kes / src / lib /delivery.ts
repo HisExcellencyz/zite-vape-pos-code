@@ -5,6 +5,8 @@ export interface Riders { threePl: Rider[]; own: Rider[]; }
 export type RiderType = 'threePl' | 'own';
 
 export const DEFAULT_DELIVERY_FEE = 199;
+/** Default rider fee per order (KES). Each outlet can set its own in Settings > Outlets. */
+export const DEFAULT_RIDER_FEE = 0;
 export const DELIVERY_FEE_PREFIX = 'Delivery fee';
 export const RIDER_LABELS: Record<RiderType, string> = { threePl: '3PL Riders', own: 'Own Riders' };
 const SHORT: Record<RiderType, string> = { threePl: '3PL', own: 'Own' };
