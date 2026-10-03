@@ -3,7 +3,7 @@ import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
 
 export default createEndpoint({
-  description: 'Create a POS sale with items',
+  description: 'Create a POS sale with items. An optional delivery fee is recorded as income; an optional rider is noted on the sale.',
   authenticated: true,
   inputSchema: z.object({
     items: z.array(z.object({
@@ -24,6 +24,9 @@ export default createEndpoint({
     stops: z.string().optional(),
     deliveryDistanceKm: z.number().optional(),
     deductions: z.array(z.object({ name: z.string(), amount: z.number() })).optional(),
+    deliveryFee: z.number().min(0).optional(),
+    riderType: z.enum(['threePl', 'own']).optional(),
+    riderName: z.string().optional(),
   }),
   outputSchema: z.object({ success: z.boolean(), sale: z.any() }),
   execute: async ({ input, context }) => {
@@ -38,10 +41,16 @@ export default createEndpoint({
     });
 
     const total = subtotal - (input.discount || 0);
+    const saleDate = new Date().toISOString();
+
+    const riderText = input.riderType && input.riderName
+      ? `Rider (${input.riderType === 'threePl' ? '3PL' : 'Own'}): ${input.riderName}`
+      : '';
+    const notes = [input.notes, riderText].filter(Boolean).join(' | ') || null;
 
     const sale = await zite.sales.create({
       record: {
-        saleDate: new Date().toISOString(),
+        saleDate,
         customer: input.customerId || null,
         branch: input.branchId || null,
         paymentMethod: input.paymentMethod,
@@ -50,7 +59,7 @@ export default createEndpoint({
         discount: input.discount || 0,
         total,
         status: 'Completed',
-        notes: input.notes || null,
+        notes,
         createdBy: context.user.id,
         pickupPoint: input.pickupPoint || null,
         deliveryAddress: input.deliveryAddress || null,
@@ -87,6 +96,21 @@ export default createEndpoint({
           record: { stockQuantity: newQty },
         });
       }
+    }
+
+    // Delivery fee: always income. Stored as an Other Income entry (description starts with
+    // "Delivery fee") so the dashboard and profit figures pick it up automatically.
+    if ((input.deliveryFee || 0) > 0) {
+      await zite.otherIncome.create({
+        record: {
+          incomeDate: saleDate,
+          description: `Delivery fee - Sale #${sale.saleNumber ?? ''}`.trim(),
+          amount: input.deliveryFee,
+          branch: input.branchId || null,
+          notes: riderText || null,
+          createdBy: context.user.id,
+        },
+      });
     }
 
     return { success: true, sale };
