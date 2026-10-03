@@ -7,8 +7,7 @@ import {
   LineChart as LineIcon, PieChart as PieIcon, BarChart3, Building2, Table2,
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
-import { DatePicker } from '@project/components/ui/date-picker';
-import { Button } from '@project/components/ui/button';
+import DateRangeFilter from '../components/DateRangeFilter';
 import { cn } from '@project/components/lib/utils';
 import { useBranch } from '../hooks/useBranch';
 
@@ -134,7 +133,8 @@ export default function DashboardPage({ scope = 'outlet' }: { scope?: 'outlet' |
     }
   };
 
-  useEffect(() => { if (scope === 'business' || currentBranch) load(); }, [branchId, scope]);
+  // Reloads automatically whenever the outlet or the chosen dates change.
+  useEffect(() => { if (scope === 'business' || currentBranch) load(); }, [branchId, scope, startDate?.getTime(), endDate?.getTime()]);
 
   const kpis = data ? [
     { label: 'Total Sales', value: fmt(data.totalRevenue), icon: ShoppingCart, color: 'text-sky-500', tint: 'sky', change: `${data.totalSales} orders` },
@@ -156,12 +156,10 @@ export default function DashboardPage({ scope = 'outlet' }: { scope?: 'outlet' |
               : <><Store className="w-3.5 h-3.5" /> {currentBranch?.branchName || 'Outlet'} — this outlet only</>}
           </p>
         </div>
-        <div className="flex items-center gap-2 flex-nowrap [&_button]:max-w-[9.5rem] [&_button]:min-w-0 [&_button]:truncate">
-          <div className="w-[9.5rem]"><DatePicker value={startDate} onChange={setStartDate} /></div>
-          <span className="text-muted-foreground text-sm">to</span>
-          <div className="w-[9.5rem]"><DatePicker value={endDate} onChange={setEndDate} /></div>
-          <Button onClick={load} size="sm">Apply</Button>
-        </div>
+        <DateRangeFilter
+          value={{ start: startDate, end: endDate }}
+          onChange={r => { setStartDate(r.start); setEndDate(r.end); }}
+        />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
