@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
-import { getProducts, getCustomers, createSale, saveCustomer, getSales } from 'zitejs/api';
+import { getProducts, getCustomers, createSale, saveCustomer, getSales, manageHeldOrders } from 'zitejs/api';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
 import { Badge } from '@project/components/ui/badge';
-import { Switch } from '@project/components/ui/switch';
+import { Checkbox } from '@project/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
-import { Search, Plus, Minus, ShoppingCart, Trash2, UserPlus, X, Receipt, DollarSign, MapPin, Route, UserCheck, Truck, Bike } from 'lucide-react';
+import { Search, Plus, Minus, ShoppingCart, Trash2, UserPlus, X, Receipt, DollarSign, MapPin, Route, UserCheck, Truck, Bike, Pause, Play, Clock, Layers } from 'lucide-react';
 import { toast } from 'sonner';
 import DeliveryRouteMap from '../components/DeliveryRouteMap';
 import LocationPickerDialog from '../components/LocationPickerDialog';
@@ -46,6 +46,58 @@ interface Customer {
 }
 
 interface SelectedRider { type: RiderType; id: string; name: string; }
+
+type DiscountType = 'KES' | '%';
+
+/** An order put on hold. Stock is only deducted when it is finally checked out. */
+interface HeldOrder {
+  id: string;
+  heldAt: string;
+  heldBy?: string;
+  branchId?: string | null;
+  items: { productId: string; productName?: string; sku?: string; image?: string; quantity: number; unitPrice: number }[];
+  customer: Customer | null;
+  paymentMethod: string;
+  selectedDeductions: string[];
+  rider: SelectedRider | null;
+  feeOn: boolean;
+  feeAmount: string;
+  discountValue: string;
+  discountType: DiscountType;
+  routePoints: any[];
+  distanceKm: number;
+}
+
+/** Discount in KES for a given subtotal, never more than the subtotal. */
+const calcDiscount = (subtotal: number, value: string | number, type: DiscountType) => {
+  const v = Math.max(0, Number(value) || 0);
+  const raw = type === '%' ? (subtotal * Math.min(v, 100)) / 100 : v;
+  return Math.round(Math.min(subtotal, raw) * 100) / 100;
+};
+
+const heldTotals = (h: HeldOrder) => {
+  const sub = h.items.reduce((s, i) => s + i.unitPrice * i.quantity, 0);
+  const discount = calcDiscount(sub, h.discountValue, h.discountType);
+  const total = sub - discount;
+  const fee = h.feeOn ? Math.max(0, Number(h.feeAmount) || 0) : 0;
+  return { sub, discount, total, fee, payable: total + fee };
+};
+
+/** Splits a list of route points into the text fields stored on a sale. */
+const routeFields = (pts: any[]) => {
+  const pickups = pts.filter(p => p.tag === 'pickup');
+  const dropoffs = pts.filter(p => p.tag === 'dropoff');
+  const other = pts.filter(p => !p.tag || !['start', 'end', 'pickup', 'dropoff'].includes(p.tag));
+  return {
+    pickupPoint: pickups.map(p => p.label).join('; ') || undefined,
+    deliveryAddress: dropoffs.map(p => p.label).join('; ') || undefined,
+    // Each pin is tagged (e.g. "dropoff:-1.29,36.82") so the Addresses > Deliveries tab can tell drop-offs apart.
+    deliveryCoordinates: pts.length > 0 ? pts.map(p => `${p.tag || 'stop'}:${p.lat},${p.lng}`).join(' → ') : undefined,
+    stops: [...other, ...pickups, ...dropoffs].map(p => p.label).join('; ') || undefined,
+  };
+};
+
+const isMergedPoint = (p: any) => String(p.id).startsWith('m_');
 
 /** Long product names in the cart shrink (down to 80% of normal size) so more items stay in view. */
 const cartNameSize = (name?: string) => {
@@ -89,12 +141,16 @@ export default function POSPage() {
   // Names of the outlet deductions the cashier has ticked for the current order.
   const [selectedDeductions, setSelectedDeductions] = useState<string[]>([]);
 
-  // Delivery fee: on by default, amount defaults to the outlet's fee, both adjustable per sale.
+  // Delivery fee: on by default (tap the tile to switch off), amount defaults to the outlet's fee, both adjustable per sale.
   const outletFee = currentBranch?.deliveryFee ?? DEFAULT_DELIVERY_FEE;
   const [feeOn, setFeeOn] = useState(true);
   const [feeAmount, setFeeAmount] = useState(String(outletFee));
   useEffect(() => { setFeeAmount(String(outletFee)); setFeeOn(true); }, [currentBranch?.id, outletFee]);
   const deliveryFee = feeOn ? Math.max(0, Number(feeAmount) || 0) : 0;
+
+  // Discount on the order, either a KES amount or a percentage of the subtotal.
+  const [discountValue, setDiscountValue] = useState('');
+  const [discountType, setDiscountType] = useState<DiscountType>('KES');
 
   // Riders (3PL / own) shared by all outlets
   const [riders, setRiders] = useState<Riders>({ threePl: [], own: [] });
@@ -125,6 +181,24 @@ export default function POSPage() {
   const [recentSales, setRecentSales] = useState<any[]>([]);
   const loadSales = () => getSales({ branchId: currentBranch?.id }).then(r => setRecentSales(r.sales)).catch(() => {});
   useEffect(() => { loadSales(); }, [currentBranch?.id]);
+
+  // ── On-hold (pending) orders ──
+  const [cartTab, setCartTab] = useState<'cart' | 'pending'>('cart');
+  const [heldOrders, setHeldOrders] = useState<HeldOrder[]>([]);
+  const [holding, setHolding] = useState(false);
+  const [mergedIds, setMergedIds] = useState<string[]>([]);
+  const loadHeld = () =>
+    manageHeldOrders({ action: 'list', branchId: currentBranch?.id })
+      .then(r => setHeldOrders(r.orders as HeldOrder[]))
+      .catch(() => {});
+  useEffect(() => {
+    loadHeld();
+    const t = setInterval(loadHeld, 30000);
+    return () => clearInterval(t);
+  }, [currentBranch?.id]);
+
+  // Orders merged into this checkout (ignores any that were resumed/deleted elsewhere in the meantime).
+  const mergeList = heldOrders.filter(h => mergedIds.includes(h.id));
 
   // Switching outlet changes the available deductions, so start fresh.
   useEffect(() => { setSelectedDeductions([]); }, [currentBranch?.id]);
@@ -163,7 +237,8 @@ export default function POSPage() {
   const removeFromCart = (productId: string) => setCart(cart.filter(c => c.product.id !== productId));
 
   const subtotal = cart.reduce((sum, c) => sum + c.unitPrice * c.quantity, 0);
-  const total = subtotal;
+  const discountAmount = calcDiscount(subtotal, discountValue, discountType);
+  const total = subtotal - discountAmount;
   const payable = total + deliveryFee;
 
   // Deductions are defined per outlet in Settings; the cashier only chooses which apply.
@@ -173,38 +248,179 @@ export default function POSPage() {
   const toggleDeduction = (name: string) =>
     setSelectedDeductions(prev => prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name]);
 
+  const resetOrder = () => {
+    // Clearing the cart also clears the quantity badges on the product tiles.
+    setCart([]);
+    setSelectedCustomer(null);
+    setSelectedDeductions([]);
+    setRider(null);
+    setFeeOn(true);
+    setFeeAmount(String(outletFee));
+    setDiscountValue('');
+    setDiscountType('KES');
+    setRoutePoints([]);
+    setDistanceKm(0);
+    setMergedIds([]);
+  };
+
+  // ── Hold / resume / delete ──
+  const handleHold = async () => {
+    if (cart.length === 0) return toast.error('Cart is empty');
+    if (mergedIds.length > 0) return toast.error('Un-merge the pending orders (Plan Route) before putting this order on hold');
+    setHolding(true);
+    try {
+      const order = {
+        items: cart.map(c => ({
+          productId: c.product.id,
+          productName: c.product.productName,
+          sku: c.product.sku,
+          image: c.product.images?.[0]?.url,
+          quantity: c.quantity,
+          unitPrice: c.unitPrice,
+        })),
+        customer: selectedCustomer,
+        paymentMethod,
+        selectedDeductions,
+        rider,
+        feeOn,
+        feeAmount,
+        discountValue,
+        discountType,
+        routePoints,
+        distanceKm,
+      };
+      const res = await manageHeldOrders({ action: 'hold', branchId: currentBranch?.id, order });
+      setHeldOrders(res.orders as HeldOrder[]);
+      resetOrder();
+      toast.success('Order put on hold. Find it under Pending.');
+    } catch (e: any) {
+      toast.error(e.message || 'Could not hold the order');
+    } finally {
+      setHolding(false);
+    }
+  };
+
+  const resumeHeld = async (h: HeldOrder) => {
+    if (cart.length > 0) return toast.error('Hold or clear the current cart before resuming another order');
+    try {
+      const res = await manageHeldOrders({ action: 'remove', id: h.id, branchId: currentBranch?.id });
+      setHeldOrders(res.orders as HeldOrder[]);
+      setCart(h.items.map(i => {
+        const live = products.find(p => p.id === i.productId);
+        const product: Product = live || {
+          id: i.productId, productName: i.productName, sku: i.sku, sellingPrice: i.unitPrice,
+          images: i.image ? [{ url: i.image }] : undefined,
+        };
+        return { product, quantity: i.quantity, unitPrice: i.unitPrice };
+      }));
+      setSelectedCustomer(h.customer || null);
+      setPaymentMethod(h.paymentMethod || 'Cash/M-PESA');
+      setSelectedDeductions(h.selectedDeductions || []);
+      setRider(h.rider || null);
+      setFeeOn(h.feeOn !== false);
+      setFeeAmount(h.feeAmount ?? String(outletFee));
+      setDiscountValue(h.discountValue || '');
+      setDiscountType(h.discountType || 'KES');
+      setRoutePoints(h.routePoints || []);
+      setDistanceKm(h.distanceKm || 0);
+      setMergedIds(prev => prev.filter(id => id !== h.id));
+      setCartTab('cart');
+      toast.success('Order resumed');
+    } catch (e: any) {
+      toast.error(e.message || 'Could not resume the order');
+    }
+  };
+
+  const deleteHeld = async (h: HeldOrder) => {
+    if (!window.confirm('Delete this pending order? This cannot be undone.')) return;
+    try {
+      const res = await manageHeldOrders({ action: 'remove', id: h.id, branchId: currentBranch?.id });
+      setHeldOrders(res.orders as HeldOrder[]);
+      setMergedIds(prev => prev.filter(id => id !== h.id));
+      setRoutePoints(pts => pts.filter(p => !String(p.id).startsWith(`m_${h.id}_`)));
+      toast.success('Pending order deleted');
+    } catch (e: any) {
+      toast.error(e.message || 'Could not delete');
+    }
+  };
+
+  // ── Merge pending orders into this delivery route ──
+  const toggleMerge = (h: HeldOrder) => {
+    if (mergedIds.includes(h.id)) {
+      setMergedIds(ids => ids.filter(x => x !== h.id));
+      setRoutePoints(pts => pts.filter(p => !String(p.id).startsWith(`m_${h.id}_`)));
+      return;
+    }
+    setMergedIds(ids => [...ids, h.id]);
+    // Bring over the drop-offs (and any extra stops). Pick-ups and start/end stay those of the active order.
+    const add = (h.routePoints || [])
+      .filter(p => p.tag !== 'start' && p.tag !== 'end' && p.tag !== 'pickup')
+      .map(p => ({ ...p, id: `m_${h.id}_${p.id}` }));
+    setRoutePoints(pts => {
+      const fresh = add.filter(a => !pts.some(p => p.lat === a.lat && p.lng === a.lng));
+      if (fresh.length === 0) return pts;
+      const endIdx = pts.findIndex(p => p.tag === 'end');
+      return endIdx >= 0 ? [...pts.slice(0, endIdx), ...fresh, ...pts.slice(endIdx)] : [...pts, ...fresh];
+    });
+  };
+
   const handleCheckout = async () => {
     if (cart.length === 0) return toast.error('Cart is empty');
     setProcessing(true);
     try {
-      const pickups = routePoints.filter((p: any) => p.tag === 'pickup');
-      const dropoffs = routePoints.filter((p: any) => p.tag === 'dropoff');
-      const otherStops = routePoints.filter((p: any) => !p.tag || (p.tag !== 'start' && p.tag !== 'end' && p.tag !== 'pickup' && p.tag !== 'dropoff'));
+      // The merged orders' drop-offs belong to their own sales, so the active sale only records its own points.
+      // The distance covers the whole merged trip and is stored once, on the active sale.
+      const rf = routeFields(routePoints.filter(p => !isMergedPoint(p)));
 
-      await createSale({
+      const activeRes = await createSale({
         items: cart.map(c => ({ productId: c.product.id, quantity: c.quantity, unitPrice: c.unitPrice })),
         customerId: selectedCustomer?.id,
         paymentMethod,
+        discount: discountAmount,
         branchId: currentBranch?.id,
-        pickupPoint: pickups.map((p: any) => p.label).join('; ') || undefined,
-        deliveryAddress: dropoffs.map((p: any) => p.label).join('; ') || undefined,
-        deliveryCoordinates: routePoints.length > 0 ? routePoints.map((p: any) => `${p.lat},${p.lng}`).join(' → ') : undefined,
-        stops: [...otherStops, ...pickups, ...dropoffs].map((p: any) => p.label).join('; ') || undefined,
+        ...rf,
         deliveryDistanceKm: distanceKm || undefined,
         deductions: appliedDeductions.map(d => ({ name: d.name, amount: commissionAmount(d, total) })),
         deliveryFee,
         riderType: rider?.type,
         riderName: rider?.name,
       });
-      toast.success('Sale completed!');
-      // Clearing the cart also clears the quantity badges on the product tiles.
-      setCart([]);
-      setSelectedCustomer(null);
-      setSelectedDeductions([]);
-      setRider(null);
-      setFeeOn(true);
-      setFeeAmount(String(outletFee));
-      setRoutePoints([]); setDistanceKm(0); loadSales();
+      const saleNo = (activeRes.sale as any)?.saleNumber;
+
+      // Complete every merged pending order together with this one.
+      let completed = 0;
+      const failed: string[] = [];
+      for (const h of mergeList) {
+        try {
+          const t = heldTotals(h);
+          await createSale({
+            items: h.items.map(i => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice })),
+            customerId: h.customer?.id,
+            paymentMethod: h.paymentMethod,
+            discount: t.discount,
+            branchId: currentBranch?.id,
+            ...routeFields(h.routePoints || []),
+            deductions: outletDeductions
+              .filter(d => (h.selectedDeductions || []).includes(d.name))
+              .map(d => ({ name: d.name, amount: commissionAmount(d, t.total) })),
+            deliveryFee: t.fee,
+            riderType: rider?.type,
+            riderName: rider?.name,
+            notes: saleNo ? `Merged delivery with Sale #${saleNo}` : 'Merged delivery',
+          });
+          await manageHeldOrders({ action: 'remove', id: h.id, branchId: currentBranch?.id });
+          completed++;
+        } catch (e: any) {
+          failed.push(h.customer?.customerName || 'Pending order');
+        }
+      }
+
+      toast.success(completed > 0 ? `Sale completed, plus ${completed} merged order${completed === 1 ? '' : 's'}!` : 'Sale completed!');
+      if (failed.length > 0) toast.error(`Could not complete: ${failed.join(', ')}. They remain in Pending.`);
+
+      resetOrder();
+      loadSales();
+      loadHeld();
       const prods = await getProducts({ status: 'Active', branchId: currentBranch?.id });
       setProducts(prods.products as Product[]);
     } catch (e: any) {
@@ -260,6 +476,9 @@ export default function POSPage() {
   };
 
   const fmt = (n: number) => `KES ${n.toLocaleString()}`;
+  const mergedPayable = mergeList.reduce((s, h) => s + heldTotals(h).payable, 0);
+  const timeOf = (iso: string) =>
+    iso ? new Date(iso).toLocaleTimeString('en-KE', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Africa/Nairobi' }) : '';
 
   return (
     <div className="p-6 h-[calc(100vh-0px)] flex gap-6">
@@ -368,162 +587,270 @@ export default function POSPage() {
       {/* Right: Cart */}
       <div className="w-96 shrink-0 flex flex-col bg-card border border-border rounded-xl">
         <div className="p-4 border-b border-border">
-          <div className="flex items-center justify-between">
-            <h2 className="font-semibold text-foreground flex items-center gap-2">
-              <ShoppingCart className="w-4 h-4" /> Cart
-              <Badge variant="secondary" className="text-xs">{cart.length}</Badge>
-            </h2>
+          {/* Cart / Pending Orders tabs */}
+          <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-1">
+            <button
+              type="button"
+              onClick={() => setCartTab('cart')}
+              aria-pressed={cartTab === 'cart'}
+              className={`h-8 rounded-md text-xs font-medium flex items-center justify-center gap-1.5 transition-colors ${cartTab === 'cart' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              <ShoppingCart className="w-3.5 h-3.5" /> Cart
+              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{cart.length}</Badge>
+            </button>
+            <button
+              type="button"
+              onClick={() => setCartTab('pending')}
+              aria-pressed={cartTab === 'pending'}
+              className={`h-8 rounded-md text-xs font-medium flex items-center justify-center gap-1.5 transition-colors ${cartTab === 'pending' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              <Clock className="w-3.5 h-3.5" /> Pending Orders
+              <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 ${heldOrders.length > 0 ? 'bg-amber-500/20 text-amber-400' : ''}`}>{heldOrders.length}</Badge>
+            </button>
           </div>
 
-          <div className="mt-3 flex items-center gap-2">
-            {selectedCustomer ? (
-              <div className="flex-1 flex items-center justify-between bg-muted rounded-lg px-3 py-2 gap-2">
-                <div className="min-w-0">
-                  <p className="text-xs font-medium text-foreground break-words whitespace-normal">{selectedCustomer.customerName}</p>
-                  <p className="text-[10px] text-muted-foreground break-all">{selectedCustomer.phoneNumber}</p>
+          {cartTab === 'cart' && (
+            <div className="mt-3 flex items-center gap-2">
+              {selectedCustomer ? (
+                <div className="flex-1 flex items-center justify-between bg-muted rounded-lg px-3 py-2 gap-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-foreground break-words whitespace-normal">{selectedCustomer.customerName}</p>
+                    <p className="text-[10px] text-muted-foreground break-all">{selectedCustomer.phoneNumber}</p>
+                  </div>
+                  <button onClick={() => setSelectedCustomer(null)} className="shrink-0"><X className="w-3.5 h-3.5 text-muted-foreground" /></button>
                 </div>
-                <button onClick={() => setSelectedCustomer(null)} className="shrink-0"><X className="w-3.5 h-3.5 text-muted-foreground" /></button>
-              </div>
-            ) : (
-              <>
-                <CustomerPicker
-                  className="w-1/2 min-w-0 rounded-md ring-1 ring-pink-400/70"
-                  placeholder="Link customer..."
-                  onSelect={(c: PickableCustomer) => setSelectedCustomer(c as Customer)}
-                />
-                <Button size="sm" variant="outline" onClick={() => setShowCustomerDialog(true)} className="h-9 w-1/2 border-amber-400/80 hover:border-amber-400 hover:shadow-[0_0_12px_hsl(45_95%_55%/0.35)]"><UserPlus className="w-3.5 h-3.5 mr-1" /> Add Customer</Button>
-              </>
-            )}
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-4 space-y-2">
-          {cart.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              <Receipt className="w-10 h-10 mx-auto mb-2 opacity-30" />
-              <p className="text-sm">Cart is empty</p>
-            </div>
-          ) : cart.map(item => (
-            <div key={item.product.id} className="flex items-center gap-2.5 bg-muted/50 rounded-lg px-3 py-2">
-              <div className="flex-1 min-w-0">
-                <p className={`${cartNameSize(item.product.productName)} font-medium text-foreground break-words whitespace-normal leading-tight [overflow-wrap:anywhere]`}>{item.product.productName}</p>
-                <p className="text-xs text-muted-foreground">{fmt(item.unitPrice)} each</p>
-              </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <button onClick={() => updateQty(item.product.id, -1)} className="w-6 h-6 rounded bg-muted flex items-center justify-center hover:bg-border"><Minus className="w-3 h-3" /></button>
-                <span className="text-sm font-semibold w-6 text-center">{item.quantity}</span>
-                <button onClick={() => updateQty(item.product.id, 1)} className="w-6 h-6 rounded bg-muted flex items-center justify-center hover:bg-border"><Plus className="w-3 h-3" /></button>
-              </div>
-              <p className="text-sm font-semibold text-foreground w-20 text-right shrink-0 break-words">{fmt(item.unitPrice * item.quantity)}</p>
-              <button onClick={() => removeFromCart(item.product.id)} className="text-destructive hover:text-red-300 shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
-            </div>
-          ))}
-        </div>
-
-        <div className="border-t border-border p-4 space-y-3 max-h-[60vh] overflow-y-auto">
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">Subtotal</span>
-            <span className="text-foreground">{fmt(subtotal)}</span>
-          </div>
-          {deliveryFee > 0 && (
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Delivery fee</span>
-              <span className="text-foreground">{fmt(deliveryFee)}</span>
-            </div>
-          )}
-          <div className="flex justify-between text-lg font-bold">
-            <span className="text-foreground">Total</span>
-            <span className="text-primary">{fmt(payable)}</span>
-          </div>
-
-          <div className="grid grid-cols-2 gap-1.5">
-            {['Platform Pay', 'Cash/M-PESA'].map(m => (
-              <button key={m} type="button" onClick={() => setPaymentMethod(m)}
-                className={`h-9 rounded-md border text-xs font-medium transition-all ${paymentMethod === m ? 'border-sky-500 bg-sky-500 text-white' : 'border-border text-muted-foreground hover:border-sky-500/60'}`}>
-                {m}
-              </button>
-            ))}
-          </div>
-
-          {/* Delivery fee: on by default, can be switched off or edited (even to 0) for this sale */}
-          <div className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 transition-colors ${feeOn ? 'border-amber-400/70' : 'border-border'}`}>
-            <Switch id="delivery-fee" checked={feeOn} onCheckedChange={setFeeOn} className="data-[state=checked]:bg-amber-500" />
-            <Label htmlFor="delivery-fee" className="text-xs font-medium flex-1 cursor-pointer">Delivery fee</Label>
-            <span className="text-[11px] text-muted-foreground">KES</span>
-            <Input
-              type="number"
-              min={0}
-              value={feeOn ? feeAmount : '0'}
-              disabled={!feeOn}
-              onChange={e => setFeeAmount(e.target.value)}
-              className="h-8 w-20 text-xs text-right"
-            />
-          </div>
-
-          {/* Outlet deductions: set up in Settings > Outlets, picked per order here */}
-          {outletDeductions.length > 0 && (
-            <div className="space-y-1.5">
-              <p className="text-[11px] font-medium text-muted-foreground">Deductions (select all that apply)</p>
-              <div className="flex flex-wrap gap-1.5">
-                {outletDeductions.map(d => {
-                  const on = selectedDeductions.includes(d.name);
-                  return (
-                    <button key={d.name} type="button" onClick={() => toggleDeduction(d.name)}
-                      className={`h-7 px-2 rounded-md border text-[11px] font-medium transition-all ${on ? 'border-pink-500 bg-pink-500 text-white' : 'border-border text-muted-foreground hover:border-pink-500/60'}`}>
-                      {d.name} · {d.type === 'percent' ? `${d.value}%` : `KES ${d.value.toLocaleString()}`}
-                    </button>
-                  );
-                })}
-              </div>
-              {appliedDeductions.length > 0 && (
-                <p className="text-[11px] text-pink-400">Deductions on this order: {fmt(deductionsTotal)}</p>
+              ) : (
+                <>
+                  <CustomerPicker
+                    className="w-1/2 min-w-0 rounded-md ring-1 ring-pink-400/70"
+                    placeholder="Link customer..."
+                    onSelect={(c: PickableCustomer) => setSelectedCustomer(c as Customer)}
+                  />
+                  <Button size="sm" variant="outline" onClick={() => setShowCustomerDialog(true)} className="h-9 w-1/2 border-amber-400/80 hover:border-amber-400 hover:shadow-[0_0_12px_hsl(45_95%_55%/0.35)]"><UserPlus className="w-3.5 h-3.5 mr-1" /> Add Customer</Button>
+                </>
               )}
             </div>
           )}
-
-          {/* Delivery riders: managed in Settings > Delivery */}
-          <div className="space-y-1.5">
-            <p className="text-[11px] font-medium text-muted-foreground">Delivery rider (optional)</p>
-            <div className="grid grid-cols-2 gap-1.5">
-              {(['threePl', 'own'] as RiderType[]).map(t => {
-                const on = rider?.type === t;
-                const Icon = t === 'threePl' ? Truck : Bike;
-                return (
-                  <button key={t} type="button" onClick={() => openRiderDialog(t)} title={RIDER_LABELS[t]}
-                    className={`h-9 px-2 rounded-md border text-xs font-medium transition-all flex items-center justify-center gap-1.5 min-w-0 ${on ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-border text-muted-foreground hover:border-emerald-500/60'}`}>
-                    <Icon className="w-3.5 h-3.5 shrink-0" />
-                    <span className="truncate">{on ? rider!.name : RIDER_LABELS[t]}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="space-y-2 border-t border-border pt-3">
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-medium text-muted-foreground flex items-center gap-1"><MapPin className="w-3 h-3" /> Delivery (optional)</p>
-              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setShowDeliveryMap(true)}>
-                <Route className="w-3 h-3 mr-1" /> {routePoints.length > 0 ? `${routePoints.length} stops` : 'Plan Route'}
-              </Button>
-            </div>
-            {routePoints.length > 0 && (
-              <div className="bg-muted/50 rounded-lg p-2 space-y-1 max-h-40 overflow-y-auto">
-                {routePoints.map((pt: any, i: number) => (
-                  <div key={pt.id} className="text-[10px] text-muted-foreground flex gap-1 items-start">
-                    <span className="font-bold text-foreground shrink-0">{i + 1}.</span>
-                    <span className="capitalize font-medium shrink-0" style={{ color: pt.tag === 'start' ? '#22c55e' : pt.tag === 'pickup' ? '#3b82f6' : pt.tag === 'dropoff' ? '#ef4444' : pt.tag === 'end' ? '#a855f7' : '#6b7280' }}>{pt.tag || 'pin'}</span>
-                    <span className="min-w-0 break-words whitespace-normal">{pt.label}</span>
-                  </div>
-                ))}
-                {distanceKm > 0 && <div className="text-xs font-semibold text-primary mt-1">Distance: {distanceKm.toFixed(2)} km</div>}
-              </div>
-            )}
-          </div>
-
-          <Button className="w-full h-12 text-base bg-gradient-to-r from-primary to-secondary" onClick={handleCheckout} disabled={processing || cart.length === 0}>
-            {processing ? 'Processing...' : `Checkout ${fmt(payable)}`}
-          </Button>
         </div>
+
+        {cartTab === 'pending' ? (
+          <div className="flex-1 overflow-y-auto p-4 space-y-2">
+            {heldOrders.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <Clock className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                <p className="text-sm">No pending orders</p>
+                <p className="text-xs mt-1">Use "Hold" on the cart to park an order here.</p>
+              </div>
+            ) : heldOrders.map(h => {
+              const t = heldTotals(h);
+              const merged = mergedIds.includes(h.id);
+              return (
+                <div key={h.id} className={`rounded-lg border px-3 py-2 space-y-1.5 ${merged ? 'border-emerald-500/70 bg-emerald-500/5' : 'border-border bg-muted/30'}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground break-words">{h.customer?.customerName || 'Walk-in customer'}</p>
+                      {h.customer?.phoneNumber && <p className="text-[10px] text-muted-foreground">{h.customer.phoneNumber}</p>}
+                    </div>
+                    <span className="text-[10px] text-muted-foreground shrink-0">Held {timeOf(h.heldAt)}</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground line-clamp-2 break-words">
+                    {h.items.map(i => `${i.quantity}× ${i.productName || 'Item'}`).join(', ')}
+                  </p>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">Total{t.fee > 0 ? ' (incl. delivery)' : ''}</span>
+                    <span className="font-bold text-primary">{fmt(t.payable)}</span>
+                  </div>
+                  {merged && <p className="text-[10px] text-emerald-400">Merged into the current delivery — completes on Checkout</p>}
+                  <div className="flex gap-1.5">
+                    <Button size="sm" className="h-7 flex-1 text-xs" onClick={() => resumeHeld(h)}><Play className="w-3 h-3 mr-1" /> Resume</Button>
+                    <Button size="sm" variant="ghost" className="h-7 text-destructive" onClick={() => deleteHeld(h)}><Trash2 className="w-3.5 h-3.5" /></Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <>
+            <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              {cart.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <Receipt className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">Cart is empty</p>
+                </div>
+              ) : cart.map(item => (
+                <div key={item.product.id} className="flex items-center gap-2.5 bg-muted/50 rounded-lg px-3 py-2">
+                  <div className="flex-1 min-w-0">
+                    <p className={`${cartNameSize(item.product.productName)} font-medium text-foreground break-words whitespace-normal leading-tight [overflow-wrap:anywhere]`}>{item.product.productName}</p>
+                    <p className="text-xs text-muted-foreground">{fmt(item.unitPrice)} each</p>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button onClick={() => updateQty(item.product.id, -1)} className="w-6 h-6 rounded bg-muted flex items-center justify-center hover:bg-border"><Minus className="w-3 h-3" /></button>
+                    <span className="text-sm font-semibold w-6 text-center">{item.quantity}</span>
+                    <button onClick={() => updateQty(item.product.id, 1)} className="w-6 h-6 rounded bg-muted flex items-center justify-center hover:bg-border"><Plus className="w-3 h-3" /></button>
+                  </div>
+                  <p className="text-sm font-semibold text-foreground w-20 text-right shrink-0 break-words">{fmt(item.unitPrice * item.quantity)}</p>
+                  <button onClick={() => removeFromCart(item.product.id)} className="text-destructive hover:text-red-300 shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
+                </div>
+              ))}
+            </div>
+
+            <div className="border-t border-border p-4 space-y-3 max-h-[60vh] overflow-y-auto">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Subtotal</span>
+                <span className="text-foreground">{fmt(subtotal)}</span>
+              </div>
+              {discountAmount > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Discount{discountType === '%' ? ` (${Math.min(Number(discountValue) || 0, 100)}%)` : ''}</span>
+                  <span className="text-sky-400">-{fmt(discountAmount)}</span>
+                </div>
+              )}
+              {deliveryFee > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Delivery fee</span>
+                  <span className="text-foreground">{fmt(deliveryFee)}</span>
+                </div>
+              )}
+              <div className="flex justify-between text-lg font-bold">
+                <span className="text-foreground">Total</span>
+                <span className="text-primary">{fmt(payable)}</span>
+              </div>
+
+              {/* Payment method */}
+              <div className="grid grid-cols-2 gap-1.5">
+                {['Platform Pay', 'Cash/M-PESA'].map(m => (
+                  <button key={m} type="button" onClick={() => setPaymentMethod(m)}
+                    className={`h-7 rounded-md border text-[11px] font-medium transition-all ${paymentMethod === m ? 'border-sky-500 bg-sky-500 text-white' : 'border-border text-muted-foreground hover:border-sky-500/60'}`}>
+                    {m}
+                  </button>
+                ))}
+              </div>
+
+              {/* Delivery fee (tap the label to switch on/off, edit the KES value) and Discount (KES or %) */}
+              <div className="grid grid-cols-2 gap-1.5">
+                <div className={`h-7 rounded-md border flex items-center overflow-hidden transition-all ${feeOn ? 'border-amber-500 bg-amber-500 text-white' : 'border-border text-muted-foreground hover:border-amber-500/60'}`}>
+                  <button
+                    type="button"
+                    onClick={() => setFeeOn(!feeOn)}
+                    title="Tap to switch the delivery fee on or off"
+                    className="flex-1 min-w-0 h-full pl-2 text-left text-[11px] font-medium truncate"
+                  >
+                    Delivery KES
+                  </button>
+                  <input
+                    type="number"
+                    min={0}
+                    value={feeOn ? feeAmount : '0'}
+                    disabled={!feeOn}
+                    onChange={e => setFeeAmount(e.target.value)}
+                    title="Delivery fee in KES"
+                    className={`h-5 w-14 mr-1 rounded px-1 text-right text-[11px] outline-none ${feeOn ? 'bg-white/25 text-white' : 'bg-transparent'}`}
+                  />
+                </div>
+                <div className={`h-7 rounded-md border flex items-center overflow-hidden transition-all ${discountAmount > 0 ? 'border-sky-500 bg-sky-500/10' : 'border-border'}`}>
+                  <input
+                    type="number"
+                    min={0}
+                    value={discountValue}
+                    placeholder="Discount"
+                    onChange={e => setDiscountValue(e.target.value)}
+                    className="flex-1 min-w-0 h-full bg-transparent px-2 text-[11px] outline-none placeholder:text-muted-foreground"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setDiscountType(t => (t === 'KES' ? '%' : 'KES'))}
+                    title="Switch between KES and %"
+                    className="h-full px-2 border-l border-border text-[11px] font-semibold hover:bg-muted"
+                  >
+                    {discountType}
+                  </button>
+                </div>
+              </div>
+
+              {/* Outlet deductions: set up in Settings > Outlets, picked per order here */}
+              {outletDeductions.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-[11px] font-medium text-muted-foreground">Deductions (select all that apply)</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {outletDeductions.map(d => {
+                      const on = selectedDeductions.includes(d.name);
+                      return (
+                        <button key={d.name} type="button" onClick={() => toggleDeduction(d.name)}
+                          className={`h-7 px-2 rounded-md border text-[11px] font-medium transition-all ${on ? 'border-pink-500 bg-pink-500 text-white' : 'border-border text-muted-foreground hover:border-pink-500/60'}`}>
+                          {d.name} · {d.type === 'percent' ? `${d.value}%` : `KES ${d.value.toLocaleString()}`}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {appliedDeductions.length > 0 && (
+                    <p className="text-[11px] text-pink-400">Deductions on this order: {fmt(deductionsTotal)}</p>
+                  )}
+                </div>
+              )}
+
+              {/* Delivery riders: managed in Settings > Delivery */}
+              <div className="space-y-1.5">
+                <p className="text-[11px] font-medium text-muted-foreground">Delivery rider (optional)</p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {(['threePl', 'own'] as RiderType[]).map(t => {
+                    const on = rider?.type === t;
+                    const Icon = t === 'threePl' ? Truck : Bike;
+                    return (
+                      <button key={t} type="button" onClick={() => openRiderDialog(t)} title={RIDER_LABELS[t]}
+                        className={`h-7 px-2 rounded-md border text-[11px] font-medium transition-all flex items-center justify-center gap-1.5 min-w-0 ${on ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-border text-muted-foreground hover:border-emerald-500/60'}`}>
+                        <Icon className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate">{on ? rider!.name : RIDER_LABELS[t]}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-2 border-t border-border pt-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-medium text-muted-foreground flex items-center gap-1"><MapPin className="w-3 h-3" /> Delivery (optional)</p>
+                  <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setShowDeliveryMap(true)}>
+                    <Route className="w-3 h-3 mr-1" /> {routePoints.length > 0 ? `${routePoints.length} stops` : 'Plan Route'}
+                  </Button>
+                </div>
+                {routePoints.length > 0 && (
+                  <div className="bg-muted/50 rounded-lg p-2 space-y-1 max-h-40 overflow-y-auto">
+                    {routePoints.map((pt: any, i: number) => (
+                      <div key={pt.id} className="text-[10px] text-muted-foreground flex gap-1 items-start">
+                        <span className="font-bold text-foreground shrink-0">{i + 1}.</span>
+                        <span className="capitalize font-medium shrink-0" style={{ color: pt.tag === 'start' ? '#22c55e' : pt.tag === 'pickup' ? '#3b82f6' : pt.tag === 'dropoff' ? '#ef4444' : pt.tag === 'end' ? '#a855f7' : '#6b7280' }}>{pt.tag || 'pin'}</span>
+                        <span className="min-w-0 break-words whitespace-normal">{pt.label}</span>
+                      </div>
+                    ))}
+                    {distanceKm > 0 && <div className="text-xs font-semibold text-primary mt-1">Distance: {distanceKm.toFixed(2)} km</div>}
+                  </div>
+                )}
+              </div>
+
+              {mergeList.length > 0 && (
+                <div className="rounded-md border border-emerald-500/60 bg-emerald-500/5 px-2.5 py-1.5 text-[11px] space-y-0.5">
+                  <p className="font-medium text-emerald-400 flex items-center gap-1"><Layers className="w-3 h-3" /> {mergeList.length} pending order{mergeList.length === 1 ? '' : 's'} merged</p>
+                  <p className="text-muted-foreground">They are completed automatically with this checkout ({fmt(mergedPayable)} more).</p>
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  className="h-12 px-3 border-amber-400/80 hover:border-amber-400"
+                  onClick={handleHold}
+                  disabled={holding || processing || cart.length === 0}
+                  title="Put this order on hold"
+                >
+                  <Pause className="w-4 h-4 mr-1" /> {holding ? '...' : 'Hold'}
+                </Button>
+                <Button className="flex-1 h-12 text-base bg-gradient-to-r from-primary to-secondary" onClick={handleCheckout} disabled={processing || cart.length === 0}>
+                  {processing ? 'Processing...' : `Checkout ${fmt(payable)}`}
+                </Button>
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Other Income (now a working dialog) */}
@@ -605,9 +932,40 @@ export default function POSPage() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><Route className="w-5 h-5 text-primary" /> Plan Delivery Route</DialogTitle>
           </DialogHeader>
+
+          {/* Merge pending orders into this route */}
+          <div className="rounded-xl border border-border bg-card/60 p-3 space-y-2">
+            <p className="text-sm font-semibold flex items-center gap-1.5"><Layers className="w-4 h-4 text-emerald-400" /> Merge pending orders</p>
+            <p className="text-xs text-muted-foreground">
+              Tick pending orders to add their drop-offs to this route. They are completed automatically when you press Checkout.
+            </p>
+            {heldOrders.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-1">No pending orders to merge.</p>
+            ) : (
+              <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                {heldOrders.map(h => {
+                  const t = heldTotals(h);
+                  const drops = (h.routePoints || []).filter((p: any) => p.tag === 'dropoff').length;
+                  return (
+                    <label key={h.id} className="flex items-center gap-2 rounded-md bg-muted/50 px-2 py-1.5 cursor-pointer text-xs">
+                      <Checkbox checked={mergedIds.includes(h.id)} onCheckedChange={() => toggleMerge(h)} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block font-medium text-foreground truncate">{h.customer?.customerName || 'Walk-in customer'}</span>
+                        <span className="block text-[10px] text-muted-foreground">
+                          {h.items.length} item{h.items.length === 1 ? '' : 's'} · {drops > 0 ? `${drops} drop-off pin${drops === 1 ? '' : 's'}` : 'no drop-off pin'}
+                        </span>
+                      </span>
+                      <span className="font-semibold text-primary shrink-0">{fmt(t.payable)}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           <DeliveryRouteMap points={routePoints} onPointsChange={setRoutePoints} totalDistance={distanceKm} onDistanceChange={setDistanceKm} />
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setRoutePoints([]); setDistanceKm(0); }}>Clear All</Button>
+            <Button variant="outline" onClick={() => { setRoutePoints([]); setDistanceKm(0); setMergedIds([]); }}>Clear All</Button>
             <Button onClick={() => setShowDeliveryMap(false)}>Done</Button>
           </DialogFooter>
         </DialogContent>
