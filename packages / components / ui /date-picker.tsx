@@ -1,34 +1,14 @@
 import * as React from 'react';
-import { format, isValid, parse } from 'date-fns';
+import { addDays, format, startOfDay } from 'date-fns';
 import { Calendar as CalendarIcon, X } from 'lucide-react';
 
 import { cn } from '../lib/utils';
+import { Button } from './button';
 import { Calendar } from './calendar';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from './dialog';
 import { Input } from './input';
-import {
-  Popover,
-  PopoverAnchor,
-  PopoverContent,
-} from './popover';
 
 const DISPLAY_FORMAT = 'MMM d, yyyy';
-const PARSE_FORMATS = [
-  'MMM d, yyyy',
-  'MMMM d, yyyy',
-  'M/d/yyyy',
-  'M/d/yy',
-  'yyyy-MM-dd',
-];
-
-function parseDateText(text: string, reference: Date): Date | undefined {
-  const trimmed = text.trim();
-  if (!trimmed) return undefined;
-  for (const parseFormat of PARSE_FORMATS) {
-    const parsed = parse(trimmed, parseFormat, reference);
-    if (isValid(parsed)) return parsed;
-  }
-  return undefined;
-}
 
 interface DatePickerProps {
   value?: Date;
@@ -38,6 +18,11 @@ interface DatePickerProps {
   className?: string;
 }
 
+/**
+ * A blue calendar icon that opens a dialog. The dialog offers quick choices
+ * (Today, Yesterday, 7 days ago, 30 days ago) and a Custom option that shows
+ * a calendar to pick any date.
+ */
 function DatePicker({
   value,
   onChange,
@@ -46,148 +31,107 @@ function DatePicker({
   className,
 }: DatePickerProps) {
   const [open, setOpen] = React.useState(false);
-  const [text, setText] = React.useState(() =>
-    value ? format(value, DISPLAY_FORMAT) : '',
-  );
-  const [month, setMonth] = React.useState(() => value ?? new Date());
-  const wrapperRef = React.useRef<HTMLDivElement>(null);
-  const inputRef = React.useRef<HTMLInputElement>(null);
-  const valueRef = React.useRef(value);
+  const [custom, setCustom] = React.useState(false);
 
-  React.useEffect(() => {
-    if (value?.getTime() === valueRef.current?.getTime()) return;
-    valueRef.current = value;
-    setText(value ? format(value, DISPLAY_FORMAT) : '');
-    if (value) setMonth(value);
-  }, [value]);
-
-  const commit = (date: Date | undefined) => {
-    setText(date ? format(date, DISPLAY_FORMAT) : '');
-    if (date) setMonth(date);
-    if (date?.getTime() !== valueRef.current?.getTime()) {
-      valueRef.current = date;
-      onChange?.(date);
-    }
+  const openDialog = () => {
+    setCustom(false);
+    setOpen(true);
   };
 
-  const commitTyped = () => {
-    const parsed = parseDateText(text, value ?? new Date());
-    if (parsed || !text.trim()) {
-      commit(parsed);
-    } else {
-      // Unparseable text reverts to the last valid value
-      setText(value ? format(value, DISPLAY_FORMAT) : '');
-    }
-  };
-
-  const close = () => {
-    commitTyped();
+  const choose = (date: Date | undefined) => {
+    onChange?.(date);
     setOpen(false);
   };
 
+  const today = startOfDay(new Date());
+  const presets: { label: string; date: Date }[] = [
+    { label: 'Today', date: today },
+    { label: 'Yesterday', date: addDays(today, -1) },
+    { label: '7 days ago', date: addDays(today, -7) },
+    { label: '30 days ago', date: addDays(today, -30) },
+  ];
+  const isSelected = (d: Date) =>
+    !!value && format(value, 'yyyy-MM-dd') === format(d, 'yyyy-MM-dd');
+
   return (
-    <Popover
-      open={open}
-      onOpenChange={isOpen => (isOpen ? setOpen(true) : close())}
-    >
-      <PopoverAnchor asChild>
-        <div
-          ref={wrapperRef}
-          className={cn(
-            'flex h-9 w-full items-center rounded-md border border-input bg-transparent shadow-sm transition-colors focus-within:ring-1 focus-within:ring-ring',
-            disabled && 'cursor-not-allowed opacity-50',
-            className,
-          )}
-        >
-          <input
-            ref={inputRef}
-            value={text}
-            placeholder={placeholder}
-            disabled={disabled}
-            role="combobox"
-            aria-expanded={open}
-            aria-haspopup="dialog"
-            aria-label={placeholder}
-            className="h-full w-full min-w-0 flex-1 bg-transparent px-3 py-1 text-base outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed md:text-sm"
-            onFocus={() => {
-              if (!open) setOpen(true);
-            }}
-            onChange={event => {
-              setText(event.target.value);
-              const parsed = parseDateText(
-                event.target.value,
-                value ?? new Date(),
-              );
-              if (parsed) setMonth(parsed);
-            }}
-            onKeyDown={event => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                close();
-              } else if (event.key === 'Escape' && open) {
-                event.preventDefault();
-                event.stopPropagation();
-                setText(value ? format(value, DISPLAY_FORMAT) : '');
-                setOpen(false);
-              }
-            }}
-          />
-          {text && !disabled ? (
-            <button
-              type="button"
-              aria-label="Clear date"
-              className="flex h-full shrink-0 items-center px-3 text-muted-foreground hover:text-foreground"
-              onClick={() => commit(undefined)}
-            >
-              <X className="size-4" />
-            </button>
-          ) : (
-            <button
-              type="button"
-              tabIndex={-1}
-              aria-label="Open calendar"
-              disabled={disabled}
-              className="flex h-full shrink-0 items-center px-3 text-muted-foreground disabled:cursor-not-allowed"
-              onMouseDown={event => {
-                // Keep focus on the input so the popover doesn't close and reopen
-                event.preventDefault();
-                setOpen(true);
-                inputRef.current?.focus();
-              }}
-            >
-              <CalendarIcon className="size-4" />
-            </button>
-          )}
-        </div>
-      </PopoverAnchor>
-      <PopoverContent
-        className="w-auto p-0"
-        align="start"
-        onOpenAutoFocus={event => event.preventDefault()}
-        onCloseAutoFocus={event => event.preventDefault()}
-        onInteractOutside={event => {
-          if (wrapperRef.current?.contains(event.target as Node)) {
-            event.preventDefault();
-          }
-        }}
-        onFocusOutside={event => {
-          if (wrapperRef.current?.contains(event.target as Node)) {
-            event.preventDefault();
-          }
-        }}
+    <div className={cn('flex items-center gap-2', className)}>
+      <button
+        type="button"
+        aria-label={placeholder}
+        title={placeholder}
+        disabled={disabled}
+        onClick={openDialog}
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-blue-500/50 bg-blue-500/10 text-blue-500 transition-colors hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        <Calendar
-          mode="single"
-          selected={value}
-          month={month}
-          onMonthChange={setMonth}
-          onSelect={date => {
-            commit(date ?? undefined);
-            setOpen(false);
-          }}
-        />
-      </PopoverContent>
-    </Popover>
+        <CalendarIcon className="size-4" />
+      </button>
+      <span
+        className={cn(
+          'min-w-0 truncate text-sm',
+          value ? 'text-foreground' : 'text-muted-foreground',
+        )}
+      >
+        {value ? format(value, DISPLAY_FORMAT) : placeholder}
+      </span>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CalendarIcon className="size-5 text-blue-500" /> Select date
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-2">
+            {presets.map(p => (
+              <Button
+                key={p.label}
+                type="button"
+                variant="outline"
+                className={cn(
+                  'border-blue-500/40 hover:bg-blue-500/10',
+                  !custom && isSelected(p.date) && 'bg-blue-500 text-white hover:bg-blue-600',
+                )}
+                onClick={() => choose(p.date)}
+              >
+                {p.label}
+              </Button>
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              className={cn(
+                'col-span-2 border-blue-500/40 hover:bg-blue-500/10',
+                custom && 'bg-blue-500 text-white hover:bg-blue-600',
+              )}
+              onClick={() => setCustom(true)}
+            >
+              Custom
+            </Button>
+          </div>
+          {custom && (
+            <div className="flex justify-center rounded-lg border border-border">
+              <Calendar
+                mode="single"
+                selected={value}
+                defaultMonth={value}
+                onSelect={date => date && choose(date)}
+              />
+            </div>
+          )}
+          {value && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground"
+              onClick={() => choose(undefined)}
+            >
+              <X className="mr-1 size-3.5" /> Clear date
+            </Button>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }
 
