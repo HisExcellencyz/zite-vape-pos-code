@@ -4,7 +4,7 @@ import { useAuth, logout } from 'zitejs/auth';
 import {
   LayoutDashboard, ShoppingCart, Package, Users, Truck,
   Receipt, Settings, LogOut, ChevronLeft, ChevronRight,
-  ShoppingBag, Wallet, MapPin, Store, Check, Sun, Moon
+  Wallet, MapPin, Store, Check, Sun, Moon
 } from 'lucide-react';
 import { cn } from '@project/components/lib/utils';
 import { Button } from '@project/components/ui/button';
@@ -20,20 +20,20 @@ import { useTheme } from '../hooks/useTheme';
 const DEFAULT_LOGO = 'https://images.fillout.com/orgid-811092/flowpublicid-6hepsbbapu/widgetid-default/xmArbfbmsBwLWSE2d2Et7u/pasted-image-1788367385543-n4ulma8b.png';
 
 // `area` links each menu item to the permission matrix on the Users page.
-const navItems = [
+// `alt` is an extra area that also shows the item.
+const navItems: { to: string; icon: any; label: string; area: string; alt?: string }[] = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard', area: 'reports' },
   { to: '/pos', icon: ShoppingCart, label: 'POS', area: 'pos' },
   { to: '/inventory', icon: Package, label: 'Inventory', area: 'inventory' },
-  { to: '/sales', icon: Receipt, label: 'Sales', area: 'pos' },
-  { to: '/purchases', icon: ShoppingBag, label: 'Purchases', area: 'purchases' },
-  { to: '/expenses', icon: Wallet, label: 'Expenses', area: 'expenses' },
+  { to: '/income', icon: Receipt, label: 'Income', area: 'pos' },
+  { to: '/expenses', icon: Wallet, label: 'Expenses', area: 'expenses', alt: 'purchases' },
   { to: '/customers', icon: Users, label: 'Customers', area: 'customers' },
   { to: '/suppliers', icon: Truck, label: 'Suppliers', area: 'suppliers' },
   { to: '/addresses', icon: MapPin, label: 'Addresses', area: 'pos' },
   { to: '/settings', icon: Settings, label: 'Settings', area: 'settings' },
 ];
 
-const TONES: Record<string, string> = { '/pos': 'blue', '/inventory': 'blue', '/sales': 'blue', '/customers': 'blue', '/purchases': 'pink', '/expenses': 'pink', '/suppliers': 'pink' };
+const TONES: Record<string, string> = { '/pos': 'blue', '/inventory': 'blue', '/income': 'blue', '/customers': 'blue', '/expenses': 'pink', '/suppliers': 'pink' };
 const toneFor = (path: string) => TONES['/' + (path.split('/')[1] || '')] || 'gold';
 
 export default function AppLayout({ children }: { children: ReactNode }) {
@@ -44,7 +44,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const { theme, toggle } = useTheme();
   const location = useLocation();
 
-  const visibleItems = navItems.filter(item => can(item.area, 'view'));
+  const visibleItems = navItems.filter(item => can(item.area, 'view') || (!!item.alt && can(item.alt, 'view')));
   const outletLogo = currentBranch?.logoUrl || DEFAULT_LOGO;
   const outletName = currentBranch?.branchName || 'Uptown Vapes';
 
