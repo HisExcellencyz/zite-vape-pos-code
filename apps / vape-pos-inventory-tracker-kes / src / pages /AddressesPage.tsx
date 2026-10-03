@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
-import { getAddresses, saveAddress, deleteRecord } from 'zitejs/api';
+import { getAddresses, saveAddress, deleteRecord, getSuppliers } from 'zitejs/api';
 import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
-import { Badge } from '@project/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@project/components/ui/tabs';
@@ -15,11 +14,14 @@ import MapView from '../components/MapView';
 import LocationTabs, { PinStatus } from '../components/LocationTabs';
 import DeliveriesPanel from '../components/DeliveriesPanel';
 import { parseCoordinates } from '../lib/geocode';
+import { ADDR_TYPES, AddrType, addrPinColor, normalizeAddrType } from '../lib/addressTypes';
 
 interface Address {
   id: string;
   addressName?: string;
   type?: string;
+  supplierId?: string | null;
+  supplierName?: string;
   fullAddress?: string;
   plusCode?: string;
   coordinates?: string;
@@ -27,23 +29,12 @@ interface Address {
   active?: boolean;
 }
 
-// Colour logic is unchanged: pickup = blue, delivery = green, branch = purple, other = grey.
-const typeColors: Record<string, string> = {
-  pickup: 'bg-blue-500/10 text-blue-400',
-  delivery: 'bg-green-500/10 text-green-400',
-  branch: 'bg-purple-500/10 text-purple-400',
-  other: 'bg-gray-500/10 text-gray-400',
-};
-
-const pinColor = (t?: string) =>
-  t === 'pickup' ? '#3b82f6' : t === 'delivery' ? '#22c55e' : t === 'branch' ? '#a855f7' : '#6b7280';
-
-const typeLabel = (t?: string) =>
-  t === 'pickup' ? 'Pickup Point' : t === 'delivery' ? 'Delivery' : t === 'branch' ? 'Branch' : 'Other';
+interface SupplierLite { id: string; supplierName?: string; }
 
 export default function AddressesPage() {
-  const [tab, setTab] = useState('suppliers');
+  const [tab, setTab] = useState('branches');
   const [addresses, setAddresses] = useState<Address[]>([]);
+  const [suppliers, setSuppliers] = useState<SupplierLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -53,7 +44,8 @@ export default function AddressesPage() {
   // Form
   const [editId, setEditId] = useState<string | undefined>();
   const [name, setName] = useState('');
-  const [type, setType] = useState<'pickup' | 'delivery' | 'branch' | 'other'>('pickup');
+  const [type, setType] = useState<AddrType>('pickup');
+  const [supplierId, setSupplierId] = useState('');
   const [fullAddress, setFullAddress] = useState('');
   const [plusCode, setPlusCode] = useState('');
   const [coordinates, setCoordinates] = useState('');
@@ -63,22 +55,24 @@ export default function AddressesPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const res = await getAddresses({});
+      const [res, sup] = await Promise.all([getAddresses({}), getSuppliers({})]);
       setAddresses(res.addresses as Address[]);
+      setSuppliers(sup.suppliers as SupplierLite[]);
     } finally { setLoading(false); }
   };
 
   useEffect(() => { load(); }, []);
 
   const openNew = () => {
-    setEditId(undefined); setName(''); setType('pickup');
+    setEditId(undefined); setName(''); setType('pickup'); setSupplierId('');
     setFullAddress(''); setPlusCode(''); setCoordinates('');
     setNotes(''); setSelectedPin(null); setShowForm(true);
   };
 
   const openEdit = (a: Address) => {
     setEditId(a.id); setName(a.addressName || '');
-    setType((a.type as any) || 'pickup');
+    setType(normalizeAddrType(a.type));
+    setSupplierId(a.supplierId || '');
     setFullAddress(a.fullAddress || '');
     setPlusCode(a.plusCode || '');
     setCoordinates(a.coordinates || '');
@@ -108,18 +102,20 @@ export default function AddressesPage() {
 
   const handleSave = async () => {
     if (!name.trim()) return toast.error('Name is required');
+    if (type === 'supplier' && !supplierId) return toast.error('Choose which supplier this location belongs to');
     setSaving(true);
     try {
       await saveAddress({
         id: editId,
         addressName: name,
         type,
+        supplierId: type === 'supplier' ? supplierId : undefined,
         fullAddress: fullAddress || undefined,
         plusCode: plusCode || undefined,
         coordinates: coordinates || undefined,
         notes: notes || undefined,
       });
-      toast.success(editId ? 'Address updated' : 'Address added');
+      toast.success(editId ? 'Location updated' : 'Location added');
       setShowForm(false);
       load();
     } catch (e: any) { toast.error(e.message || 'Failed'); }
@@ -144,17 +140,17 @@ export default function AddressesPage() {
   const mapPins = addresses
     .map(a => ({ a, p: parseCoordinates(a.coordinates) }))
     .filter(x => x.p)
-    .map(x => ({ lat: x.p!.lat, lng: x.p!.lng, label: x.a.addressName || '', color: pinColor(x.a.type) }));
+    .map(x => ({ lat: x.p!.lat, lng: x.p!.lng, label: x.a.addressName || '', color: addrPinColor(x.a.type) }));
 
   const renderActions = (a: Address) => (
     <div className="flex gap-0.5 shrink-0" onClick={e => e.stopPropagation()}>
-      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(a)}><Edit className="w-3.5 h-3.5" /></Button>
+      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEdit(a)}><Edit className="w-3 h-3" /></Button>
       <AlertDialog>
         <AlertDialogTrigger asChild>
-          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button>
+          <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive"><Trash2 className="w-3 h-3" /></Button>
         </AlertDialogTrigger>
         <AlertDialogContent>
-          <AlertDialogHeader><AlertDialogTitle>Delete this address?</AlertDialogTitle><AlertDialogDescription>This cannot be undone.</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogHeader><AlertDialogTitle>Delete this location?</AlertDialogTitle><AlertDialogDescription>This cannot be undone.</AlertDialogDescription></AlertDialogHeader>
           <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleDelete(a.id)}>Delete</AlertDialogAction></AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -162,38 +158,38 @@ export default function AddressesPage() {
   );
 
   return (
-    <div className="p-6 space-y-4">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Addresses</h1>
-          <p className="text-sm text-muted-foreground">
-            {tab === 'suppliers' ? `${addresses.length} addresses saved` : 'Where your orders are delivered'}
-          </p>
-        </div>
-        {tab === 'suppliers' && (
-          <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" /> Add Address</Button>
-        )}
-      </div>
-
+    <div className="p-4 space-y-3">
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="bg-muted">
-          <TabsTrigger value="suppliers">Suppliers</TabsTrigger>
-          <TabsTrigger value="deliveries">Deliveries</TabsTrigger>
-        </TabsList>
+        {/* One compact header row: title, tabs and the add button */}
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-xl font-bold text-foreground">Addresses</h1>
+            <TabsList className="bg-muted">
+              <TabsTrigger value="branches">Branches</TabsTrigger>
+              <TabsTrigger value="deliveries">Deliveries</TabsTrigger>
+            </TabsList>
+            <span className="text-xs text-muted-foreground">
+              {tab === 'branches' ? `${addresses.length} locations saved` : 'Where your orders are delivered'}
+            </span>
+          </div>
+          {tab === 'branches' && (
+            <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" /> Add Location</Button>
+          )}
+        </div>
 
-        <TabsContent value="suppliers" className="mt-4">
-          <div className="grid gap-4 lg:grid-cols-[minmax(300px,380px)_1fr]">
-            {/* Left: address tiles */}
-            <div className="space-y-2 lg:max-h-[calc(100vh-220px)] lg:overflow-y-auto lg:pr-1 order-2 lg:order-1">
+        <TabsContent value="branches" className="mt-3">
+          <div className="grid gap-3 lg:grid-cols-[minmax(210px,270px)_1fr]">
+            {/* Left: narrow location tiles (no type shown) */}
+            <div className="space-y-1.5 lg:max-h-[calc(100vh-96px)] lg:overflow-y-auto lg:pr-1 order-2 lg:order-1">
               {loading ? (
-                [...Array(4)].map((_, i) => (
-                  <Card key={i} className="bg-card border-border"><CardContent className="p-3"><div className="h-10 bg-muted rounded animate-pulse" /></CardContent></Card>
+                [...Array(5)].map((_, i) => (
+                  <Card key={i} className="bg-card border-border"><CardContent className="p-2"><div className="h-8 bg-muted rounded animate-pulse" /></CardContent></Card>
                 ))
               ) : addresses.length === 0 ? (
                 <Card className="bg-card border-border">
-                  <CardContent className="p-10 text-center text-muted-foreground">
-                    <MapPin className="w-10 h-10 mx-auto mb-2 opacity-40" />
-                    No addresses yet. Add your commonly used pickup points and delivery addresses.
+                  <CardContent className="p-8 text-center text-muted-foreground">
+                    <MapPin className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                    <p className="text-sm">No locations yet. Add your commonly used supplier, pick-up, drop-off and start/end points.</p>
                   </CardContent>
                 </Card>
               ) : addresses.map(a => (
@@ -202,18 +198,13 @@ export default function AddressesPage() {
                   onClick={() => selectTile(a)}
                   className={`bg-card cursor-pointer transition-colors ${activeId === a.id ? 'border-primary' : 'border-border'}`}
                 >
-                  <CardContent className="p-3">
-                    <div className="flex items-start gap-2">
-                      <MapPin className="w-4 h-4 mt-0.5 shrink-0" style={{ color: pinColor(a.type) }} />
+                  <CardContent className="p-2">
+                    <div className="flex items-start gap-1.5">
+                      <MapPin className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: addrPinColor(a.type) }} />
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="font-semibold text-sm text-foreground break-words leading-snug">{a.addressName}</h3>
-                          <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 ${typeColors[a.type || 'other'] || typeColors.other}`}>
-                            {typeLabel(a.type)}
-                          </Badge>
-                        </div>
-                        {a.fullAddress && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2 break-words">{a.fullAddress}</p>}
-                        {a.notes && <p className="text-[11px] text-muted-foreground italic mt-0.5 line-clamp-1 break-words">{a.notes}</p>}
+                        <h3 className="font-semibold text-xs text-foreground break-words leading-snug">{a.addressName}</h3>
+                        {a.fullAddress && <p className="text-[11px] text-muted-foreground line-clamp-2 break-words">{a.fullAddress}</p>}
+                        {a.notes && <p className="text-[10px] text-muted-foreground italic line-clamp-1 break-words">{a.notes}</p>}
                       </div>
                       {renderActions(a)}
                     </div>
@@ -222,20 +213,20 @@ export default function AddressesPage() {
               ))}
             </div>
 
-            {/* Right: map overview */}
-            <div className="order-1 lg:order-2 lg:sticky lg:top-6 lg:self-start">
+            {/* Right: large map overview */}
+            <div className="order-1 lg:order-2 lg:sticky lg:top-4 lg:self-start">
               <MapView
                 pins={mapPins}
                 fitToPins
                 plainPins
                 focus={focus}
-                className="h-[280px] lg:h-[calc(100vh-220px)]"
+                className="h-[300px] lg:h-[calc(100vh-96px)]"
               />
             </div>
           </div>
         </TabsContent>
 
-        <TabsContent value="deliveries" className="mt-4">
+        <TabsContent value="deliveries" className="mt-3">
           <DeliveriesPanel />
         </TabsContent>
       </Tabs>
@@ -243,23 +234,33 @@ export default function AddressesPage() {
       {/* Add/Edit Dialog */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>{editId ? 'Edit' : 'Add'} Address</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editId ? 'Edit' : 'Add'} Location</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div>
               <Label>Name *</Label>
-              <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Westlands Pickup Point" />
+              <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Westlands Pick-up Point" />
             </div>
-            <div>
-              <Label>Type</Label>
-              <Select value={type} onValueChange={v => setType(v as any)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="pickup">Pickup Point</SelectItem>
-                  <SelectItem value="delivery">Delivery Address</SelectItem>
-                  <SelectItem value="branch">Branch</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Location type</Label>
+                <Select value={type} onValueChange={v => setType(v as AddrType)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {ADDR_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              {type === 'supplier' && (
+                <div>
+                  <Label>Supplier *</Label>
+                  <Select value={supplierId} onValueChange={setSupplierId}>
+                    <SelectTrigger><SelectValue placeholder="Select supplier" /></SelectTrigger>
+                    <SelectContent>
+                      {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.supplierName}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
             <div>
               <Label>Full Address</Label>
@@ -298,7 +299,7 @@ export default function AddressesPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>{saving ? 'Saving...' : editId ? 'Update' : 'Add Address'}</Button>
+            <Button onClick={handleSave} disabled={saving}>{saving ? 'Saving...' : editId ? 'Update' : 'Add Location'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
