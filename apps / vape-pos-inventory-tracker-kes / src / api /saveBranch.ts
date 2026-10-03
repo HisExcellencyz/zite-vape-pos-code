@@ -3,7 +3,7 @@ import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
 
 export default createEndpoint({
-  description: 'Create or update an outlet/branch, including its own logo and cover photo',
+  description: 'Create or update an outlet/branch, including its own logo, cover photo and delivery fee',
   authenticated: true,
   inputSchema: z.object({
     id: z.string().optional(),
@@ -17,16 +17,17 @@ export default createEndpoint({
     coverPhotoUrl: z.string().optional(),
     plusCode: z.string().optional(),
     coordinates: z.string().optional(),
+    deliveryFee: z.number().min(0).optional(),
     commissions: z.array(z.object({ name: z.string(), type: z.enum(['percent', 'fixed']), value: z.number() })).optional(),
   }),
   outputSchema: z.object({ success: z.boolean(), branch: z.any() }),
   execute: async ({ input }) => {
-    // Logo / cover photo aren't declared as schema fields on Branches, so —
-    // exactly like businessSettings.customFields elsewhere in this app — the
-    // branding for each outlet is kept as a small JSON blob in customFields.
+    // Logo / cover photo / delivery fee aren't schema fields on Branches, so — like
+    // businessSettings.customFields elsewhere in this app — they live in a small JSON blob.
     const branding = JSON.stringify({
       logoUrl: (input.logoUrl || '').trim(),
       coverPhotoUrl: (input.coverPhotoUrl || '').trim(),
+      deliveryFee: input.deliveryFee ?? 199,
     });
 
     const record: Record<string, unknown> = {
