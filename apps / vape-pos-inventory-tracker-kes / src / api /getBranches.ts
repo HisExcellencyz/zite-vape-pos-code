@@ -3,7 +3,7 @@ import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
 
 export default createEndpoint({
-  description: 'List outlets/branches, each with its own independent branding (logo, cover photo)',
+  description: 'List outlets/branches, each with its own independent branding (logo, cover photo) and delivery fee',
   authenticated: true,
   inputSchema: z.object({}),
   outputSchema: z.object({ branches: z.array(z.any()) }),
@@ -13,6 +13,7 @@ export default createEndpoint({
     const branches = records.map(b => {
       let branding: any = {};
       try { branding = b.customFields ? JSON.parse(b.customFields) : {}; } catch {}
+      const fee = Number(branding.deliveryFee);
       return {
         id: b.id,
         branchName: b.branchName || 'Outlet',
@@ -25,6 +26,7 @@ export default createEndpoint({
         coordinates: b.coordinates || '',
         logoUrl: branding.logoUrl || '',
         coverPhotoUrl: branding.coverPhotoUrl || '',
+        deliveryFee: branding.deliveryFee !== undefined && Number.isFinite(fee) ? fee : 199,
         commissions: (() => { try { return b.commissionRates ? JSON.parse(b.commissionRates) : []; } catch { return []; } })() as { name: string; type: 'percent' | 'fixed'; value: number }[],
       };
     });
@@ -37,7 +39,7 @@ export default createEndpoint({
           branchName: 'Main Outlet',
           isMainBranch: true,
           active: true,
-          customFields: JSON.stringify({}),
+          customFields: JSON.stringify({ deliveryFee: 199 }),
         },
       });
       branches.push({
@@ -52,6 +54,7 @@ export default createEndpoint({
         coordinates: '',
         logoUrl: '',
         coverPhotoUrl: '',
+        deliveryFee: 199,
         commissions: [],
       });
     }
