@@ -13,12 +13,27 @@ export interface Branch {
   coordinates?: string;
   logoUrl?: string;
   coverPhotoUrl?: string;
-  /** Default delivery fee charged per order at this outlet (KES). */
+  /** Legacy default delivery fee (KES). The first entry of `incomes` is now the delivery fee. */
   deliveryFee?: number;
+  /** Deductions / commissions (e.g. Glovo). */
   commissions?: Commission[];
+  /** Incomes & revenues charged on top of an order. The first one is the Delivery Fee. */
+  incomes?: Commission[];
 }
 
-export interface Commission { name: string; type: 'percent' | 'fixed'; value: number }
+export interface Commission {
+  name: string;
+  type: 'percent' | 'fixed';
+  value: number;
+  /** When on, the item is applied automatically to every POS order (it can be switched off per order). */
+  enabled?: boolean;
+}
+
+/**
+ * Whether an income / deduction is switched on in Settings.
+ * Items saved before the toggle existed have no flag: "Glovo" counts as on, everything else as off.
+ */
+export const autoOn = (c: Commission) => c.enabled ?? /^\s*glovo\s*$/i.test(c.name || '');
 
 export const commissionAmount = (c: Commission, base: number) =>
   Math.round((c.type === 'percent' ? (base * c.value) / 100 : c.value) * 100) / 100;
