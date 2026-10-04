@@ -30,3 +30,13 @@ export async function getAccess(userId: string) {
     can: (area: string, action: string) => full || matrix[area]?.[action] === true,
   };
 }
+
+/** Throws unless the user may do `action` in at least one of the given permission areas. */
+export async function assertCan(userId: string, areas: string | string[], action: string) {
+  const access = await getAccess(userId);
+  const list = Array.isArray(areas) ? areas : [areas];
+  if (!list.some(a => access.can(a, action))) {
+    throw new Error(`You do not have permission to ${action} here. Ask an administrator to update your role.`);
+  }
+  return access;
+}
