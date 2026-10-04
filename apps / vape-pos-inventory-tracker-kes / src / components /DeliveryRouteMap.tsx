@@ -34,6 +34,19 @@ export interface PickupItem {
   unitCost: number;
 }
 
+/**
+ * Fixed route order, whatever order points were added in:
+ * Start -> Pick-ups -> (untagged stops) -> Drop-offs -> End.
+ * Points of the same kind keep the order they were added in.
+ */
+const ROUTE_RANK: Record<string, number> = { start: 0, pickup: 1, dropoff: 3, end: 4 };
+export function sortRoutePoints<T extends { tag?: string }>(pts: T[]): T[] {
+  return pts
+    .map((p, i) => ({ p, i, r: p.tag && p.tag in ROUTE_RANK ? ROUTE_RANK[p.tag] : 2 }))
+    .sort((a, b) => a.r - b.r || a.i - b.i)
+    .map(x => x.p);
+}
+
 interface Props {
   points: RoutePoint[];
   onPointsChange: (points: RoutePoint[]) => void;
@@ -77,13 +90,9 @@ let rememberedReturnToStart = true;
 type Target = 'start' | 'stops' | 'end';
 
 interface TripInfo {
-  /** Total driving time including live traffic, in seconds. */
   seconds: number;
-  /** Total driving time with no traffic, in seconds. */
   staticSeconds: number;
-  /** When the calculation was made (ms since epoch); the trip is assumed to leave then. */
   calcAt: number;
-  /** True if any leg used a straight-line estimate instead of a real route. */
   estimated: boolean;
 }
 
@@ -168,6 +177,16 @@ export default function DeliveryRouteMap({
 
   const apiKey = import.meta.env.VITE_GOOGLEMAPS_API_KEY;
 
+  // Every change goes through here so the order is always Start -> Pick-ups -> Drop-offs -> End.
+  const commit = (next: RoutePoint[]) => onPointsChangeRef.current(sortRoutePoints(next));
+
+  // Keep whatever was already in the route (e.g. auto-added customer drop-offs) in the right order.
+  useEffect(() => {
+    const sorted = sortRoutePoints(pointsRef.current);
+    if (sorted.some((p, i) => p !== pointsRef.current[i])) onPointsChangeRef.current(sorted);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const placePoint = useCallback((lat: number, lng: number, label?: string, extra?: PointExtra) => {
     const cur = pointsRef.current;
     const t = targetRef.current;
@@ -185,11 +204,9 @@ export default function DeliveryRouteMap({
     } else if (t === 'end') {
       next = [...cur.filter(p => p.tag !== 'end'), { ...pt, tag: 'end' }];
     } else {
-      const stop: RoutePoint = extra?.tag ? { ...pt, tag: extra.tag } : pt;
-      const endIdx = cur.findIndex(p => p.tag === 'end');
-      next = endIdx >= 0 ? [...cur.slice(0, endIdx), stop, ...cur.slice(endIdx)] : [...cur, stop];
+      next = [...cur, extra?.tag ? { ...pt, tag: extra.tag } : pt];
     }
-    onPointsChangeRef.current(next);
+    onPointsChangeRef.current(sortRoutePoints(next));
   }, []);
 
   // Load saved addresses (the locations saved on the Addresses > Branches tab)
@@ -225,6 +242,16 @@ export default function DeliveryRouteMap({
     return () => { mounted = false; };
   }, [apiKey]);
 
+  // With "Return to start" on (and no different end), the Start point is prefilled as the End point too.
+  const startPt = points.find(p => p.tag === 'start');
+  const showReturn = returnToStart && !diffEnd && !!startPt && !points.some(p => p.tag === 'end');
+  const displayPts = useMemo<RoutePoint[]>(
+    () => (showReturn && startPt ? [...points, { ...startPt, id: 'return-to-start', tag: 'end' as const }] : points),
+    [points, showReturn, startPt],
+  );
+  // The stops actually driven (needs at least two real points).
+  const routePts = points.length >= 2 ? displayPts : points;
+
   // Update markers
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -233,13 +260,13 @@ export default function DeliveryRouteMap({
     markersRef.current.forEach(m => m.setMap(null));
     markersRef.current = [];
 
-    points.forEach((pt, i) => {
+    displayPts.forEach((pt, i) => {
       const color = pt.tag ? tagColors[pt.tag] : '#6b7280';
       const marker = new google.maps.Marker({
         position: { lat: pt.lat, lng: pt.lng },
         map,
         icon: numberedPin(i + 1, color),
-        title: `${pt.tag ? tagLabels[pt.tag] + ': ' : ''}${pt.label}`,
+        title: pt.id === 'return-to-start' ? `End: ${pt.label} (return to start)` : `${pt.tag ? tagLabels[pt.tag] + ': ' : ''}${pt.label}`,
       });
       markersRef.current.push(marker);
     });
@@ -250,22 +277,10 @@ export default function DeliveryRouteMap({
       map.fitBounds(bounds, 50);
       if (points.length === 1) map.setZoom(15);
     }
-  }, [points, isLoading]);
-
-  // The stops actually driven. When "Return to start" is on (and no different end is set),
-  // a final leg back to the start location is added to the calculation.
-  const startPt = points.find(p => p.tag === 'start');
-  const routePts = useMemo<RoutePoint[]>(() => {
-    if (returnToStart && !diffEnd && startPt && points.length >= 2 && points[points.length - 1].id !== startPt.id) {
-      return [...points, { ...startPt, id: 'return-to-start', label: 'Return to start' }];
-    }
-    return points;
-  }, [points, returnToStart, diffEnd, startPt]);
+  }, [displayPts, isLoading]);
 
   // Shortest driving route between each pair of consecutive stops (Routes API),
-  // drawn along the roads. Each leg also returns its duration using LIVE traffic
-  // (routingPreference TRAFFIC_AWARE, departing now). Falls back to a dashed
-  // straight line if no route is found.
+  // drawn along the roads, with live-traffic durations. Falls back to a dashed straight line.
   useEffect(() => {
     const map = mapInstanceRef.current;
     let cancelled = false;
@@ -277,13 +292,11 @@ export default function DeliveryRouteMap({
     }
     if (!map) return;
     setCalculatingDistance(true);
-    // Remove any lines from a previous calculation (e.g. when refreshing live traffic).
     polylinesRef.current.forEach(p => p.setMap(null));
     polylinesRef.current = [];
     const calcAt = Date.now();
     const legs = routePts.slice(0, -1).map((a, i) => [a, routePts[i + 1]] as const);
     const wp = (p: RoutePoint) => ({ location: { latLng: { latitude: p.lat, longitude: p.lng } } });
-    // Routes API durations come back as strings like "1234s".
     const secs = (s?: string) => { const n = s ? parseInt(s, 10) : NaN; return Number.isFinite(n) ? n : NaN; };
     Promise.all(legs.map(([a, b]) =>
       fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
@@ -390,11 +403,11 @@ export default function DeliveryRouteMap({
   });
 
   const updateTag = (id: string, tag: string) => {
-    onPointsChange(points.map(p => p.id === id ? { ...p, tag: tag === 'none' ? undefined : tag as any } : p));
+    commit(points.map(p => p.id === id ? { ...p, tag: tag === 'none' ? undefined : tag as any } : p));
   };
 
   const removePoint = (id: string) => {
-    onPointsChange(points.filter(p => p.id !== id));
+    commit(points.filter(p => p.id !== id));
   };
 
   const toggleDiffEnd = (on: boolean) => {
@@ -402,7 +415,7 @@ export default function DeliveryRouteMap({
     if (on) {
       setTarget('end');
     } else {
-      onPointsChange(points.filter(p => p.tag !== 'end'));
+      commit(points.filter(p => p.tag !== 'end'));
       if (targetRef.current === 'end') setTarget('stops');
     }
   };
@@ -449,7 +462,7 @@ export default function DeliveryRouteMap({
         {extraActions}
       </div>
 
-      {/* Location panel: title, Search / Coordinates / Plus code ribbon, map, pin status, toggles */}
+      {/* Location panel */}
       <div className="rounded-xl border border-border bg-card/60 p-3 space-y-3">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <p className="text-sm font-semibold text-foreground">{panelTitle}</p>
@@ -473,7 +486,6 @@ export default function DeliveryRouteMap({
 
         <LocationTabs onPick={(lat, lng, address) => placePoint(lat, lng, address)} />
 
-        {/* Map */}
         <div className="relative w-full rounded-lg overflow-hidden h-[250px]">
           <div ref={mapRef} className="w-full h-full" />
           {isLoading && <div className="absolute inset-0 flex items-center justify-center bg-background/80 text-muted-foreground text-sm">Loading map...</div>}
@@ -496,10 +508,19 @@ export default function DeliveryRouteMap({
         </div>
       </div>
 
-      {/* Point list */}
-      {points.length > 0 && (
+      {/* Point list (always Start -> Pick-ups -> Drop-offs -> End) */}
+      {displayPts.length > 0 && (
         <div className="space-y-1.5 max-h-[180px] overflow-y-auto">
-          {points.map((pt, i) => {
+          {displayPts.map((pt, i) => {
+            if (pt.id === 'return-to-start') {
+              return (
+                <div key={pt.id} className="flex items-center gap-2 bg-muted/50 rounded-md px-2 py-1.5 text-xs">
+                  <span className="w-5 h-5 rounded-full text-white text-[10px] font-bold flex items-center justify-center shrink-0" style={{ background: tagColors.end }}>{i + 1}</span>
+                  <span className="w-[90px] shrink-0 text-[10px] text-muted-foreground">End (return)</span>
+                  <span className="flex-1 truncate text-foreground">{pt.label}</span>
+                </div>
+              );
+            }
             const isSupplierPickup = pt.tag === 'pickup' && !!pt.supplierId;
             const picked = isSupplierPickup ? selectedFor(pt.id).length : 0;
             return (
@@ -540,7 +561,7 @@ export default function DeliveryRouteMap({
         </div>
       )}
 
-      {/* Trip summary: distance, live-traffic duration and final drop-off time */}
+      {/* Trip summary */}
       {routePts.length >= 2 && (
         <div className="rounded-md bg-primary/10 px-3 py-2 space-y-1.5">
           <div className="flex items-center justify-between">
@@ -629,7 +650,7 @@ export default function DeliveryRouteMap({
         </DialogContent>
       </Dialog>
 
-      {/* Items picked up at a supplier (optional). Only items in the active cart and merged orders are listed. */}
+      {/* Items picked up at a supplier */}
       <Dialog open={!!pickupFor} onOpenChange={o => { if (!o) setPickupFor(null); }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
