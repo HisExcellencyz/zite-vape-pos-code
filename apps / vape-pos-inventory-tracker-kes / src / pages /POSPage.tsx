@@ -54,6 +54,8 @@ interface HeldOrder {
   heldAt: string;
   heldBy?: string;
   branchId?: string | null;
+  /** 2 = the Rider Fee is one of the outlet's deductions. Missing = older order with a separate rider fee. */
+  v?: number;
   items: { productId: string; productName?: string; sku?: string; image?: string; quantity: number; unitPrice: number }[];
   customer: Customer | null;
   paymentMethod: string;
@@ -63,6 +65,7 @@ interface HeldOrder {
   feeAmount: string;
   /** Other incomes & revenues (besides the delivery fee) that were switched on for this order. */
   extraIncomes?: { name: string; amount: number }[];
+  /** Only present on older held orders (before the Rider Fee became a deduction). */
   riderFeeOn?: boolean;
   riderFeeAmount?: string;
   discountValue: string;
@@ -88,13 +91,11 @@ const heldTotals = (h: HeldOrder) => {
   return { sub, discount, total, fee, extra, payable: total + fee + extra };
 };
 
-/** The rider fee (KES) of a held order. Older held orders without one use the default. */
-const heldRiderFee = (h: HeldOrder) =>
-  h.riderFeeOn === false ? 0 : Math.max(0, Number(h.riderFeeAmount ?? DEFAULT_RIDER_FEE) || 0);
+/** Rider fee (KES) of an OLDER held order that had a separate rider fee. New held orders use the Rider Fee deduction instead. */
+const legacyRiderFee = (h: HeldOrder) =>
+  h.v === 2 || h.riderFeeOn === false ? 0 : Math.max(0, Number(h.riderFeeAmount ?? DEFAULT_RIDER_FEE) || 0);
 
-/** The rider fee is recorded as a deduction on the sale (so it counts as an expense). */
-const withRiderFee = (list: { name: string; amount: number }[], fee: number) =>
-  fee > 0 ? [...list, { name: 'Rider fee', amount: fee }] : list;
+const isRiderFeeName = (name?: string) => (name || '').trim().toLowerCase() === 'rider fee';
 
 /** Splits a list of route points into the text fields stored on a sale. */
 const routeFields = (pts: any[]) => {
@@ -184,6 +185,7 @@ export default function POSPage() {
 
   // Deductions and incomes are set up per outlet in Settings > Outlets. Items switched on there
   // are applied automatically; the cashier can switch any of them off (or on) for a single order.
+  // Every outlet carries Glovo, Rider Fee and Promo (Rider Fee sits between the other two).
   const outletDeductions: Commission[] = currentBranch?.commissions || [];
   const outletIncomes: Commission[] = currentBranch?.incomes ?? [
     { name: 'Delivery Fee', type: 'fixed', value: currentBranch?.deliveryFee ?? DEFAULT_DELIVERY_FEE, enabled: true },
@@ -198,12 +200,6 @@ export default function POSPage() {
   const [feeOverride, setFeeOverride] = useState<string | null>(null);
   const [extraOn, setExtraOn] = useState<Record<string, boolean>>({});
   const [extraVal, setExtraVal] = useState<Record<string, string>>({});
-
-  // Rider fee: default comes from DEFAULT_RIDER_FEE (lib/delivery.ts), adjustable per order.
-  // It is recorded as a deduction on the sale.
-  const [riderFeeOn, setRiderFeeOn] = useState(true);
-  const [riderFeeAmount, setRiderFeeAmount] = useState(String(DEFAULT_RIDER_FEE));
-  const riderFee = riderFeeOn ? Math.max(0, Number(riderFeeAmount) || 0) : 0;
 
   // Discount on the order, either a KES amount or a percentage of the subtotal.
   const [discountValue, setDiscountValue] = useState('');
@@ -329,8 +325,6 @@ export default function POSPage() {
     setRider(null);
     setFeeOnOverride(null); setFeeOverride(null);
     setExtraOn({}); setExtraVal({});
-    setRiderFeeOn(true);
-    setRiderFeeAmount(String(DEFAULT_RIDER_FEE));
     setDiscountValue('');
     setDiscountType('KES');
     setRoutePoints([]);
@@ -346,6 +340,7 @@ export default function POSPage() {
     setHolding(true);
     try {
       const order = {
+        v: 2,
         items: cart.map(c => ({
           productId: c.product.id,
           productName: c.product.productName,
@@ -361,8 +356,6 @@ export default function POSPage() {
         feeOn,
         feeAmount,
         extraIncomes: appliedExtras,
-        riderFeeOn,
-        riderFeeAmount,
         discountValue,
         discountType,
         routePoints,
@@ -396,14 +389,17 @@ export default function POSPage() {
       setSelectedCustomer(h.customer || null);
       setPaymentMethod(h.paymentMethod || 'Cash/M-PESA');
       // Restore exactly which deductions / incomes were on for this order.
-      setDedOverrides(Object.fromEntries(outletDeductions.map(d => [d.name, (h.selectedDeductions || []).includes(d.name)])));
+      // An older held order with a separate rider fee switches the Rider Fee deduction on.
+      const legacyRider = legacyRiderFee(h) > 0;
+      setDedOverrides(Object.fromEntries(outletDeductions.map(d => [
+        d.name,
+        (h.selectedDeductions || []).includes(d.name) || (legacyRider && isRiderFeeName(d.name)),
+      ])));
       setRider(h.rider || null);
       setFeeOnOverride(h.feeOn !== false);
       setFeeOverride(h.feeAmount ?? null);
       setExtraOn(Object.fromEntries(outletIncomes.slice(1).map(c => [c.name, (h.extraIncomes || []).some(e => e.name === c.name)])));
       setExtraVal(Object.fromEntries((h.extraIncomes || []).map(e => [e.name, String(e.amount)])));
-      setRiderFeeOn(h.riderFeeOn !== false);
-      setRiderFeeAmount(h.riderFeeAmount ?? String(DEFAULT_RIDER_FEE));
       setDiscountValue(h.discountValue || '');
       setDiscountType(h.discountType || 'KES');
       setRoutePoints(h.routePoints || []);
@@ -488,7 +484,7 @@ export default function POSPage() {
         branchId: currentBranch?.id,
         ...rf,
         deliveryDistanceKm: distanceKm || undefined,
-        deductions: withRiderFee(appliedDeductions.map(d => ({ name: d.name, amount: commissionAmount(d, total) })), riderFee),
+        deductions: appliedDeductions.map(d => ({ name: d.name, amount: commissionAmount(d, total) })),
         deliveryFee,
         extraIncomes: appliedExtras,
         riderType: rider?.type,
@@ -502,6 +498,12 @@ export default function POSPage() {
       for (const h of mergeList) {
         try {
           const t = heldTotals(h);
+          const heldDeductions = outletDeductions
+            .filter(d => (h.selectedDeductions || []).includes(d.name))
+            .map(d => ({ name: d.name, amount: commissionAmount(d, t.total) }));
+          // Older held orders carried a separate rider fee.
+          const oldRider = legacyRiderFee(h);
+          if (oldRider > 0 && !heldDeductions.some(d => isRiderFeeName(d.name))) heldDeductions.push({ name: 'Rider Fee', amount: oldRider });
           await createSale({
             items: h.items.map(i => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice })),
             customerId: h.customer?.id,
@@ -509,12 +511,7 @@ export default function POSPage() {
             discount: t.discount,
             branchId: currentBranch?.id,
             ...routeFields(h.routePoints || []),
-            deductions: withRiderFee(
-              outletDeductions
-                .filter(d => (h.selectedDeductions || []).includes(d.name))
-                .map(d => ({ name: d.name, amount: commissionAmount(d, t.total) })),
-              heldRiderFee(h),
-            ),
+            deductions: heldDeductions,
             deliveryFee: t.fee,
             extraIncomes: h.extraIncomes,
             riderType: rider?.type,
@@ -886,7 +883,7 @@ export default function POSPage() {
                       title={`${feeInc.name} in KES`}
                     />
                   )}
-                  {/* Discount: permanent label, amount in KES or % (same size as the Rider Fee tile) */}
+                  {/* Discount: permanent label, amount in KES or % */}
                   <div className={`h-7 rounded-md border flex items-center overflow-hidden transition-all ${discountAmount > 0 ? 'border-sky-500 bg-sky-500 text-white' : 'border-border text-muted-foreground hover:border-sky-500/60'}`}>
                     <span className="flex-1 min-w-0 pl-2 text-[11px] font-medium truncate">Discount</span>
                     <input
@@ -928,7 +925,8 @@ export default function POSPage() {
                   </div>
                 )}
 
-                {/* Outlet deductions: set up in Settings > Outlets. Switched-on ones apply automatically; tap to switch off/on for this order */}
+                {/* Outlet deductions (Glovo, Rider Fee, Promo and any others): set up in Settings > Outlets.
+                    Switched-on ones apply automatically; tap to switch off/on for this order */}
                 {outletDeductions.length > 0 && (
                   <div className="space-y-1.5">
                     <p className="text-[11px] font-medium text-muted-foreground">Deductions (tap to switch on / off)</p>
@@ -945,25 +943,11 @@ export default function POSPage() {
                     </div>
                   </div>
                 )}
-                {(appliedDeductions.length > 0 || riderFee > 0) && (
+                {appliedDeductions.length > 0 && (
                   <p className="text-[11px] text-pink-400">
-                    Deductions on this order: {fmt(deductionsTotal + riderFee)}{riderFee > 0 ? ` (incl. rider fee ${fmt(riderFee)})` : ''}
+                    Deductions on this order: {fmt(deductionsTotal)}
                   </p>
                 )}
-
-                {/* Rider fee: tap the label to switch on/off, edit the KES value. Recorded as a deduction on the sale. */}
-                <div className="grid grid-cols-2 gap-1.5">
-                  <FeeTile
-                    label="Rider Fee KES"
-                    on={riderFeeOn}
-                    onToggle={() => setRiderFeeOn(!riderFeeOn)}
-                    value={riderFeeAmount}
-                    onValue={setRiderFeeAmount}
-                    onCls="border-emerald-500 bg-emerald-500 text-white"
-                    offCls="border-border text-muted-foreground hover:border-emerald-500/60"
-                    title="Rider fee in KES (recorded as a deduction on this sale)"
-                  />
-                </div>
 
                 <div className="space-y-2 border-t border-border pt-3">
                   <div className="flex items-center justify-between">
