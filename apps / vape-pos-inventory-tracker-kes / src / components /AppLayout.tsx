@@ -185,21 +185,21 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                 size="icon"
                 onClick={handleArchive}
                 disabled={archiving}
-                className="gold-btn h-8 w-8 shrink-0"
+                className="h-8 w-8 shrink-0 bg-sky-300 text-slate-900 hover:bg-sky-400 hover:text-slate-900"
                 title="Archive Now (to Google Sheets)"
               >
                 {archiving ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
               </Button>
             ) : (
               <Button
-                variant="outline"
+                variant="default"
                 size="sm"
                 onClick={handleArchive}
                 disabled={archiving}
-                className="gold-btn h-8 flex-1 min-w-0 text-xs px-2"
+                className="h-8 flex-1 min-w-0 text-xs px-2 border border-sky-300 bg-sky-300 text-slate-900 shadow-none hover:bg-sky-400 hover:text-slate-900"
                 title="Copy all data to your Google Sheet; transactions older than 3 months are then removed from the app"
               >
-                {archiving ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin shrink-0" /> : <FileSpreadsheet className="w-3.5 h-3.5 mr-1 shrink-0 text-emerald-400" />}
+                {archiving ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin shrink-0" /> : <FileSpreadsheet className="w-3.5 h-3.5 mr-1 shrink-0" />}
                 <span className="truncate">{archiving ? 'Archiving...' : 'Archive Now'}</span>
               </Button>
             )
