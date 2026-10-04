@@ -6,8 +6,7 @@ import { Label } from '@project/components/ui/label';
 import { Badge } from '@project/components/ui/badge';
 import { Checkbox } from '@project/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
-import { Search, Plus, Minus, ShoppingCart, Trash2, UserPlus, X, Receipt, DollarSign, MapPin, Route, UserCheck, Truck, Bike, Pause, Play, Clock, Layers } from 'lucide-react';
+import { Search, Plus, Minus, ShoppingCart, Trash2, UserPlus, X, Receipt, DollarSign, MapPin, Route, UserCheck, Pause, Play, Clock, Layers } from 'lucide-react';
 import { toast } from 'sonner';
 import DeliveryRouteMap, { PickupItem } from '../components/DeliveryRouteMap';
 import LocationPickerDialog from '../components/LocationPickerDialog';
@@ -15,11 +14,11 @@ import ViewToggle, { useViewMode } from '../components/ViewToggle';
 import OtherIncomeDialog from '../components/OtherIncomeDialog';
 import ProductImage from '../components/ProductImage';
 import CustomerPicker, { PickableCustomer } from '../components/CustomerPicker';
-import { useBranch, commissionAmount } from '../hooks/useBranch';
+import { useBranch, commissionAmount, autoOn, Commission } from '../hooks/useBranch';
 import SummaryTiles from '../components/SummaryTiles';
 import DateRangeFilter, { Range, inRange } from '../components/DateRangeFilter';
 import { isCashPayment } from '../lib/payments';
-import { Riders, RiderType, RIDER_LABELS, DEFAULT_DELIVERY_FEE, DEFAULT_RIDER_FEE, loadRiders } from '../lib/delivery';
+import { RiderType, DEFAULT_DELIVERY_FEE, DEFAULT_RIDER_FEE } from '../lib/delivery';
 
 interface Product {
   id: string;
@@ -62,6 +61,8 @@ interface HeldOrder {
   rider: SelectedRider | null;
   feeOn: boolean;
   feeAmount: string;
+  /** Other incomes & revenues (besides the delivery fee) that were switched on for this order. */
+  extraIncomes?: { name: string; amount: number }[];
   riderFeeOn?: boolean;
   riderFeeAmount?: string;
   discountValue: string;
@@ -83,7 +84,8 @@ const heldTotals = (h: HeldOrder) => {
   const discount = calcDiscount(sub, h.discountValue, h.discountType);
   const total = sub - discount;
   const fee = h.feeOn ? Math.max(0, Number(h.feeAmount) || 0) : 0;
-  return { sub, discount, total, fee, payable: total + fee };
+  const extra = (h.extraIncomes || []).reduce((s, e) => s + (e.amount || 0), 0);
+  return { sub, discount, total, fee, extra, payable: total + fee + extra };
 };
 
 /** The rider fee (KES) of a held order. Older held orders without one use the default. */
@@ -131,6 +133,37 @@ function QtyBadge({ qty, small }: { qty: number; small?: boolean }) {
   );
 }
 
+/** Half-width tile: tap the label to switch on/off, edit the KES amount on the right. */
+function FeeTile({ label, on, onToggle, value, onValue, onCls, offCls, title }: {
+  label: string; on: boolean; onToggle: () => void; value: string; onValue: (v: string) => void;
+  onCls: string; offCls: string; title: string;
+}) {
+  return (
+    <div className={`h-7 rounded-md border flex items-center overflow-hidden transition-all ${on ? onCls : offCls}`}>
+      <button
+        type="button"
+        onClick={onToggle}
+        title={`Tap to switch ${label} on or off`}
+        className="flex-1 min-w-0 h-full pl-2 text-left text-[11px] font-medium truncate"
+      >
+        {label}
+      </button>
+      <input
+        type="number"
+        min={0}
+        value={on ? value : '0'}
+        disabled={!on}
+        onChange={e => onValue(e.target.value)}
+        title={title}
+        className={`h-5 w-14 mr-1 rounded px-1 text-right text-[11px] outline-none ${on ? 'bg-white/25 text-white' : 'bg-transparent'}`}
+      />
+    </div>
+  );
+}
+
+const AMBER_ON = 'border-amber-500 bg-amber-500 text-white';
+const AMBER_OFF = 'border-border text-muted-foreground hover:border-amber-500/60';
+
 export default function POSPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -149,18 +182,25 @@ export default function POSPage() {
   const [catalogView, setCatalogView] = useViewMode('pos', 'grid');
   const { currentBranch } = useBranch();
 
-  // Names of the outlet deductions the cashier has ticked for the current order.
-  const [selectedDeductions, setSelectedDeductions] = useState<string[]>([]);
+  // Deductions and incomes are set up per outlet in Settings > Outlets. Items switched on there
+  // are applied automatically; the cashier can switch any of them off (or on) for a single order.
+  const outletDeductions: Commission[] = currentBranch?.commissions || [];
+  const outletIncomes: Commission[] = currentBranch?.incomes ?? [
+    { name: 'Delivery Fee', type: 'fixed', value: currentBranch?.deliveryFee ?? DEFAULT_DELIVERY_FEE, enabled: true },
+  ];
+  const feeInc: Commission | undefined = outletIncomes[0]; // the first income is the Delivery Fee
 
-  // Delivery fee: on by default (tap the tile to switch off), amount defaults to the outlet's fee, both adjustable per sale.
-  const outletFee = currentBranch?.deliveryFee ?? DEFAULT_DELIVERY_FEE;
-  const [feeOn, setFeeOn] = useState(true);
-  const [feeAmount, setFeeAmount] = useState(String(outletFee));
-  useEffect(() => { setFeeAmount(String(outletFee)); setFeeOn(true); }, [currentBranch?.id, outletFee]);
-  const deliveryFee = feeOn ? Math.max(0, Number(feeAmount) || 0) : 0;
+  // Per-order overrides of what Settings switched on/off.
+  const [dedOverrides, setDedOverrides] = useState<Record<string, boolean>>({});
+  const selectedDeductions = outletDeductions.filter(d => dedOverrides[d.name] ?? autoOn(d)).map(d => d.name);
 
-  // Rider fee: same tile design as the delivery fee. The default comes from DEFAULT_RIDER_FEE
-  // (lib/delivery.ts) and can be changed on each order. It is recorded as a deduction on the sale.
+  const [feeOnOverride, setFeeOnOverride] = useState<boolean | null>(null);
+  const [feeOverride, setFeeOverride] = useState<string | null>(null);
+  const [extraOn, setExtraOn] = useState<Record<string, boolean>>({});
+  const [extraVal, setExtraVal] = useState<Record<string, string>>({});
+
+  // Rider fee: default comes from DEFAULT_RIDER_FEE (lib/delivery.ts), adjustable per order.
+  // It is recorded as a deduction on the sale.
   const [riderFeeOn, setRiderFeeOn] = useState(true);
   const [riderFeeAmount, setRiderFeeAmount] = useState(String(DEFAULT_RIDER_FEE));
   const riderFee = riderFeeOn ? Math.max(0, Number(riderFeeAmount) || 0) : 0;
@@ -169,27 +209,8 @@ export default function POSPage() {
   const [discountValue, setDiscountValue] = useState('');
   const [discountType, setDiscountType] = useState<DiscountType>('KES');
 
-  // Riders (3PL / own) shared by all outlets
-  const [riders, setRiders] = useState<Riders>({ threePl: [], own: [] });
+  // Kept so held orders created earlier (which may carry a rider) still complete with it.
   const [rider, setRider] = useState<SelectedRider | null>(null);
-  const [riderDialog, setRiderDialog] = useState<RiderType | null>(null);
-  const [riderChoice, setRiderChoice] = useState('none');
-  useEffect(() => { loadRiders().then(setRiders).catch(() => {}); }, []);
-
-  const openRiderDialog = (type: RiderType) => {
-    setRiderChoice(rider?.type === type ? rider.id : 'none');
-    setRiderDialog(type);
-  };
-  const confirmRider = () => {
-    if (!riderDialog) return;
-    if (riderChoice === 'none') {
-      if (rider?.type === riderDialog) setRider(null);
-    } else {
-      const r = riders[riderDialog].find(x => x.id === riderChoice);
-      if (r) setRider({ type: riderDialog, id: r.id, name: r.name });
-    }
-    setRiderDialog(null);
-  };
 
   const [showDeliveryMap, setShowDeliveryMap] = useState(false);
   const [showMergeDialog, setShowMergeDialog] = useState(false);
@@ -235,8 +256,12 @@ export default function POSPage() {
     return Array.from(map.values());
   })();
 
-  // Switching outlet changes the available deductions, so start fresh.
-  useEffect(() => { setSelectedDeductions([]); }, [currentBranch?.id]);
+  // Switching outlet changes the available incomes/deductions, so start fresh.
+  useEffect(() => {
+    setDedOverrides({});
+    setFeeOnOverride(null); setFeeOverride(null);
+    setExtraOn({}); setExtraVal({});
+  }, [currentBranch?.id]);
 
   useEffect(() => {
     Promise.all([getProducts({ status: 'Active', branchId: currentBranch?.id }), getCustomers({})]).then(([prods, custs]) => {
@@ -274,23 +299,36 @@ export default function POSPage() {
   const subtotal = cart.reduce((sum, c) => sum + c.unitPrice * c.quantity, 0);
   const discountAmount = calcDiscount(subtotal, discountValue, discountType);
   const total = subtotal - discountAmount;
-  const payable = total + deliveryFee;
 
-  // Deductions are defined per outlet in Settings; the cashier only chooses which apply.
-  const outletDeductions = currentBranch?.commissions || [];
+  // Delivery fee (first income): % is taken on the order total after discount; the amount can be edited per order.
+  const feeOn = feeInc ? (feeOnOverride ?? autoOn(feeInc)) : false;
+  const feeAmount = feeOverride ?? String(feeInc ? commissionAmount(feeInc, total) : 0);
+  const deliveryFee = feeOn ? Math.max(0, Number(feeAmount) || 0) : 0;
+
+  // Any other incomes & revenues of the outlet.
+  const extraIncomes = outletIncomes.slice(1).map(c => {
+    const on = extraOn[c.name] ?? autoOn(c);
+    const amount = extraVal[c.name] ?? String(commissionAmount(c, total));
+    return { name: c.name, on, amount, value: on ? Math.max(0, Number(amount) || 0) : 0 };
+  });
+  const appliedExtras = extraIncomes.filter(e => e.value > 0).map(e => ({ name: e.name, amount: e.value }));
+  const extraTotal = appliedExtras.reduce((s, e) => s + e.amount, 0);
+
+  const payable = total + deliveryFee + extraTotal;
+
   const appliedDeductions = outletDeductions.filter(d => selectedDeductions.includes(d.name));
   const deductionsTotal = appliedDeductions.reduce((s, d) => s + commissionAmount(d, total), 0);
-  const toggleDeduction = (name: string) =>
-    setSelectedDeductions(prev => prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name]);
+  const toggleDeduction = (d: Commission) =>
+    setDedOverrides(prev => ({ ...prev, [d.name]: !(prev[d.name] ?? autoOn(d)) }));
 
   const resetOrder = () => {
     // Clearing the cart also clears the quantity badges on the product tiles.
     setCart([]);
     setSelectedCustomer(null);
-    setSelectedDeductions([]);
+    setDedOverrides({});
     setRider(null);
-    setFeeOn(true);
-    setFeeAmount(String(outletFee));
+    setFeeOnOverride(null); setFeeOverride(null);
+    setExtraOn({}); setExtraVal({});
     setRiderFeeOn(true);
     setRiderFeeAmount(String(DEFAULT_RIDER_FEE));
     setDiscountValue('');
@@ -322,6 +360,7 @@ export default function POSPage() {
         rider,
         feeOn,
         feeAmount,
+        extraIncomes: appliedExtras,
         riderFeeOn,
         riderFeeAmount,
         discountValue,
@@ -356,10 +395,13 @@ export default function POSPage() {
       }));
       setSelectedCustomer(h.customer || null);
       setPaymentMethod(h.paymentMethod || 'Cash/M-PESA');
-      setSelectedDeductions(h.selectedDeductions || []);
+      // Restore exactly which deductions / incomes were on for this order.
+      setDedOverrides(Object.fromEntries(outletDeductions.map(d => [d.name, (h.selectedDeductions || []).includes(d.name)])));
       setRider(h.rider || null);
-      setFeeOn(h.feeOn !== false);
-      setFeeAmount(h.feeAmount ?? String(outletFee));
+      setFeeOnOverride(h.feeOn !== false);
+      setFeeOverride(h.feeAmount ?? null);
+      setExtraOn(Object.fromEntries(outletIncomes.slice(1).map(c => [c.name, (h.extraIncomes || []).some(e => e.name === c.name)])));
+      setExtraVal(Object.fromEntries((h.extraIncomes || []).map(e => [e.name, String(e.amount)])));
       setRiderFeeOn(h.riderFeeOn !== false);
       setRiderFeeAmount(h.riderFeeAmount ?? String(DEFAULT_RIDER_FEE));
       setDiscountValue(h.discountValue || '');
@@ -448,6 +490,7 @@ export default function POSPage() {
         deliveryDistanceKm: distanceKm || undefined,
         deductions: withRiderFee(appliedDeductions.map(d => ({ name: d.name, amount: commissionAmount(d, total) })), riderFee),
         deliveryFee,
+        extraIncomes: appliedExtras,
         riderType: rider?.type,
         riderName: rider?.name,
       });
@@ -473,6 +516,7 @@ export default function POSPage() {
               heldRiderFee(h),
             ),
             deliveryFee: t.fee,
+            extraIncomes: h.extraIncomes,
             riderType: rider?.type,
             riderName: rider?.name,
             notes: saleNo ? `Merged delivery with Sale #${saleNo}` : 'Merged delivery',
@@ -751,7 +795,7 @@ export default function POSPage() {
                     {h.items.map(i => `${i.quantity}× ${i.productName || 'Item'}`).join(', ')}
                   </p>
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-muted-foreground">Total{t.fee > 0 ? ' (incl. delivery)' : ''}</span>
+                    <span className="text-muted-foreground">Total{t.fee + t.extra > 0 ? ' (incl. fees)' : ''}</span>
                     <span className="font-bold text-primary">{fmt(t.payable)}</span>
                   </div>
                   {merged && <p className="text-[10px] text-emerald-400">Merged into the current delivery — completes on Checkout</p>}
@@ -803,10 +847,16 @@ export default function POSPage() {
                 )}
                 {deliveryFee > 0 && (
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Delivery fee</span>
+                    <span className="text-muted-foreground">{feeInc?.name || 'Delivery fee'}</span>
                     <span className="text-foreground">{fmt(deliveryFee)}</span>
                   </div>
                 )}
+                {appliedExtras.map(e => (
+                  <div key={e.name} className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">{e.name}</span>
+                    <span className="text-foreground">{fmt(e.amount)}</span>
+                  </div>
+                ))}
                 <div className="flex justify-between text-lg font-bold">
                   <span className="text-foreground">Total</span>
                   <span className="text-primary">{fmt(payable)}</span>
@@ -822,79 +872,71 @@ export default function POSPage() {
                   ))}
                 </div>
 
-                {/* Delivery fee and Rider fee (tap the label to switch on/off, edit the KES value) */}
+                {/* Delivery fee (first income of the outlet) and Discount, side by side */}
                 <div className="grid grid-cols-2 gap-1.5">
-                  <div className={`h-7 rounded-md border flex items-center overflow-hidden transition-all ${feeOn ? 'border-amber-500 bg-amber-500 text-white' : 'border-border text-muted-foreground hover:border-amber-500/60'}`}>
-                    <button
-                      type="button"
-                      onClick={() => setFeeOn(!feeOn)}
-                      title="Tap to switch the delivery fee on or off"
-                      className="flex-1 min-w-0 h-full pl-2 text-left text-[11px] font-medium truncate"
-                    >
-                      Delivery KES
-                    </button>
+                  {feeInc && (
+                    <FeeTile
+                      label={`${feeInc.name || 'Delivery Fee'} KES`}
+                      on={feeOn}
+                      onToggle={() => setFeeOnOverride(!feeOn)}
+                      value={feeAmount}
+                      onValue={setFeeOverride}
+                      onCls={AMBER_ON}
+                      offCls={AMBER_OFF}
+                      title={`${feeInc.name} in KES`}
+                    />
+                  )}
+                  {/* Discount: permanent label, amount in KES or % (same size as the Rider Fee tile) */}
+                  <div className={`h-7 rounded-md border flex items-center overflow-hidden transition-all ${discountAmount > 0 ? 'border-sky-500 bg-sky-500 text-white' : 'border-border text-muted-foreground hover:border-sky-500/60'}`}>
+                    <span className="flex-1 min-w-0 pl-2 text-[11px] font-medium truncate">Discount</span>
                     <input
                       type="number"
                       min={0}
-                      value={feeOn ? feeAmount : '0'}
-                      disabled={!feeOn}
-                      onChange={e => setFeeAmount(e.target.value)}
-                      title="Delivery fee in KES"
-                      className={`h-5 w-14 mr-1 rounded px-1 text-right text-[11px] outline-none ${feeOn ? 'bg-white/25 text-white' : 'bg-transparent'}`}
+                      value={discountValue}
+                      placeholder="0"
+                      onChange={e => setDiscountValue(e.target.value)}
+                      title="Discount amount"
+                      className={`h-5 w-11 mr-1 rounded px-1 text-right text-[11px] outline-none ${discountAmount > 0 ? 'bg-white/25 text-white placeholder:text-white/70' : 'bg-transparent text-foreground placeholder:text-muted-foreground'}`}
                     />
-                  </div>
-                  <div className={`h-7 rounded-md border flex items-center overflow-hidden transition-all ${riderFeeOn ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-border text-muted-foreground hover:border-emerald-500/60'}`}>
                     <button
                       type="button"
-                      onClick={() => setRiderFeeOn(!riderFeeOn)}
-                      title="Tap to switch the rider fee on or off"
-                      className="flex-1 min-w-0 h-full pl-2 text-left text-[11px] font-medium truncate"
+                      onClick={() => setDiscountType(t => (t === 'KES' ? '%' : 'KES'))}
+                      title="Switch between KES and %"
+                      className={`h-full px-1.5 border-l text-[11px] font-semibold ${discountAmount > 0 ? 'border-white/40 hover:bg-white/20' : 'border-border hover:bg-muted'}`}
                     >
-                      Rider Fee KES
+                      {discountType}
                     </button>
-                    <input
-                      type="number"
-                      min={0}
-                      value={riderFeeOn ? riderFeeAmount : '0'}
-                      disabled={!riderFeeOn}
-                      onChange={e => setRiderFeeAmount(e.target.value)}
-                      title="Rider fee in KES (recorded as a deduction on this sale)"
-                      className={`h-5 w-14 mr-1 rounded px-1 text-right text-[11px] outline-none ${riderFeeOn ? 'bg-white/25 text-white' : 'bg-transparent'}`}
-                    />
                   </div>
                 </div>
 
-                {/* Discount: permanent label, amount in KES or % */}
-                <div className={`h-7 rounded-md border flex items-center overflow-hidden transition-all ${discountAmount > 0 ? 'border-sky-500 bg-sky-500 text-white' : 'border-border text-muted-foreground hover:border-sky-500/60'}`}>
-                  <span className="flex-1 min-w-0 pl-2 text-[11px] font-medium truncate">Discount</span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={discountValue}
-                    placeholder="0"
-                    onChange={e => setDiscountValue(e.target.value)}
-                    title="Discount amount"
-                    className={`h-5 w-16 mr-1 rounded px-1 text-right text-[11px] outline-none ${discountAmount > 0 ? 'bg-white/25 text-white placeholder:text-white/70' : 'bg-transparent text-foreground placeholder:text-muted-foreground'}`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setDiscountType(t => (t === 'KES' ? '%' : 'KES'))}
-                    title="Switch between KES and %"
-                    className={`h-full px-2.5 border-l text-[11px] font-semibold ${discountAmount > 0 ? 'border-white/40 hover:bg-white/20' : 'border-border hover:bg-muted'}`}
-                  >
-                    {discountType}
-                  </button>
-                </div>
+                {/* Other incomes & revenues of the outlet (Settings > Outlets > Incomes & Revenues) */}
+                {extraIncomes.length > 0 && (
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {extraIncomes.map(e => (
+                      <FeeTile
+                        key={e.name}
+                        label={`${e.name} KES`}
+                        on={e.on}
+                        onToggle={() => setExtraOn(p => ({ ...p, [e.name]: !e.on }))}
+                        value={e.amount}
+                        onValue={v => setExtraVal(p => ({ ...p, [e.name]: v }))}
+                        onCls={AMBER_ON}
+                        offCls={AMBER_OFF}
+                        title={`${e.name} in KES`}
+                      />
+                    ))}
+                  </div>
+                )}
 
-                {/* Outlet deductions: set up in Settings > Outlets, picked per order here */}
+                {/* Outlet deductions: set up in Settings > Outlets. Switched-on ones apply automatically; tap to switch off/on for this order */}
                 {outletDeductions.length > 0 && (
                   <div className="space-y-1.5">
-                    <p className="text-[11px] font-medium text-muted-foreground">Deductions (select all that apply)</p>
+                    <p className="text-[11px] font-medium text-muted-foreground">Deductions (tap to switch on / off)</p>
                     <div className="flex flex-wrap gap-1.5">
                       {outletDeductions.map(d => {
                         const on = selectedDeductions.includes(d.name);
                         return (
-                          <button key={d.name} type="button" onClick={() => toggleDeduction(d.name)}
+                          <button key={d.name} type="button" onClick={() => toggleDeduction(d)}
                             className={`h-7 px-2 rounded-md border text-[11px] font-medium transition-all ${on ? 'border-pink-500 bg-pink-500 text-white' : 'border-border text-muted-foreground hover:border-pink-500/60'}`}>
                             {d.name} · {d.type === 'percent' ? `${d.value}%` : `KES ${d.value.toLocaleString()}`}
                           </button>
@@ -909,22 +951,18 @@ export default function POSPage() {
                   </p>
                 )}
 
-                {/* Delivery riders: managed in Settings > Delivery */}
-                <div className="space-y-1.5">
-                  <p className="text-[11px] font-medium text-muted-foreground">Delivery rider (optional)</p>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {(['threePl', 'own'] as RiderType[]).map(t => {
-                      const on = rider?.type === t;
-                      const Icon = t === 'threePl' ? Truck : Bike;
-                      return (
-                        <button key={t} type="button" onClick={() => openRiderDialog(t)} title={RIDER_LABELS[t]}
-                          className={`h-7 px-2 rounded-md border text-[11px] font-medium transition-all flex items-center justify-center gap-1.5 min-w-0 ${on ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-border text-muted-foreground hover:border-emerald-500/60'}`}>
-                          <Icon className="w-3.5 h-3.5 shrink-0" />
-                          <span className="truncate">{on ? rider!.name : RIDER_LABELS[t]}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
+                {/* Rider fee: tap the label to switch on/off, edit the KES value. Recorded as a deduction on the sale. */}
+                <div className="grid grid-cols-2 gap-1.5">
+                  <FeeTile
+                    label="Rider Fee KES"
+                    on={riderFeeOn}
+                    onToggle={() => setRiderFeeOn(!riderFeeOn)}
+                    value={riderFeeAmount}
+                    onValue={setRiderFeeAmount}
+                    onCls="border-emerald-500 bg-emerald-500 text-white"
+                    offCls="border-border text-muted-foreground hover:border-emerald-500/60"
+                    title="Rider fee in KES (recorded as a deduction on this sale)"
+                  />
                 </div>
 
                 <div className="space-y-2 border-t border-border pt-3">
@@ -992,32 +1030,6 @@ export default function POSPage() {
 
       {/* Other Income (now a working dialog) */}
       <OtherIncomeDialog open={showOtherIncome} onOpenChange={setShowOtherIncome} />
-
-      {/* Rider picker */}
-      <Dialog open={!!riderDialog} onOpenChange={o => { if (!o) setRiderDialog(null); }}>
-        <DialogContent className="max-w-xs">
-          <DialogHeader><DialogTitle>{riderDialog ? RIDER_LABELS[riderDialog] : ''}</DialogTitle></DialogHeader>
-          <div className="space-y-2">
-            <Label className="text-xs">Rider for this order</Label>
-            <Select value={riderChoice} onValueChange={setRiderChoice}>
-              <SelectTrigger><SelectValue placeholder="Choose a rider" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">No rider</SelectItem>
-                {(riderDialog ? riders[riderDialog] : []).map(r => (
-                  <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {riderDialog && riders[riderDialog].length === 0 && (
-              <p className="text-xs text-muted-foreground">No riders yet. Add them under Settings → Delivery.</p>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRiderDialog(null)}>Cancel</Button>
-            <Button onClick={confirmRider}>OK</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* New Customer Dialog */}
       <Dialog open={showCustomerDialog} onOpenChange={(open) => { setShowCustomerDialog(open); if (!open) setDuplicateMatch(null); }}>
