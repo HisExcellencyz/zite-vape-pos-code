@@ -8,8 +8,9 @@ import { Checkbox } from '@project/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { Search, Plus, Minus, ShoppingCart, Trash2, UserPlus, X, Receipt, DollarSign, MapPin, Route, UserCheck, Pause, Play, Clock, Layers } from 'lucide-react';
 import { toast } from 'sonner';
-import DeliveryRouteMap, { PickupItem } from '../components/DeliveryRouteMap';
+import DeliveryRouteMap, { PickupItem, sortRoutePoints } from '../components/DeliveryRouteMap';
 import LocationPickerDialog from '../components/LocationPickerDialog';
+import CustomerLocationDialog from '../components/CustomerLocationDialog';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
 import OtherIncomeDialog from '../components/OtherIncomeDialog';
 import ProductImage from '../components/ProductImage';
@@ -18,6 +19,7 @@ import { useBranch, commissionAmount, autoOn, Commission } from '../hooks/useBra
 import SummaryTiles from '../components/SummaryTiles';
 import DateRangeFilter, { Range, inRange } from '../components/DateRangeFilter';
 import { isCashPayment } from '../lib/payments';
+import { parseCoordinates } from '../lib/geocode';
 import { RiderType, DEFAULT_DELIVERY_FEE, DEFAULT_RIDER_FEE } from '../lib/delivery';
 
 interface Product {
@@ -42,6 +44,8 @@ interface Customer {
   id: string;
   customerName?: string;
   phoneNumber?: string;
+  address?: string;
+  coordinates?: string;
 }
 
 interface SelectedRider { type: RiderType; id: string; name: string; }
@@ -114,6 +118,8 @@ const routeFields = (pts: any[]) => {
 };
 
 const isMergedPoint = (p: any) => String(p.id).startsWith('m_');
+/** Drop-offs that were added automatically from a customer's saved location. */
+const isAutoCustomerPoint = (p: any) => String(p.id).startsWith('c_') || /^m_.+_c_/.test(String(p.id));
 
 /** Long product names in the cart shrink (down to 80% of normal size) so more items stay in view. */
 const cartNameSize = (name?: string) => {
@@ -180,8 +186,10 @@ export default function POSPage() {
   const [newCustName, setNewCustName] = useState('');
   const [newCustPhone, setNewCustPhone] = useState('');
   const [newCustAddress, setNewCustAddress] = useState('');
+  const [newCustCoords, setNewCustCoords] = useState('');
   const [duplicateMatch, setDuplicateMatch] = useState<Customer | null>(null);
   const [showCustLocationPicker, setShowCustLocationPicker] = useState(false);
+  const [showCustLocation, setShowCustLocation] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [showOtherIncome, setShowOtherIncome] = useState(false);
   const [catalogView, setCatalogView] = useViewMode('pos', 'grid');
@@ -349,6 +357,36 @@ export default function POSPage() {
     setMergedIds([]);
   };
 
+  // ── Customer locations as drop-off points ──
+  /** The latest saved location of a customer (from the loaded list, falling back to the order's copy). */
+  const dropFor = (c: Customer | null | undefined, id: string) => {
+    if (!c) return null;
+    const full = customers.find(x => x.id === c.id) || c;
+    const p = parseCoordinates(full.coordinates);
+    if (!p) return null;
+    return { id, label: full.address || full.customerName || `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`, tag: 'dropoff', lat: p.lat, lng: p.lng };
+  };
+
+  /**
+   * Opens the Route Plan dialog. The linked customer's saved location, and that of every merged order,
+   * is added as a drop-off point (replacing any earlier auto-added ones so they are never stale).
+   */
+  const openRoutePlanner = () => {
+    const wanted: any[] = [];
+    const own = dropFor(selectedCustomer, `c_${selectedCustomer?.id}`);
+    if (own) wanted.push(own);
+    mergeList.forEach(h => {
+      const d = dropFor(h.customer, `m_${h.id}_c_${h.customer?.id}`);
+      if (d) wanted.push(d);
+    });
+    setRoutePoints(pts => {
+      const keep = pts.filter(p => !isAutoCustomerPoint(p));
+      const fresh = wanted.filter(w => !keep.some(p => p.tag === 'dropoff' && p.lat === w.lat && p.lng === w.lng));
+      return sortRoutePoints([...keep, ...fresh]);
+    });
+    setShowDeliveryMap(true);
+  };
+
   // ── Hold / resume / delete ──
   const handleHold = async () => {
     if (cart.length === 0) return toast.error('Cart is empty');
@@ -426,7 +464,7 @@ export default function POSPage() {
       setExtraVal(Object.fromEntries((h.extraIncomes || []).map(e => [e.name, String(e.amount)])));
       setDiscountValue(h.discountValue || '');
       setDiscountType(h.discountType || 'KES');
-      setRoutePoints(h.routePoints || []);
+      setRoutePoints(sortRoutePoints(h.routePoints || []));
       setDistanceKm(h.distanceKm || 0);
       setPickupSelections(h.pickupSelections || {});
       setMergedIds(prev => prev.filter(id => id !== h.id));
@@ -459,14 +497,15 @@ export default function POSPage() {
     }
     setMergedIds(ids => [...ids, h.id]);
     // Bring over the drop-offs (and any extra stops). Pick-ups and start/end stay those of the active order.
-    const add = (h.routePoints || [])
+    const add: any[] = (h.routePoints || [])
       .filter(p => p.tag !== 'start' && p.tag !== 'end' && p.tag !== 'pickup')
       .map(p => ({ ...p, id: `m_${h.id}_${p.id}` }));
+    // The merged order's customer location is a drop-off too.
+    const cust = dropFor(h.customer, `m_${h.id}_c_${h.customer?.id}`);
+    if (cust) add.push(cust);
     setRoutePoints(pts => {
-      const fresh = add.filter(a => !pts.some(p => p.lat === a.lat && p.lng === a.lng));
-      if (fresh.length === 0) return pts;
-      const endIdx = pts.findIndex(p => p.tag === 'end');
-      return endIdx >= 0 ? [...pts.slice(0, endIdx), ...fresh, ...pts.slice(endIdx)] : [...pts, ...fresh];
+      const fresh = add.filter((a, i) => !pts.some(p => p.lat === a.lat && p.lng === a.lng) && add.findIndex(b => b.lat === a.lat && b.lng === a.lng) === i);
+      return fresh.length === 0 ? pts : sortRoutePoints([...pts, ...fresh]);
     });
   };
 
@@ -535,13 +574,17 @@ export default function POSPage() {
           // Older held orders carried a separate rider fee.
           const oldRider = legacyRiderFee(h);
           if (oldRider > 0 && !heldDeductions.some(d => isRiderFeeName(d.name))) heldDeductions.push({ name: 'Rider Fee', amount: oldRider });
+          // When a route was planned, the merged order's customer location is its drop-off.
+          const heldPoints: any[] = [...(h.routePoints || [])];
+          const custDrop = routePoints.length > 0 ? dropFor(h.customer, 'x') : null;
+          if (custDrop && !heldPoints.some(p => p.tag === 'dropoff' && p.lat === custDrop.lat && p.lng === custDrop.lng)) heldPoints.push(custDrop);
           await createSale({
             items: h.items.map(i => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice })),
             customerId: h.customer?.id,
             paymentMethod: h.paymentMethod,
             discount: t.discount,
             branchId: currentBranch?.id,
-            ...routeFields(h.routePoints || []),
+            ...routeFields(sortRoutePoints(heldPoints)),
             deductions: heldDeductions,
             deliveryFee: t.fee,
             extraIncomes: h.extraIncomes,
@@ -612,22 +655,29 @@ export default function POSPage() {
     }
   };
 
+  const clearNewCustomerForm = () => { setNewCustName(''); setNewCustPhone(''); setNewCustAddress(''); setNewCustCoords(''); };
+
   const useDuplicateMatch = () => {
     if (!duplicateMatch) return;
     setSelectedCustomer(duplicateMatch);
     setShowCustomerDialog(false);
     setDuplicateMatch(null);
-    setNewCustName(''); setNewCustPhone(''); setNewCustAddress('');
+    clearNewCustomerForm();
   };
 
   const handleCreateCustomer = async () => {
     if (!newCustName || !newCustPhone) return toast.error('Name and phone are required');
     try {
-      const res = await saveCustomer({ customerName: newCustName, phoneNumber: newCustPhone, address: newCustAddress || undefined });
+      const res = await saveCustomer({
+        customerName: newCustName,
+        phoneNumber: newCustPhone,
+        address: newCustAddress || undefined,
+        coordinates: newCustCoords || undefined,
+      });
       setCustomers(prev => [...prev, res.customer as Customer]);
       setSelectedCustomer(res.customer as Customer);
       setShowCustomerDialog(false);
-      setNewCustName(''); setNewCustPhone(''); setNewCustAddress('');
+      clearNewCustomerForm();
       setDuplicateMatch(null);
       toast.success('Customer created');
     } catch (e: any) {
@@ -783,7 +833,17 @@ export default function POSPage() {
                     <p className="text-xs font-medium text-foreground break-words whitespace-normal">{selectedCustomer.customerName}</p>
                     <p className="text-[10px] text-muted-foreground break-all">{selectedCustomer.phoneNumber}</p>
                   </div>
-                  <button onClick={() => setSelectedCustomer(null)} className="shrink-0"><X className="w-3.5 h-3.5 text-muted-foreground" /></button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setShowCustLocation(true)}
+                      title="View or update this customer's saved location"
+                      className="w-6 h-6 rounded-md border border-amber-400/70 flex items-center justify-center hover:bg-amber-400/10"
+                    >
+                      <MapPin className="w-3.5 h-3.5 text-amber-400" />
+                    </button>
+                    <button onClick={() => setSelectedCustomer(null)}><X className="w-3.5 h-3.5 text-muted-foreground" /></button>
+                  </div>
                 </div>
               ) : (
                 <>
@@ -956,10 +1016,7 @@ export default function POSPage() {
                   </div>
                 )}
 
-                {/* Outlet deductions (Glovo, Rider Fee, Promo and any others): set up in Settings > Outlets.
-                    Switched-on ones apply automatically; tap to switch off/on for this order.
-                    The Rider Fee works like the Delivery Fee: its KES amount can be edited per order.
-                    Tiles stretch (flex-1) so the row always reaches the right edge of the tabs above. */}
+                {/* Outlet deductions (Glovo, Rider Fee, Promo and any others) */}
                 {outletDeductions.length > 0 && (
                   <div className="space-y-1.5">
                     <p className="text-[11px] font-medium text-muted-foreground">Deductions (tap to switch on / off)</p>
@@ -1001,7 +1058,7 @@ export default function POSPage() {
                 <div className="space-y-2 border-t border-border pt-3">
                   <div className="flex items-center justify-between">
                     <p className="text-xs font-medium text-muted-foreground flex items-center gap-1"><MapPin className="w-3 h-3" /> Delivery (optional)</p>
-                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setShowDeliveryMap(true)}>
+                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={openRoutePlanner}>
                       <Route className="w-3 h-3 mr-1" /> {routePoints.length > 0 ? `${routePoints.length} stops` : 'Plan Route'}
                     </Button>
                   </div>
@@ -1020,7 +1077,7 @@ export default function POSPage() {
                 </div>
               </div>
 
-              {/* Frozen footer: merged-orders tile and Hold / Checkout stay in view while the options above scroll */}
+              {/* Frozen footer */}
               <div className="shrink-0 border-t border-border bg-card rounded-b-xl p-4 pt-3 space-y-2">
                 {mergeList.length > 0 && (
                   <div className="flex items-center gap-2 rounded-md border border-emerald-500/60 bg-emerald-500/5 px-2 py-1">
@@ -1064,6 +1121,18 @@ export default function POSPage() {
       {/* Other Income (now a working dialog) */}
       <OtherIncomeDialog open={showOtherIncome} onOpenChange={setShowOtherIncome} />
 
+      {/* Retain / Update the linked customer's saved location */}
+      <CustomerLocationDialog
+        open={showCustLocation}
+        onOpenChange={setShowCustLocation}
+        customer={selectedCustomer}
+        onChanged={loc => {
+          if (!selectedCustomer) return;
+          setSelectedCustomer({ ...selectedCustomer, ...loc });
+          setCustomers(prev => prev.map(c => (c.id === selectedCustomer.id ? { ...c, ...loc } : c)));
+        }}
+      />
+
       {/* New Customer Dialog */}
       <Dialog open={showCustomerDialog} onOpenChange={(open) => { setShowCustomerDialog(open); if (!open) setDuplicateMatch(null); }}>
         <DialogContent className="max-w-sm">
@@ -1089,9 +1158,10 @@ export default function POSPage() {
             <div>
               <Label>Location</Label>
               <div className="flex gap-2">
-                <Input value={newCustAddress} onChange={e => setNewCustAddress(e.target.value)} placeholder="Address (optional)" className="flex-1" />
+                <Input value={newCustAddress} onChange={e => { setNewCustAddress(e.target.value); setNewCustCoords(''); }} placeholder="Address (optional)" className="flex-1" />
                 <Button type="button" variant="outline" size="icon" className="shrink-0" onClick={() => setShowCustLocationPicker(true)}><MapPin className="w-4 h-4" /></Button>
               </div>
+              {newCustCoords && <p className="text-[10px] font-mono text-muted-foreground mt-1">Pin saved: {newCustCoords} — added as a drop-off when you plan the route.</p>}
             </div>
           </div>
           <DialogFooter>
@@ -1106,7 +1176,7 @@ export default function POSPage() {
         onOpenChange={setShowCustLocationPicker}
         title="Customer Location"
         value={newCustAddress}
-        onSelect={(address) => { setNewCustAddress(address); }}
+        onSelect={(address, coords) => { setNewCustAddress(address); setNewCustCoords(coords); }}
       />
 
       <Dialog open={showDeliveryMap} onOpenChange={setShowDeliveryMap}>
@@ -1150,7 +1220,7 @@ export default function POSPage() {
           </DialogHeader>
           <div className="space-y-2">
             <p className="text-xs text-muted-foreground">
-              Tick pending orders to add their drop-offs to this route. They are completed automatically when you press Checkout.
+              Tick pending orders to add their drop-offs (including each customer's saved location) to this route. They are completed automatically when you press Checkout.
             </p>
             {heldOrders.length === 0 ? (
               <p className="text-xs text-muted-foreground py-4 text-center">No pending orders to merge.</p>
@@ -1158,7 +1228,7 @@ export default function POSPage() {
               <div className="space-y-1.5 max-h-72 overflow-y-auto">
                 {heldOrders.map(h => {
                   const t = heldTotals(h);
-                  const drops = (h.routePoints || []).filter((p: any) => p.tag === 'dropoff').length;
+                  const drops = (h.routePoints || []).filter((p: any) => p.tag === 'dropoff').length + (dropFor(h.customer, 'x') ? 1 : 0);
                   return (
                     <label key={h.id} className="flex items-center gap-2 rounded-md bg-muted/50 px-2 py-1.5 cursor-pointer text-xs">
                       <Checkbox checked={mergedIds.includes(h.id)} onCheckedChange={() => toggleMerge(h)} />
