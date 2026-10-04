@@ -60,6 +60,8 @@ interface HeldOrder {
   customer: Customer | null;
   paymentMethod: string;
   selectedDeductions: string[];
+  /** Per-order edited amounts (KES) for the Rider Fee deduction, keyed by deduction name. */
+  deductionAmounts?: Record<string, string>;
   rider: SelectedRider | null;
   feeOn: boolean;
   feeAmount: string;
@@ -164,6 +166,8 @@ function FeeTile({ label, on, onToggle, value, onValue, onCls, offCls, title }: 
 
 const AMBER_ON = 'border-amber-500 bg-amber-500 text-white';
 const AMBER_OFF = 'border-border text-muted-foreground hover:border-amber-500/60';
+const PINK_ON = 'border-pink-500 bg-pink-500 text-white';
+const PINK_OFF = 'border-border text-muted-foreground hover:border-pink-500/60';
 
 export default function POSPage() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -194,6 +198,8 @@ export default function POSPage() {
 
   // Per-order overrides of what Settings switched on/off.
   const [dedOverrides, setDedOverrides] = useState<Record<string, boolean>>({});
+  // Per-order edited KES amounts for the Rider Fee deduction (keyed by deduction name).
+  const [dedAmounts, setDedAmounts] = useState<Record<string, string>>({});
   const selectedDeductions = outletDeductions.filter(d => dedOverrides[d.name] ?? autoOn(d)).map(d => d.name);
 
   const [feeOnOverride, setFeeOnOverride] = useState<boolean | null>(null);
@@ -255,6 +261,7 @@ export default function POSPage() {
   // Switching outlet changes the available incomes/deductions, so start fresh.
   useEffect(() => {
     setDedOverrides({});
+    setDedAmounts({});
     setFeeOnOverride(null); setFeeOverride(null);
     setExtraOn({}); setExtraVal({});
   }, [currentBranch?.id]);
@@ -312,8 +319,16 @@ export default function POSPage() {
 
   const payable = total + deliveryFee + extraTotal;
 
+  // Amount (KES) of a deduction on this order. The Rider Fee can be edited per order; the others follow the outlet setup.
+  const deductionAmountText = (d: Commission) =>
+    isRiderFeeName(d.name) && dedAmounts[d.name] !== undefined ? dedAmounts[d.name] : String(commissionAmount(d, total));
+  const deductionAmount = (d: Commission) =>
+    isRiderFeeName(d.name) && dedAmounts[d.name] !== undefined
+      ? Math.max(0, Number(dedAmounts[d.name]) || 0)
+      : commissionAmount(d, total);
+
   const appliedDeductions = outletDeductions.filter(d => selectedDeductions.includes(d.name));
-  const deductionsTotal = appliedDeductions.reduce((s, d) => s + commissionAmount(d, total), 0);
+  const deductionsTotal = appliedDeductions.reduce((s, d) => s + deductionAmount(d), 0);
   const toggleDeduction = (d: Commission) =>
     setDedOverrides(prev => ({ ...prev, [d.name]: !(prev[d.name] ?? autoOn(d)) }));
 
@@ -322,6 +337,7 @@ export default function POSPage() {
     setCart([]);
     setSelectedCustomer(null);
     setDedOverrides({});
+    setDedAmounts({});
     setRider(null);
     setFeeOnOverride(null); setFeeOverride(null);
     setExtraOn({}); setExtraVal({});
@@ -352,6 +368,7 @@ export default function POSPage() {
         customer: selectedCustomer,
         paymentMethod,
         selectedDeductions,
+        deductionAmounts: dedAmounts,
         rider,
         feeOn,
         feeAmount,
@@ -395,6 +412,13 @@ export default function POSPage() {
         d.name,
         (h.selectedDeductions || []).includes(d.name) || (legacyRider && isRiderFeeName(d.name)),
       ])));
+      // Restore an edited Rider Fee amount (older held orders carried it as a separate rider fee).
+      const amounts: Record<string, string> = { ...(h.deductionAmounts || {}) };
+      if (legacyRider) {
+        const rf = outletDeductions.find(d => isRiderFeeName(d.name));
+        if (rf && amounts[rf.name] === undefined) amounts[rf.name] = String(legacyRiderFee(h));
+      }
+      setDedAmounts(amounts);
       setRider(h.rider || null);
       setFeeOnOverride(h.feeOn !== false);
       setFeeOverride(h.feeAmount ?? null);
@@ -484,7 +508,7 @@ export default function POSPage() {
         branchId: currentBranch?.id,
         ...rf,
         deliveryDistanceKm: distanceKm || undefined,
-        deductions: appliedDeductions.map(d => ({ name: d.name, amount: commissionAmount(d, total) })),
+        deductions: appliedDeductions.map(d => ({ name: d.name, amount: deductionAmount(d) })),
         deliveryFee,
         extraIncomes: appliedExtras,
         riderType: rider?.type,
@@ -500,7 +524,14 @@ export default function POSPage() {
           const t = heldTotals(h);
           const heldDeductions = outletDeductions
             .filter(d => (h.selectedDeductions || []).includes(d.name))
-            .map(d => ({ name: d.name, amount: commissionAmount(d, t.total) }));
+            .map(d => {
+              // A Rider Fee edited on the held order keeps its edited amount.
+              const edited = isRiderFeeName(d.name) ? h.deductionAmounts?.[d.name] : undefined;
+              return {
+                name: d.name,
+                amount: edited !== undefined ? Math.max(0, Number(edited) || 0) : commissionAmount(d, t.total),
+              };
+            });
           // Older held orders carried a separate rider fee.
           const oldRider = legacyRiderFee(h);
           if (oldRider > 0 && !heldDeductions.some(d => isRiderFeeName(d.name))) heldDeductions.push({ name: 'Rider Fee', amount: oldRider });
@@ -926,16 +957,34 @@ export default function POSPage() {
                 )}
 
                 {/* Outlet deductions (Glovo, Rider Fee, Promo and any others): set up in Settings > Outlets.
-                    Switched-on ones apply automatically; tap to switch off/on for this order */}
+                    Switched-on ones apply automatically; tap to switch off/on for this order.
+                    The Rider Fee works like the Delivery Fee: its KES amount can be edited per order.
+                    Tiles stretch (flex-1) so the row always reaches the right edge of the tabs above. */}
                 {outletDeductions.length > 0 && (
                   <div className="space-y-1.5">
                     <p className="text-[11px] font-medium text-muted-foreground">Deductions (tap to switch on / off)</p>
                     <div className="flex flex-wrap gap-1.5">
                       {outletDeductions.map(d => {
                         const on = selectedDeductions.includes(d.name);
+                        if (isRiderFeeName(d.name)) {
+                          return (
+                            <div key={d.name} className="flex-[1.6] min-w-[140px]">
+                              <FeeTile
+                                label={`${d.name} KES`}
+                                on={on}
+                                onToggle={() => toggleDeduction(d)}
+                                value={deductionAmountText(d)}
+                                onValue={v => setDedAmounts(p => ({ ...p, [d.name]: v }))}
+                                onCls={PINK_ON}
+                                offCls={PINK_OFF}
+                                title={`${d.name} in KES`}
+                              />
+                            </div>
+                          );
+                        }
                         return (
                           <button key={d.name} type="button" onClick={() => toggleDeduction(d)}
-                            className={`h-7 px-2 rounded-md border text-[11px] font-medium transition-all ${on ? 'border-pink-500 bg-pink-500 text-white' : 'border-border text-muted-foreground hover:border-pink-500/60'}`}>
+                            className={`flex-1 h-7 px-2 rounded-md border text-[11px] font-medium whitespace-nowrap transition-all ${on ? 'border-pink-500 bg-pink-500 text-white' : 'border-border text-muted-foreground hover:border-pink-500/60'}`}>
                             {d.name} · {d.type === 'percent' ? `${d.value}%` : `KES ${d.value.toLocaleString()}`}
                           </button>
                         );
