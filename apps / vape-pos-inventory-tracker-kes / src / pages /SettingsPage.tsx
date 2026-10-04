@@ -11,13 +11,15 @@ import { Switch } from '@project/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { Store, Plus, Pencil, Trash2, Check, Shield, Truck, Bike, Phone } from 'lucide-react';
 import { toast } from 'sonner';
-import { useBranch, Branch } from '../hooks/useBranch';
+import { useBranch, Branch, autoOn } from '../hooks/useBranch';
 import { Rider, Riders, RiderType, RIDER_LABELS, DEFAULT_DELIVERY_FEE, loadRiders, persistRiders, newRiderId } from '../lib/delivery';
 
 const DEFAULT_LOGO = 'https://images.fillout.com/orgid-811092/flowpublicid-6hepsbbapu/widgetid-default/xmArbfbmsBwLWSE2d2Et7u/pasted-image-1788367385543-n4ulma8b.png';
 
 import CommissionEditor from '../components/CommissionEditor';
 import type { Commission } from '../hooks/useBranch';
+
+const defaultIncomes = (): Commission[] => [{ name: 'Delivery Fee', type: 'fixed', value: DEFAULT_DELIVERY_FEE, enabled: true }];
 
 export default function SettingsPage() {
   const { branches, currentBranch, setCurrentBranchId, refresh: refreshBranches } = useBranch();
@@ -29,7 +31,7 @@ export default function SettingsPage() {
   const [outletTaxId, setOutletTaxId] = useState('');
   const [outletLogoUrl, setOutletLogoUrl] = useState('');
   const [outletCoverUrl, setOutletCoverUrl] = useState('');
-  const [outletDeliveryFee, setOutletDeliveryFee] = useState(String(DEFAULT_DELIVERY_FEE));
+  const [outletIncomes, setOutletIncomes] = useState<Commission[]>(defaultIncomes());
   const [outletIsMain, setOutletIsMain] = useState(false);
   const [outletActive, setOutletActive] = useState(true);
   const [savingOutlet, setSavingOutlet] = useState(false);
@@ -50,7 +52,7 @@ export default function SettingsPage() {
   const openNewOutlet = () => {
     setEditingOutlet(null);
     setOutletName(''); setOutletAddress(''); setOutletPhone(''); setOutletTaxId('');
-    setOutletLogoUrl(''); setOutletCoverUrl(''); setOutletDeliveryFee(String(DEFAULT_DELIVERY_FEE));
+    setOutletLogoUrl(''); setOutletCoverUrl(''); setOutletIncomes(defaultIncomes());
     setOutletIsMain(branches.length === 0); setOutletActive(true); setOutletCommissions([]);
     setOutletDialogOpen(true);
   };
@@ -63,17 +65,16 @@ export default function SettingsPage() {
     setOutletTaxId(b.taxId || '');
     setOutletLogoUrl(b.logoUrl || '');
     setOutletCoverUrl(b.coverPhotoUrl || '');
-    setOutletDeliveryFee(String(b.deliveryFee ?? DEFAULT_DELIVERY_FEE));
+    setOutletIncomes((b.incomes ?? defaultIncomes()).map(c => ({ ...c, enabled: autoOn(c) })));
     setOutletIsMain(!!b.isMainBranch);
     setOutletActive(b.active !== false);
-    setOutletCommissions(b.commissions || []);
+    setOutletCommissions((b.commissions || []).map(c => ({ ...c, enabled: autoOn(c) })));
     setOutletDialogOpen(true);
   };
 
   const handleSaveOutlet = async () => {
     if (!outletName.trim()) return toast.error('Outlet name is required');
-    const fee = Number(outletDeliveryFee);
-    if (outletDeliveryFee === '' || !Number.isFinite(fee) || fee < 0) return toast.error('Enter a valid delivery fee (0 or more)');
+    if (outletIncomes.some(c => c.name.trim() && (!Number.isFinite(c.value) || c.value < 0))) return toast.error('Enter valid amounts (0 or more) for the incomes');
     setSavingOutlet(true);
     try {
       const res = await saveBranch({
@@ -84,10 +85,10 @@ export default function SettingsPage() {
         taxId: outletTaxId || undefined,
         logoUrl: outletLogoUrl || undefined,
         coverPhotoUrl: outletCoverUrl || undefined,
-        deliveryFee: fee,
         isMainBranch: outletIsMain,
         active: outletActive,
-        commissions: outletCommissions.filter(c => c.name.trim() && c.value > 0),
+        incomes: outletIncomes.filter(c => c.name.trim()).map(c => ({ ...c, enabled: autoOn(c) })),
+        commissions: outletCommissions.filter(c => c.name.trim() && c.value > 0).map(c => ({ ...c, enabled: autoOn(c) })),
       });
       toast.success(editingOutlet ? 'Outlet updated' : 'Outlet created');
       setOutletDialogOpen(false);
@@ -160,6 +161,16 @@ export default function SettingsPage() {
     </Card>
   );
 
+  const incomeChip = (b: Branch) => {
+    const inc = (b.incomes ?? [])[0];
+    if (!inc) return null;
+    return (
+      <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400">
+        {inc.name} {inc.type === 'percent' ? `${inc.value}%` : `KES ${(inc.value || 0).toLocaleString()}`}
+      </span>
+    );
+  };
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -202,7 +213,7 @@ export default function SettingsPage() {
                     {b.isMainBranch && <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary">Main Outlet</span>}
                     {b.active === false && <span className="px-2 py-0.5 rounded-full bg-destructive/10 text-destructive">Inactive</span>}
                     {b.id === currentBranch?.id && <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center gap-1"><Check className="w-3 h-3" /> Active view</span>}
-                    <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400">Delivery fee KES {(b.deliveryFee ?? DEFAULT_DELIVERY_FEE).toLocaleString()}</span>
+                    {incomeChip(b)}
                   </div>
                   <div className="flex gap-2 pt-1 border-t border-border">
                     <Button variant="outline" size="sm" className="flex-1" onClick={() => setCurrentBranchId(b.id)} disabled={b.id === currentBranch?.id}>
@@ -216,7 +227,7 @@ export default function SettingsPage() {
           </div>
 
           <Dialog open={outletDialogOpen} onOpenChange={setOutletDialogOpen}>
-            <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
+            <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
               <DialogHeader><DialogTitle>{editingOutlet ? 'Edit Outlet' : 'Add Outlet'}</DialogTitle></DialogHeader>
               <div className="space-y-4">
                 <div>
@@ -253,12 +264,20 @@ export default function SettingsPage() {
                     <img src={outletCoverUrl} alt="Cover preview" className="mt-2 w-full h-24 rounded-lg object-cover border border-border" onError={e => (e.currentTarget.style.display = 'none')} />
                   )}
                 </div>
-                <div>
-                  <Label>Delivery fee per order (KES)</Label>
-                  <Input type="number" min={0} value={outletDeliveryFee} onChange={e => setOutletDeliveryFee(e.target.value)} placeholder="199" />
-                  <p className="text-xs text-muted-foreground mt-1">Applied automatically at POS for this outlet and counted as income. It can be switched off or changed on each sale.</p>
-                </div>
-                <CommissionEditor value={outletCommissions} onChange={setOutletCommissions} />
+                <CommissionEditor
+                  title="Incomes & Revenues"
+                  namePlaceholder="e.g. Delivery Fee"
+                  description="Charged on top of the order. The first one is the Delivery Fee. Switched-on items are added automatically to every POS order and can be switched off per order. Names show on the POS cart."
+                  value={outletIncomes}
+                  onChange={setOutletIncomes}
+                />
+                <CommissionEditor
+                  title="Commissions & Deductions"
+                  namePlaceholder="e.g. Glovo"
+                  description="Switched-on items are deducted automatically on every POS order and can be switched off per order. Names show on the POS cart."
+                  value={outletCommissions}
+                  onChange={setOutletCommissions}
+                />
                 <div className="flex items-center gap-3">
                   <Switch checked={outletIsMain} onCheckedChange={setOutletIsMain} />
                   <Label className="text-sm">Set as the main outlet (default view)</Label>
@@ -283,7 +302,7 @@ export default function SettingsPage() {
         <TabsContent value="delivery" className="mt-4 space-y-4">
           <p className="text-sm text-muted-foreground max-w-2xl">
             Riders added here are shared by every outlet. At POS, the cashier picks which 3PL or own rider is handling an order.
-            The delivery fee per order is set for each outlet under Outlets.
+            The delivery fee per order is set for each outlet under Outlets, in Incomes &amp; Revenues.
           </p>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {riderCard('threePl', Truck)}
