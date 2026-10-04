@@ -21,6 +21,14 @@ import type { Commission } from '../hooks/useBranch';
 
 const defaultIncomes = (): Commission[] => [{ name: 'Delivery Fee', type: 'fixed', value: DEFAULT_DELIVERY_FEE, enabled: true }];
 
+// The standard deductions every outlet carries, in this order.
+const STANDARD_DEDUCTIONS: Commission[] = [
+  { name: 'Glovo', type: 'percent', value: 11.6, enabled: true },
+  { name: 'Rider Fee', type: 'fixed', value: 340, enabled: true },
+  { name: 'Promo', type: 'fixed', value: 70, enabled: false },
+];
+const sameName = (a?: string, b?: string) => (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
+
 export default function SettingsPage() {
   const { branches, currentBranch, setCurrentBranchId, refresh: refreshBranches } = useBranch();
   const [outletDialogOpen, setOutletDialogOpen] = useState(false);
@@ -49,11 +57,21 @@ export default function SettingsPage() {
     loadRiders().then(setRiders).catch(() => {});
   }, []);
 
+  // A new outlet starts with Glovo, Rider Fee and Promo, copied from an existing outlet when it has them.
+  const standardDeductions = (): Commission[] =>
+    STANDARD_DEDUCTIONS.map(def => {
+      for (const b of branches) {
+        const found = (b.commissions || []).find(c => sameName(c.name, def.name));
+        if (found) return { ...found, enabled: autoOn(found) };
+      }
+      return { ...def };
+    });
+
   const openNewOutlet = () => {
     setEditingOutlet(null);
     setOutletName(''); setOutletAddress(''); setOutletPhone(''); setOutletTaxId('');
     setOutletLogoUrl(''); setOutletCoverUrl(''); setOutletIncomes(defaultIncomes());
-    setOutletIsMain(branches.length === 0); setOutletActive(true); setOutletCommissions([]);
+    setOutletIsMain(branches.length === 0); setOutletActive(true); setOutletCommissions(standardDeductions());
     setOutletDialogOpen(true);
   };
 
@@ -274,7 +292,7 @@ export default function SettingsPage() {
                 <CommissionEditor
                   title="Commissions & Deductions"
                   namePlaceholder="e.g. Glovo"
-                  description="Switched-on items are deducted automatically on every POS order and can be switched off per order. Names show on the POS cart."
+                  description="Glovo, Rider Fee and Promo come with every outlet. Switched-on items are deducted automatically on every POS order and can be switched off per order. Names show on the POS cart."
                   value={outletCommissions}
                   onChange={setOutletCommissions}
                 />
