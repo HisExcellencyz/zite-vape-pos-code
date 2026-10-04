@@ -46,11 +46,14 @@ export default createEndpoint({
 
     // Logo / cover photo / incomes aren't schema fields on Branches, so — like
     // businessSettings.customFields elsewhere in this app — they live in a small JSON blob.
+    // `deductionsSeeded` tells getBranches the standard deductions (Glovo, Rider Fee, Promo)
+    // have already been added, so a deduction removed in Settings is not added back.
     const branding = JSON.stringify({
       logoUrl: (input.logoUrl || '').trim(),
       coverPhotoUrl: (input.coverPhotoUrl || '').trim(),
       deliveryFee: compatFee,
       ...(incomes ? { incomes } : {}),
+      deductionsSeeded: true,
     });
 
     const record: Record<string, unknown> = {
