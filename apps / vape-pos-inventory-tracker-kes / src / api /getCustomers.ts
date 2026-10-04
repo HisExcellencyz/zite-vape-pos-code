@@ -1,80 +1,58 @@
 import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
+import { getArchivedLocations } from '../lib/customerLocations';
 
 export default createEndpoint({
-  description: 'List customers with search, sorting, and order/spend stats',
+  description: 'Get customer details with order history and previous (secondary) locations',
   authenticated: true,
-  inputSchema: z.object({
-    search: z.string().optional(),
-    offset: z.number().optional(),
-    limit: z.number().optional(),
-    sortBy: z.enum(['name', 'date', 'orders', 'value']).optional(),
-    sortDir: z.enum(['asc', 'desc']).optional(),
+  inputSchema: z.object({ customerId: z.string() }),
+  outputSchema: z.object({
+    customer: z.any(),
+    orderCount: z.number(),
+    totalSpent: z.number(),
+    orders: z.array(z.any()),
+    previousLocations: z.array(z.any()),
   }),
-  outputSchema: z.object({ customers: z.array(z.any()), hasMore: z.boolean() }),
   execute: async ({ input }) => {
-    const { records, hasMore } = await zite.customers.findAll({
-      limit: input.limit || 2000,
-      offset: input.offset || 0,
-    });
+    const customer = await zite.customers.findOne({ id: input.customerId });
+    if (!customer) throw new Error('Customer not found');
 
-    let filtered = records;
-    if (input.search) {
-      const s = input.search.toLowerCase();
-      filtered = records.filter(c =>
-        (c.customerName || '').toLowerCase().includes(s) ||
-        (c.phoneNumber || '').toLowerCase().includes(s)
-      );
-    }
-
-    // Order count + total spent per customer, used both for display and for sorting.
-    const statsResult = await zite.sql({
+    const stats = await zite.sql({
       query: `
-        SELECT l."customersId" AS "customerId",
-               COUNT(DISTINCT s.id) AS "orderCount",
+        SELECT COUNT(DISTINCT s.id) AS "orderCount",
                COALESCE(SUM(s."total"), 0) AS "totalSpent"
-        FROM "CustomersSales" l
-        JOIN "Sales" s ON s.id = l."salesId"
-        WHERE s."status" = 'Completed'
-        GROUP BY l."customersId"
+        FROM "Sales" s
+        JOIN "CustomersSales" l ON l."salesId" = s.id
+        WHERE l."customersId" = $1 AND s."status" = 'Completed'
       `,
+      params: [input.customerId],
     });
-    const statsMap = new Map<string, { orderCount: number; totalSpent: number }>();
-    for (const row of statsResult.rows) {
-      statsMap.set(String(row.customerId), {
-        orderCount: Number(row.orderCount || 0),
-        totalSpent: Number(row.totalSpent || 0),
-      });
-    }
 
-    const withStats = filtered.map(c => ({
-      ...c,
-      orderCount: statsMap.get(c.id)?.orderCount || 0,
-      totalSpent: statsMap.get(c.id)?.totalSpent || 0,
-    }));
+    const orders = await zite.sql({
+      query: `
+        SELECT s.id, s."saleDate", s."total", s."status", s."paymentMethod"
+        FROM "Sales" s
+        JOIN "CustomersSales" l ON l."salesId" = s.id
+        WHERE l."customersId" = $1
+        ORDER BY s."saleDate" DESC
+        LIMIT 50
+      `,
+      params: [input.customerId],
+    });
 
-    const dir = input.sortDir === 'desc' ? -1 : 1;
-    switch (input.sortBy) {
-      case 'name':
-        withStats.sort((a, b) => dir * (a.customerName || '').localeCompare(b.customerName || ''));
-        break;
-      case 'orders':
-        withStats.sort((a, b) => dir * ((a.orderCount || 0) - (b.orderCount || 0)));
-        break;
-      case 'value':
-        withStats.sort((a, b) => dir * ((a.totalSpent || 0) - (b.totalSpent || 0)));
-        break;
-      case 'date':
-        // Customers don't carry an explicit "date added" field, but findAll()
-        // returns them in the order they were created (oldest first). So
-        // ascending keeps that natural order and descending just reverses it.
-        if (input.sortDir === 'desc') withStats.reverse();
-        break;
-      default:
-        break;
-    }
-
-    return { customers: withStats, hasMore };
+    return {
+      customer,
+      orderCount: Number(stats.rows[0]?.orderCount ?? 0),
+      totalSpent: Number(stats.rows[0]?.totalSpent ?? 0),
+      orders: orders.rows.map(r => ({
+        id: String(r.id),
+        saleDate: r.saleDate ? String(r.saleDate) : null,
+        total: Number(r.total || 0),
+        status: String(r.status || ''),
+        paymentMethod: String(r.paymentMethod || ''),
+      })),
+      previousLocations: await getArchivedLocations(input.customerId),
+    };
   },
 });
