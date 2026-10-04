@@ -2,8 +2,15 @@ import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
 
+const itemSchema = z.object({
+  name: z.string(),
+  type: z.enum(['percent', 'fixed']),
+  value: z.number(),
+  enabled: z.boolean().optional(),
+});
+
 export default createEndpoint({
-  description: 'Create or update an outlet/branch, including its own logo, cover photo and delivery fee',
+  description: 'Create or update an outlet/branch, including its own logo, cover photo, incomes & revenues (first = delivery fee) and deductions',
   authenticated: true,
   inputSchema: z.object({
     id: z.string().optional(),
@@ -18,16 +25,32 @@ export default createEndpoint({
     plusCode: z.string().optional(),
     coordinates: z.string().optional(),
     deliveryFee: z.number().min(0).optional(),
-    commissions: z.array(z.object({ name: z.string(), type: z.enum(['percent', 'fixed']), value: z.number() })).optional(),
+    incomes: z.array(itemSchema).optional(),
+    commissions: z.array(itemSchema).optional(),
   }),
   outputSchema: z.object({ success: z.boolean(), branch: z.any() }),
   execute: async ({ input }) => {
-    // Logo / cover photo / delivery fee aren't schema fields on Branches, so — like
+    // If the caller didn't send incomes, keep the ones already stored for this outlet.
+    let incomes: any[] | undefined = input.incomes?.filter(c => c.name.trim()).map(c => ({ ...c, name: c.name.trim() }));
+    if (!incomes && input.id) {
+      const existing = await zite.branches.findOne({ id: input.id });
+      try {
+        const old = existing?.customFields ? JSON.parse(existing.customFields) : {};
+        if (Array.isArray(old.incomes)) incomes = old.incomes;
+      } catch {}
+    }
+
+    // The first income is the Delivery Fee; its fixed amount is also kept in `deliveryFee` for older code.
+    const first = incomes?.[0];
+    const compatFee = first && first.type === 'fixed' ? first.value : (input.deliveryFee ?? 199);
+
+    // Logo / cover photo / incomes aren't schema fields on Branches, so — like
     // businessSettings.customFields elsewhere in this app — they live in a small JSON blob.
     const branding = JSON.stringify({
       logoUrl: (input.logoUrl || '').trim(),
       coverPhotoUrl: (input.coverPhotoUrl || '').trim(),
-      deliveryFee: input.deliveryFee ?? 199,
+      deliveryFee: compatFee,
+      ...(incomes ? { incomes } : {}),
     });
 
     const record: Record<string, unknown> = {
