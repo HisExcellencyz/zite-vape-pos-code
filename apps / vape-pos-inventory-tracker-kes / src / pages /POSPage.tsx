@@ -19,7 +19,7 @@ import { useBranch, commissionAmount } from '../hooks/useBranch';
 import SummaryTiles from '../components/SummaryTiles';
 import DateRangeFilter, { Range, inRange } from '../components/DateRangeFilter';
 import { isCashPayment } from '../lib/payments';
-import { Riders, RiderType, RIDER_LABELS, DEFAULT_DELIVERY_FEE, loadRiders } from '../lib/delivery';
+import { Riders, RiderType, RIDER_LABELS, DEFAULT_DELIVERY_FEE, DEFAULT_RIDER_FEE, loadRiders } from '../lib/delivery';
 
 interface Product {
   id: string;
@@ -62,6 +62,8 @@ interface HeldOrder {
   rider: SelectedRider | null;
   feeOn: boolean;
   feeAmount: string;
+  riderFeeOn?: boolean;
+  riderFeeAmount?: string;
   discountValue: string;
   discountType: DiscountType;
   routePoints: any[];
@@ -83,6 +85,14 @@ const heldTotals = (h: HeldOrder) => {
   const fee = h.feeOn ? Math.max(0, Number(h.feeAmount) || 0) : 0;
   return { sub, discount, total, fee, payable: total + fee };
 };
+
+/** The rider fee (KES) of a held order. Older held orders without one use the default. */
+const heldRiderFee = (h: HeldOrder) =>
+  h.riderFeeOn === false ? 0 : Math.max(0, Number(h.riderFeeAmount ?? DEFAULT_RIDER_FEE) || 0);
+
+/** The rider fee is recorded as a deduction on the sale (so it counts as an expense). */
+const withRiderFee = (list: { name: string; amount: number }[], fee: number) =>
+  fee > 0 ? [...list, { name: 'Rider fee', amount: fee }] : list;
 
 /** Splits a list of route points into the text fields stored on a sale. */
 const routeFields = (pts: any[]) => {
@@ -149,6 +159,12 @@ export default function POSPage() {
   useEffect(() => { setFeeAmount(String(outletFee)); setFeeOn(true); }, [currentBranch?.id, outletFee]);
   const deliveryFee = feeOn ? Math.max(0, Number(feeAmount) || 0) : 0;
 
+  // Rider fee: same tile design as the delivery fee. The default comes from DEFAULT_RIDER_FEE
+  // (lib/delivery.ts) and can be changed on each order. It is recorded as a deduction on the sale.
+  const [riderFeeOn, setRiderFeeOn] = useState(true);
+  const [riderFeeAmount, setRiderFeeAmount] = useState(String(DEFAULT_RIDER_FEE));
+  const riderFee = riderFeeOn ? Math.max(0, Number(riderFeeAmount) || 0) : 0;
+
   // Discount on the order, either a KES amount or a percentage of the subtotal.
   const [discountValue, setDiscountValue] = useState('');
   const [discountType, setDiscountType] = useState<DiscountType>('KES');
@@ -176,6 +192,7 @@ export default function POSPage() {
   };
 
   const [showDeliveryMap, setShowDeliveryMap] = useState(false);
+  const [showMergeDialog, setShowMergeDialog] = useState(false);
   const [routePoints, setRoutePoints] = useState<any[]>([]);
   const [distanceKm, setDistanceKm] = useState(0);
   // Items ticked as picked up, per route point id (supplier pick-up pins only).
@@ -274,6 +291,8 @@ export default function POSPage() {
     setRider(null);
     setFeeOn(true);
     setFeeAmount(String(outletFee));
+    setRiderFeeOn(true);
+    setRiderFeeAmount(String(DEFAULT_RIDER_FEE));
     setDiscountValue('');
     setDiscountType('KES');
     setRoutePoints([]);
@@ -285,7 +304,7 @@ export default function POSPage() {
   // ── Hold / resume / delete ──
   const handleHold = async () => {
     if (cart.length === 0) return toast.error('Cart is empty');
-    if (mergedIds.length > 0) return toast.error('Un-merge the pending orders (Plan Route) before putting this order on hold');
+    if (mergedIds.length > 0) return toast.error('Unmerge the pending orders before putting this order on hold');
     setHolding(true);
     try {
       const order = {
@@ -303,6 +322,8 @@ export default function POSPage() {
         rider,
         feeOn,
         feeAmount,
+        riderFeeOn,
+        riderFeeAmount,
         discountValue,
         discountType,
         routePoints,
@@ -339,6 +360,8 @@ export default function POSPage() {
       setRider(h.rider || null);
       setFeeOn(h.feeOn !== false);
       setFeeAmount(h.feeAmount ?? String(outletFee));
+      setRiderFeeOn(h.riderFeeOn !== false);
+      setRiderFeeAmount(h.riderFeeAmount ?? String(DEFAULT_RIDER_FEE));
       setDiscountValue(h.discountValue || '');
       setDiscountType(h.discountType || 'KES');
       setRoutePoints(h.routePoints || []);
@@ -385,6 +408,13 @@ export default function POSPage() {
     });
   };
 
+  // Unmerges every merged pending order straight from the cart (no need to reopen Plan Route).
+  const unmergeAll = () => {
+    setMergedIds([]);
+    setRoutePoints(pts => pts.filter(p => !isMergedPoint(p)));
+    toast.success('Pending orders unmerged');
+  };
+
   const handleCheckout = async () => {
     if (cart.length === 0) return toast.error('Cart is empty');
     setProcessing(true);
@@ -416,7 +446,7 @@ export default function POSPage() {
         branchId: currentBranch?.id,
         ...rf,
         deliveryDistanceKm: distanceKm || undefined,
-        deductions: appliedDeductions.map(d => ({ name: d.name, amount: commissionAmount(d, total) })),
+        deductions: withRiderFee(appliedDeductions.map(d => ({ name: d.name, amount: commissionAmount(d, total) })), riderFee),
         deliveryFee,
         riderType: rider?.type,
         riderName: rider?.name,
@@ -436,9 +466,12 @@ export default function POSPage() {
             discount: t.discount,
             branchId: currentBranch?.id,
             ...routeFields(h.routePoints || []),
-            deductions: outletDeductions
-              .filter(d => (h.selectedDeductions || []).includes(d.name))
-              .map(d => ({ name: d.name, amount: commissionAmount(d, t.total) })),
+            deductions: withRiderFee(
+              outletDeductions
+                .filter(d => (h.selectedDeductions || []).includes(d.name))
+                .map(d => ({ name: d.name, amount: commissionAmount(d, t.total) })),
+              heldRiderFee(h),
+            ),
             deliveryFee: t.fee,
             riderType: rider?.type,
             riderName: rider?.name,
@@ -646,7 +679,7 @@ export default function POSPage() {
       </div>
 
       {/* Right: Cart */}
-      <div className="w-96 shrink-0 flex flex-col bg-card border border-border rounded-xl">
+      <div className="w-96 shrink-0 flex flex-col min-h-0 bg-card border border-border rounded-xl">
         <div className="p-4 border-b border-border">
           {/* Cart / Pending Orders tabs */}
           <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-1">
@@ -695,7 +728,7 @@ export default function POSPage() {
         </div>
 
         {cartTab === 'pending' ? (
-          <div className="flex-1 overflow-y-auto p-4 space-y-2">
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-2">
             {heldOrders.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground">
                 <Clock className="w-10 h-10 mx-auto mb-2 opacity-30" />
@@ -732,7 +765,7 @@ export default function POSPage() {
           </div>
         ) : (
           <>
-            <div className="flex-1 overflow-y-auto p-4 space-y-2">
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-2">
               {cart.length === 0 ? (
                 <div className="text-center py-12 text-muted-foreground">
                   <Receipt className="w-10 h-10 mx-auto mb-2 opacity-30" />
@@ -755,159 +788,202 @@ export default function POSPage() {
               ))}
             </div>
 
-            <div className="border-t border-border p-4 space-y-3 max-h-[60vh] overflow-y-auto">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Subtotal</span>
-                <span className="text-foreground">{fmt(subtotal)}</span>
-              </div>
-              {discountAmount > 0 && (
+            <div className="border-t border-border flex flex-col shrink-0">
+              {/* Scrollable options */}
+              <div className="p-4 pb-3 space-y-3 max-h-[45vh] overflow-y-auto">
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Discount{discountType === '%' ? ` (${Math.min(Number(discountValue) || 0, 100)}%)` : ''}</span>
-                  <span className="text-sky-400">-{fmt(discountAmount)}</span>
+                  <span className="text-muted-foreground">Subtotal</span>
+                  <span className="text-foreground">{fmt(subtotal)}</span>
                 </div>
-              )}
-              {deliveryFee > 0 && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Delivery fee</span>
-                  <span className="text-foreground">{fmt(deliveryFee)}</span>
+                {discountAmount > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Discount{discountType === '%' ? ` (${Math.min(Number(discountValue) || 0, 100)}%)` : ''}</span>
+                    <span className="text-sky-400">-{fmt(discountAmount)}</span>
+                  </div>
+                )}
+                {deliveryFee > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Delivery fee</span>
+                    <span className="text-foreground">{fmt(deliveryFee)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-lg font-bold">
+                  <span className="text-foreground">Total</span>
+                  <span className="text-primary">{fmt(payable)}</span>
                 </div>
-              )}
-              <div className="flex justify-between text-lg font-bold">
-                <span className="text-foreground">Total</span>
-                <span className="text-primary">{fmt(payable)}</span>
-              </div>
 
-              {/* Payment method */}
-              <div className="grid grid-cols-2 gap-1.5">
-                {['Platform Pay', 'Cash/M-PESA'].map(m => (
-                  <button key={m} type="button" onClick={() => setPaymentMethod(m)}
-                    className={`h-7 rounded-md border text-[11px] font-medium transition-all ${paymentMethod === m ? 'border-sky-500 bg-sky-500 text-white' : 'border-border text-muted-foreground hover:border-sky-500/60'}`}>
-                    {m}
-                  </button>
-                ))}
-              </div>
-
-              {/* Delivery fee (tap the label to switch on/off, edit the KES value) and Discount (KES or %) */}
-              <div className="grid grid-cols-2 gap-1.5">
-                <div className={`h-7 rounded-md border flex items-center overflow-hidden transition-all ${feeOn ? 'border-amber-500 bg-amber-500 text-white' : 'border-border text-muted-foreground hover:border-amber-500/60'}`}>
-                  <button
-                    type="button"
-                    onClick={() => setFeeOn(!feeOn)}
-                    title="Tap to switch the delivery fee on or off"
-                    className="flex-1 min-w-0 h-full pl-2 text-left text-[11px] font-medium truncate"
-                  >
-                    Delivery KES
-                  </button>
-                  <input
-                    type="number"
-                    min={0}
-                    value={feeOn ? feeAmount : '0'}
-                    disabled={!feeOn}
-                    onChange={e => setFeeAmount(e.target.value)}
-                    title="Delivery fee in KES"
-                    className={`h-5 w-14 mr-1 rounded px-1 text-right text-[11px] outline-none ${feeOn ? 'bg-white/25 text-white' : 'bg-transparent'}`}
-                  />
+                {/* Payment method */}
+                <div className="grid grid-cols-2 gap-1.5">
+                  {['Platform Pay', 'Cash/M-PESA'].map(m => (
+                    <button key={m} type="button" onClick={() => setPaymentMethod(m)}
+                      className={`h-7 rounded-md border text-[11px] font-medium transition-all ${paymentMethod === m ? 'border-sky-500 bg-sky-500 text-white' : 'border-border text-muted-foreground hover:border-sky-500/60'}`}>
+                      {m}
+                    </button>
+                  ))}
                 </div>
-                <div className={`h-7 rounded-md border flex items-center overflow-hidden transition-all ${discountAmount > 0 ? 'border-sky-500 bg-sky-500/10' : 'border-border'}`}>
+
+                {/* Delivery fee and Rider fee (tap the label to switch on/off, edit the KES value) */}
+                <div className="grid grid-cols-2 gap-1.5">
+                  <div className={`h-7 rounded-md border flex items-center overflow-hidden transition-all ${feeOn ? 'border-amber-500 bg-amber-500 text-white' : 'border-border text-muted-foreground hover:border-amber-500/60'}`}>
+                    <button
+                      type="button"
+                      onClick={() => setFeeOn(!feeOn)}
+                      title="Tap to switch the delivery fee on or off"
+                      className="flex-1 min-w-0 h-full pl-2 text-left text-[11px] font-medium truncate"
+                    >
+                      Delivery KES
+                    </button>
+                    <input
+                      type="number"
+                      min={0}
+                      value={feeOn ? feeAmount : '0'}
+                      disabled={!feeOn}
+                      onChange={e => setFeeAmount(e.target.value)}
+                      title="Delivery fee in KES"
+                      className={`h-5 w-14 mr-1 rounded px-1 text-right text-[11px] outline-none ${feeOn ? 'bg-white/25 text-white' : 'bg-transparent'}`}
+                    />
+                  </div>
+                  <div className={`h-7 rounded-md border flex items-center overflow-hidden transition-all ${riderFeeOn ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-border text-muted-foreground hover:border-emerald-500/60'}`}>
+                    <button
+                      type="button"
+                      onClick={() => setRiderFeeOn(!riderFeeOn)}
+                      title="Tap to switch the rider fee on or off"
+                      className="flex-1 min-w-0 h-full pl-2 text-left text-[11px] font-medium truncate"
+                    >
+                      Rider Fee KES
+                    </button>
+                    <input
+                      type="number"
+                      min={0}
+                      value={riderFeeOn ? riderFeeAmount : '0'}
+                      disabled={!riderFeeOn}
+                      onChange={e => setRiderFeeAmount(e.target.value)}
+                      title="Rider fee in KES (recorded as a deduction on this sale)"
+                      className={`h-5 w-14 mr-1 rounded px-1 text-right text-[11px] outline-none ${riderFeeOn ? 'bg-white/25 text-white' : 'bg-transparent'}`}
+                    />
+                  </div>
+                </div>
+
+                {/* Discount: permanent label, amount in KES or % */}
+                <div className={`h-7 rounded-md border flex items-center overflow-hidden transition-all ${discountAmount > 0 ? 'border-sky-500 bg-sky-500 text-white' : 'border-border text-muted-foreground hover:border-sky-500/60'}`}>
+                  <span className="flex-1 min-w-0 pl-2 text-[11px] font-medium truncate">Discount</span>
                   <input
                     type="number"
                     min={0}
                     value={discountValue}
-                    placeholder="Discount"
+                    placeholder="0"
                     onChange={e => setDiscountValue(e.target.value)}
-                    className="flex-1 min-w-0 h-full bg-transparent px-2 text-[11px] outline-none placeholder:text-muted-foreground"
+                    title="Discount amount"
+                    className={`h-5 w-16 mr-1 rounded px-1 text-right text-[11px] outline-none ${discountAmount > 0 ? 'bg-white/25 text-white placeholder:text-white/70' : 'bg-transparent text-foreground placeholder:text-muted-foreground'}`}
                   />
                   <button
                     type="button"
                     onClick={() => setDiscountType(t => (t === 'KES' ? '%' : 'KES'))}
                     title="Switch between KES and %"
-                    className="h-full px-2 border-l border-border text-[11px] font-semibold hover:bg-muted"
+                    className={`h-full px-2.5 border-l text-[11px] font-semibold ${discountAmount > 0 ? 'border-white/40 hover:bg-white/20' : 'border-border hover:bg-muted'}`}
                   >
                     {discountType}
                   </button>
                 </div>
-              </div>
 
-              {/* Outlet deductions: set up in Settings > Outlets, picked per order here */}
-              {outletDeductions.length > 0 && (
+                {/* Outlet deductions: set up in Settings > Outlets, picked per order here */}
+                {outletDeductions.length > 0 && (
+                  <div className="space-y-1.5">
+                    <p className="text-[11px] font-medium text-muted-foreground">Deductions (select all that apply)</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {outletDeductions.map(d => {
+                        const on = selectedDeductions.includes(d.name);
+                        return (
+                          <button key={d.name} type="button" onClick={() => toggleDeduction(d.name)}
+                            className={`h-7 px-2 rounded-md border text-[11px] font-medium transition-all ${on ? 'border-pink-500 bg-pink-500 text-white' : 'border-border text-muted-foreground hover:border-pink-500/60'}`}>
+                            {d.name} · {d.type === 'percent' ? `${d.value}%` : `KES ${d.value.toLocaleString()}`}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {(appliedDeductions.length > 0 || riderFee > 0) && (
+                  <p className="text-[11px] text-pink-400">
+                    Deductions on this order: {fmt(deductionsTotal + riderFee)}{riderFee > 0 ? ` (incl. rider fee ${fmt(riderFee)})` : ''}
+                  </p>
+                )}
+
+                {/* Delivery riders: managed in Settings > Delivery */}
                 <div className="space-y-1.5">
-                  <p className="text-[11px] font-medium text-muted-foreground">Deductions (select all that apply)</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {outletDeductions.map(d => {
-                      const on = selectedDeductions.includes(d.name);
+                  <p className="text-[11px] font-medium text-muted-foreground">Delivery rider (optional)</p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {(['threePl', 'own'] as RiderType[]).map(t => {
+                      const on = rider?.type === t;
+                      const Icon = t === 'threePl' ? Truck : Bike;
                       return (
-                        <button key={d.name} type="button" onClick={() => toggleDeduction(d.name)}
-                          className={`h-7 px-2 rounded-md border text-[11px] font-medium transition-all ${on ? 'border-pink-500 bg-pink-500 text-white' : 'border-border text-muted-foreground hover:border-pink-500/60'}`}>
-                          {d.name} · {d.type === 'percent' ? `${d.value}%` : `KES ${d.value.toLocaleString()}`}
+                        <button key={t} type="button" onClick={() => openRiderDialog(t)} title={RIDER_LABELS[t]}
+                          className={`h-7 px-2 rounded-md border text-[11px] font-medium transition-all flex items-center justify-center gap-1.5 min-w-0 ${on ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-border text-muted-foreground hover:border-emerald-500/60'}`}>
+                          <Icon className="w-3.5 h-3.5 shrink-0" />
+                          <span className="truncate">{on ? rider!.name : RIDER_LABELS[t]}</span>
                         </button>
                       );
                     })}
                   </div>
-                  {appliedDeductions.length > 0 && (
-                    <p className="text-[11px] text-pink-400">Deductions on this order: {fmt(deductionsTotal)}</p>
+                </div>
+
+                <div className="space-y-2 border-t border-border pt-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-medium text-muted-foreground flex items-center gap-1"><MapPin className="w-3 h-3" /> Delivery (optional)</p>
+                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setShowDeliveryMap(true)}>
+                      <Route className="w-3 h-3 mr-1" /> {routePoints.length > 0 ? `${routePoints.length} stops` : 'Plan Route'}
+                    </Button>
+                  </div>
+                  {routePoints.length > 0 && (
+                    <div className="bg-muted/50 rounded-lg p-2 space-y-1 max-h-40 overflow-y-auto">
+                      {routePoints.map((pt: any, i: number) => (
+                        <div key={pt.id} className="text-[10px] text-muted-foreground flex gap-1 items-start">
+                          <span className="font-bold text-foreground shrink-0">{i + 1}.</span>
+                          <span className="capitalize font-medium shrink-0" style={{ color: pt.tag === 'start' ? '#22c55e' : pt.tag === 'pickup' ? '#3b82f6' : pt.tag === 'dropoff' ? '#ef4444' : pt.tag === 'end' ? '#a855f7' : '#6b7280' }}>{pt.tag || 'pin'}</span>
+                          <span className="min-w-0 break-words whitespace-normal">{pt.label}</span>
+                        </div>
+                      ))}
+                      {distanceKm > 0 && <div className="text-xs font-semibold text-primary mt-1">Distance: {distanceKm.toFixed(2)} km</div>}
+                    </div>
                   )}
                 </div>
-              )}
-
-              {/* Delivery riders: managed in Settings > Delivery */}
-              <div className="space-y-1.5">
-                <p className="text-[11px] font-medium text-muted-foreground">Delivery rider (optional)</p>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {(['threePl', 'own'] as RiderType[]).map(t => {
-                    const on = rider?.type === t;
-                    const Icon = t === 'threePl' ? Truck : Bike;
-                    return (
-                      <button key={t} type="button" onClick={() => openRiderDialog(t)} title={RIDER_LABELS[t]}
-                        className={`h-7 px-2 rounded-md border text-[11px] font-medium transition-all flex items-center justify-center gap-1.5 min-w-0 ${on ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-border text-muted-foreground hover:border-emerald-500/60'}`}>
-                        <Icon className="w-3.5 h-3.5 shrink-0" />
-                        <span className="truncate">{on ? rider!.name : RIDER_LABELS[t]}</span>
-                      </button>
-                    );
-                  })}
-                </div>
               </div>
 
-              <div className="space-y-2 border-t border-border pt-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-medium text-muted-foreground flex items-center gap-1"><MapPin className="w-3 h-3" /> Delivery (optional)</p>
-                  <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setShowDeliveryMap(true)}>
-                    <Route className="w-3 h-3 mr-1" /> {routePoints.length > 0 ? `${routePoints.length} stops` : 'Plan Route'}
-                  </Button>
-                </div>
-                {routePoints.length > 0 && (
-                  <div className="bg-muted/50 rounded-lg p-2 space-y-1 max-h-40 overflow-y-auto">
-                    {routePoints.map((pt: any, i: number) => (
-                      <div key={pt.id} className="text-[10px] text-muted-foreground flex gap-1 items-start">
-                        <span className="font-bold text-foreground shrink-0">{i + 1}.</span>
-                        <span className="capitalize font-medium shrink-0" style={{ color: pt.tag === 'start' ? '#22c55e' : pt.tag === 'pickup' ? '#3b82f6' : pt.tag === 'dropoff' ? '#ef4444' : pt.tag === 'end' ? '#a855f7' : '#6b7280' }}>{pt.tag || 'pin'}</span>
-                        <span className="min-w-0 break-words whitespace-normal">{pt.label}</span>
-                      </div>
-                    ))}
-                    {distanceKm > 0 && <div className="text-xs font-semibold text-primary mt-1">Distance: {distanceKm.toFixed(2)} km</div>}
+              {/* Frozen footer: merged-orders tile and Hold / Checkout stay in view while the options above scroll */}
+              <div className="shrink-0 border-t border-border bg-card rounded-b-xl p-4 pt-3 space-y-2">
+                {mergeList.length > 0 && (
+                  <div className="flex items-center gap-2 rounded-md border border-emerald-500/60 bg-emerald-500/5 px-2 py-1">
+                    <Layers className="w-3 h-3 text-emerald-400 shrink-0" />
+                    <p className="flex-1 min-w-0 text-[11px] truncate" title="They are completed automatically with this checkout">
+                      <span className="font-medium text-emerald-400">{mergeList.length} merged</span>
+                      <span className="text-muted-foreground"> · +{fmt(mergedPayable)}</span>
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-6 px-2 text-[10px] border-emerald-500/70 hover:border-emerald-500"
+                      onClick={unmergeAll}
+                      title="Remove the merged pending orders from this checkout"
+                    >
+                      Unmerge
+                    </Button>
                   </div>
                 )}
-              </div>
-
-              {mergeList.length > 0 && (
-                <div className="rounded-md border border-emerald-500/60 bg-emerald-500/5 px-2.5 py-1.5 text-[11px] space-y-0.5">
-                  <p className="font-medium text-emerald-400 flex items-center gap-1"><Layers className="w-3 h-3" /> {mergeList.length} pending order{mergeList.length === 1 ? '' : 's'} merged</p>
-                  <p className="text-muted-foreground">They are completed automatically with this checkout ({fmt(mergedPayable)} more).</p>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    className="h-12 px-3 border-amber-400/80 hover:border-amber-400"
+                    onClick={handleHold}
+                    disabled={holding || processing || cart.length === 0}
+                    title="Put this order on hold"
+                  >
+                    <Pause className="w-4 h-4 mr-1" /> {holding ? '...' : 'Hold'}
+                  </Button>
+                  <Button className="flex-1 h-12 text-base bg-gradient-to-r from-primary to-secondary" onClick={handleCheckout} disabled={processing || cart.length === 0}>
+                    {processing ? 'Processing...' : `Checkout ${fmt(payable)}`}
+                  </Button>
                 </div>
-              )}
-
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  className="h-12 px-3 border-amber-400/80 hover:border-amber-400"
-                  onClick={handleHold}
-                  disabled={holding || processing || cart.length === 0}
-                  title="Put this order on hold"
-                >
-                  <Pause className="w-4 h-4 mr-1" /> {holding ? '...' : 'Hold'}
-                </Button>
-                <Button className="flex-1 h-12 text-base bg-gradient-to-r from-primary to-secondary" onClick={handleCheckout} disabled={processing || cart.length === 0}>
-                  {processing ? 'Processing...' : `Checkout ${fmt(payable)}`}
-                </Button>
               </div>
             </div>
           </>
@@ -994,16 +1070,47 @@ export default function POSPage() {
             <DialogTitle className="flex items-center gap-2"><Route className="w-5 h-5 text-primary" /> Plan Delivery Route</DialogTitle>
           </DialogHeader>
 
-          {/* Merge pending orders into this route */}
-          <div className="rounded-xl border border-border bg-card/60 p-3 space-y-2">
-            <p className="text-sm font-semibold flex items-center gap-1.5"><Layers className="w-4 h-4 text-emerald-400" /> Merge pending orders</p>
+          <DeliveryRouteMap
+            points={routePoints}
+            onPointsChange={setRoutePoints}
+            totalDistance={distanceKm}
+            onDistanceChange={setDistanceKm}
+            pickupItems={pickupItems}
+            pickupSelections={pickupSelections}
+            onPickupSelectionsChange={setPickupSelections}
+            extraActions={
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 text-xs border-emerald-500/70 hover:border-emerald-500"
+                onClick={() => setShowMergeDialog(true)}
+              >
+                <Layers className="w-3.5 h-3.5 mr-1.5 shrink-0 text-emerald-400" />
+                <span className="truncate">Merge Orders{mergeList.length > 0 ? ` (${mergeList.length})` : ''}</span>
+              </Button>
+            }
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setRoutePoints([]); setDistanceKm(0); setMergedIds([]); setPickupSelections({}); }}>Clear All</Button>
+            <Button onClick={() => setShowDeliveryMap(false)}>Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Merge pending orders into the delivery route */}
+      <Dialog open={showMergeDialog} onOpenChange={setShowMergeDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Layers className="w-5 h-5 text-emerald-400" /> Merge pending orders</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
             <p className="text-xs text-muted-foreground">
               Tick pending orders to add their drop-offs to this route. They are completed automatically when you press Checkout.
             </p>
             {heldOrders.length === 0 ? (
-              <p className="text-xs text-muted-foreground py-1">No pending orders to merge.</p>
+              <p className="text-xs text-muted-foreground py-4 text-center">No pending orders to merge.</p>
             ) : (
-              <div className="space-y-1.5 max-h-40 overflow-y-auto">
+              <div className="space-y-1.5 max-h-72 overflow-y-auto">
                 {heldOrders.map(h => {
                   const t = heldTotals(h);
                   const drops = (h.routePoints || []).filter((p: any) => p.tag === 'dropoff').length;
@@ -1023,19 +1130,9 @@ export default function POSPage() {
               </div>
             )}
           </div>
-
-          <DeliveryRouteMap
-            points={routePoints}
-            onPointsChange={setRoutePoints}
-            totalDistance={distanceKm}
-            onDistanceChange={setDistanceKm}
-            pickupItems={pickupItems}
-            pickupSelections={pickupSelections}
-            onPickupSelectionsChange={setPickupSelections}
-          />
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setRoutePoints([]); setDistanceKm(0); setMergedIds([]); setPickupSelections({}); }}>Clear All</Button>
-            <Button onClick={() => setShowDeliveryMap(false)}>Done</Button>
+            <Button variant="outline" onClick={unmergeAll} disabled={mergeList.length === 0}>Unmerge all</Button>
+            <Button onClick={() => setShowMergeDialog(false)}>Done</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
