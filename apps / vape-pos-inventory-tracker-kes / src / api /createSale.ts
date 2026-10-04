@@ -3,7 +3,7 @@ import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
 
 export default createEndpoint({
-  description: 'Create a POS sale with items. An optional delivery fee is recorded as income; an optional rider is noted on the sale.',
+  description: 'Create a POS sale with items. An optional delivery fee (and other incomes) is recorded as income; an optional rider is noted on the sale.',
   authenticated: true,
   inputSchema: z.object({
     items: z.array(z.object({
@@ -25,6 +25,7 @@ export default createEndpoint({
     deliveryDistanceKm: z.number().optional(),
     deductions: z.array(z.object({ name: z.string(), amount: z.number() })).optional(),
     deliveryFee: z.number().min(0).optional(),
+    extraIncomes: z.array(z.object({ name: z.string(), amount: z.number().min(0) })).optional(),
     riderType: z.enum(['threePl', 'own']).optional(),
     riderName: z.string().optional(),
   }),
@@ -106,6 +107,22 @@ export default createEndpoint({
           incomeDate: saleDate,
           description: `Delivery fee - Sale #${sale.saleNumber ?? ''}`.trim(),
           amount: input.deliveryFee,
+          branch: input.branchId || null,
+          notes: riderText || null,
+          createdBy: context.user.id,
+        },
+      });
+    }
+
+    // Any other incomes & revenues set up for the outlet (Settings > Outlets) are also recorded as Other Income,
+    // named after the income so they can be told apart.
+    for (const inc of input.extraIncomes || []) {
+      if (!(inc.amount > 0)) continue;
+      await zite.otherIncome.create({
+        record: {
+          incomeDate: saleDate,
+          description: `${inc.name} - Sale #${sale.saleNumber ?? ''}`.trim(),
+          amount: inc.amount,
           branch: input.branchId || null,
           notes: riderText || null,
           createdBy: context.user.id,
