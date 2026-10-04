@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
+import { fullPermissions, normalizePerms, isAdminRoleName } from '../lib/permissionAreas';
 
 /**
  * IMPORTANT: put the business owner's sign-in email here, e.g. ['owner@example.com'].
@@ -9,26 +10,15 @@ import { zite } from 'zitejs/db';
  */
 const OWNER_EMAILS: string[] = [];
 
-const AREAS = ['pos', 'customers', 'inventory', 'purchases', 'suppliers', 'expenses', 'reports', 'users', 'settings'];
-const ACTIONS = ['view', 'create', 'edit', 'delete', 'export', 'import', 'approve', 'backdate'];
-
-function fullPermissions() {
-  const p: Record<string, Record<string, boolean>> = {};
-  AREAS.forEach(a => {
-    p[a] = {};
-    ACTIONS.forEach(ac => { p[a][ac] = true; });
-  });
-  return p;
-}
-
 export default createEndpoint({
-  description: 'Get the current user permissions based on assigned role. Users with no role are "pending" until an admin assigns one.',
+  description: 'Get the current user permissions based on assigned role. Owner and Admin get every permission (including backdating). Users with no role are "pending" until an admin assigns one.',
   authenticated: true,
   inputSchema: z.object({}),
   outputSchema: z.object({
     permissions: z.any(),
     roleName: z.string(),
     pending: z.boolean().optional(),
+    canBackdate: z.boolean().optional(),
   }),
   execute: async ({ context }) => {
     const settings = await zite.businessSettings.findOne({});
@@ -70,18 +60,22 @@ export default createEndpoint({
       }
     }
 
-    if (isOwner) return { permissions: fullPermissions(), roleName: 'Owner', pending: false };
+    if (isOwner) return { permissions: fullPermissions(), roleName: 'Owner', pending: false, canBackdate: true };
 
     const roleId = cfg.userRoles[userId];
-    if (!roleId) return { permissions: {}, roleName: 'No role assigned', pending: true };
+    if (!roleId) return { permissions: {}, roleName: 'No role assigned', pending: true, canBackdate: false };
 
     const role = await zite.roles.findOne({ id: roleId });
-    if (!role) return { permissions: {}, roleName: 'No role assigned', pending: true };
+    if (!role) return { permissions: {}, roleName: 'No role assigned', pending: true, canBackdate: false };
 
-    try {
-      return { permissions: role.permissions ? JSON.parse(role.permissions) : {}, roleName: role.roleName || 'Unknown', pending: false };
-    } catch {
-      return { permissions: {}, roleName: role.roleName || 'Unknown', pending: false };
+    // Any role with "admin" in its name has every permission, same as the Owner.
+    if (isAdminRoleName(role.roleName)) {
+      return { permissions: fullPermissions(), roleName: role.roleName || 'Admin', pending: false, canBackdate: true };
     }
+
+    let raw: any = {};
+    try { raw = role.permissions ? JSON.parse(role.permissions) : {}; } catch {}
+    // normalizePerms lets roles saved before newer areas existed inherit the older area's permissions.
+    return { permissions: normalizePerms(raw), roleName: role.roleName || 'Unknown', pending: false, canBackdate: false };
   },
 });
