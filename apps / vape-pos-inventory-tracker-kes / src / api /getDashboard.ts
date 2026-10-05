@@ -15,6 +15,8 @@ export default createEndpoint({
     totalRevenue: z.number(),
     totalOtherIncome: z.number(),
     totalExpenses: z.number(),
+    totalDeductions: z.number(),
+    totalDiscounts: z.number(),
     totalPurchases: z.number(),
     profitLoss: z.number(),
     stockValue: z.number(),
@@ -67,8 +69,9 @@ export default createEndpoint({
     const salesResult = await zite.sql({
       query: `
         SELECT COUNT(DISTINCT s.id) AS "totalSales",
-               COALESCE(SUM(s."total"), 0) AS "totalRevenue",
-               COALESCE(SUM(s."deductions"), 0) AS "totalDeductions"
+               COALESCE(SUM(s."total" + COALESCE(s."discount", 0)), 0) AS "totalRevenue",
+               COALESCE(SUM(s."deductions"), 0) AS "totalDeductions",
+               COALESCE(SUM(s."discount"), 0) AS "totalDiscounts"
         FROM "Sales" s
         WHERE s."status" = 'Completed'${dateFilter}
       `,
@@ -218,7 +221,7 @@ export default createEndpoint({
     const revByDay = await zite.sql({
       query: `
         SELECT to_char(s."saleDate" AT TIME ZONE 'Africa/Nairobi', 'YYYY-MM-DD') AS date,
-               COALESCE(SUM(s."total"), 0) AS revenue
+               COALESCE(SUM(s."total" + COALESCE(s."discount", 0)), 0) AS revenue
         FROM "Sales" s
         WHERE s."status" = 'Completed'
           AND s."saleDate" IS NOT NULL
@@ -246,6 +249,7 @@ export default createEndpoint({
 
     const totalRevenue = Number(salesResult.rows[0]?.totalRevenue ?? 0);
     const totalDeductions = Number(salesResult.rows[0]?.totalDeductions ?? 0);
+    const totalDiscounts = Number(salesResult.rows[0]?.totalDiscounts ?? 0);
     const totalPurchases = Number(purchasesResult.rows[0]?.totalPurchases ?? 0);
     const totalExpenses = Number(expensesResult.rows[0]?.totalExpenses ?? 0);
     const totalOtherIncome = Number(incomeResult.rows[0]?.totalOtherIncome ?? 0);
@@ -273,10 +277,14 @@ export default createEndpoint({
       totalSales: Number(salesResult.rows[0]?.totalSales ?? 0),
       totalRevenue,
       totalOtherIncome,
-      totalExpenses: totalExpenses + totalPurchases,
+      // Expenses = purchases + other expenses + sale deductions + discounts given
+      totalExpenses: totalExpenses + totalPurchases + totalDeductions + totalDiscounts,
+      totalDeductions,
+      totalDiscounts,
       totalPurchases,
       // Profit = sales + other income - purchases - other expenses
-      profitLoss: totalRevenue + totalOtherIncome - totalPurchases - totalExpenses - totalDeductions,
+      // Sales are counted before discounts and the discounts are an expense, so profit is unchanged by how they are shown.
+      profitLoss: totalRevenue + totalOtherIncome - totalPurchases - totalExpenses - totalDeductions - totalDiscounts,
       stockValue: Number(stockResult.rows[0]?.stockValue ?? 0),
       topProducts: topProducts.rows.map(r => ({
         productName: String(r.productName ?? ''),
