@@ -1,19 +1,22 @@
 import { useState, useEffect } from 'react';
 import { useBranch } from '../hooks/useBranch';
-import { getSales, getIncome, exportCsv, importSales } from 'zitejs/api';
+import { getSales, getIncome, exportCsv, importSales, importEntries } from 'zitejs/api';
 import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
 import { Badge } from '@project/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@project/components/ui/tabs';
 import { Checkbox } from '@project/components/ui/checkbox';
-import { Download, Upload, Receipt, BadgePercent, TrendingUp, Truck } from 'lucide-react';
+import { Download, Upload, Receipt, BadgePercent, TrendingUp, Truck, Coins, Pencil, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { downloadCsv } from '../lib/exportHelper';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
 import ImportDialog from '../components/ImportDialog';
 import BulkDeductionsDialog from '../components/BulkDeductionsDialog';
+import BulkRevenuesDialog from '../components/BulkRevenuesDialog';
+import { EditEntryDialog, DeleteEntryDialog, EntryKind } from '../components/EntryDialogs';
+import { usePermissions } from '../hooks/usePermissions';
 import OtherIncomeDialog from '../components/OtherIncomeDialog';
 import { useTableControls, TableControls, SortTh, FieldDef } from '../components/TableControls';
 import DateRangeFilter, { Range, inRange } from '../components/DateRangeFilter';
@@ -69,6 +72,7 @@ const q = (v: unknown) => { const s = String(v ?? ''); return /[",\n]/.test(s) ?
 
 export default function IncomePage() {
   const { currentBranch } = useBranch();
+  const { can, canBackdate } = usePermissions();
   const [tab, setTab] = useState('sales');
   const [sales, setSales] = useState<Sale[]>([]);
   const [income, setIncome] = useState<Income[]>([]);
@@ -79,6 +83,9 @@ export default function IncomePage() {
   const [showIncome, setShowIncome] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkRevOpen, setBulkRevOpen] = useState(false);
+  const [editT, setEditT] = useState<{ kind: EntryKind; entry: any } | null>(null);
+  const [delT, setDelT] = useState<{ kind: EntryKind; entry: any } | null>(null);
   const [range, setRange] = useState<Range>({});
 
   const dated = sales.filter(x => inRange(range, x.saleDate));
@@ -126,9 +133,23 @@ export default function IncomePage() {
   };
 
   const runImport = async (rows: Record<string, string>[], adjustStock: boolean) => {
+    if (tab === 'other') {
+      const r = await importEntries({ kind: 'income', rows });
+      return { imported: r.imported, updated: r.updated, skipped: r.skipped, errors: r.errors };
+    }
     const res = await importSales({ rows, adjustStock });
-    return { imported: res.imported, skipped: res.skipped, errors: res.errors };
+    return { imported: res.imported, updated: res.updated, skipped: res.skipped, errors: res.errors };
   };
+
+  const canEdit = can('income', 'edit');
+  const canDelete = can('income', 'delete');
+  const rowActions = (kind: EntryKind, entry: any) => (canEdit || canDelete) ? (
+    <div className="flex justify-end gap-0.5">
+      {canEdit && <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Edit" onClick={() => setEditT({ kind, entry })}><Pencil className="w-3.5 h-3.5" /></Button>}
+      {canDelete && <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" title="Delete" onClick={() => setDelT({ kind, entry })}><Trash2 className="w-3.5 h-3.5" /></Button>}
+    </div>
+  ) : null;
+  const actionCols = canEdit || canDelete ? 1 : 0;
 
   const activeControls = (tab === 'sales' ? tcS : tab === 'delivery' ? tcF : tcO) as any;
 
@@ -142,12 +163,13 @@ export default function IncomePage() {
           <SortTh c={tc} k="description" className="text-left">Description</SortTh>
           {showRider && <SortTh c={tc} k="rider" className="text-left">Rider</SortTh>}
           <SortTh c={tc} k="amount" className="text-right">Amount</SortTh>
+          {actionCols > 0 && <th className="p-3 w-20" />}
         </tr></thead>
         <tbody>
           {loading ? (
-            [...Array(4)].map((_, i) => <tr key={i} className="border-b border-border">{[...Array(showRider ? 5 : 4)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}</tr>)
+            [...Array(4)].map((_, i) => <tr key={i} className="border-b border-border">{[...Array((showRider ? 5 : 4) + actionCols)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}</tr>)
           ) : tc.view.length === 0 ? (
-            <tr><td colSpan={showRider ? 5 : 4} className="text-center py-12 text-muted-foreground"><Icon className="w-10 h-10 mx-auto mb-2 opacity-40" />{empty}</td></tr>
+            <tr><td colSpan={(showRider ? 5 : 4) + actionCols} className="text-center py-12 text-muted-foreground"><Icon className="w-10 h-10 mx-auto mb-2 opacity-40" />{empty}</td></tr>
           ) : tc.view.map(i => (
             <tr key={i.id} className="border-b border-border hover:bg-muted/30">
               <td className="p-3 font-mono text-xs text-muted-foreground">#{i.incomeNumber}</td>
@@ -155,6 +177,7 @@ export default function IncomePage() {
               <td className="p-3 text-foreground break-words whitespace-normal max-w-md">{i.description}{!showRider && i.notes ? <span className="block text-xs text-muted-foreground">{i.notes}</span> : null}</td>
               {showRider && <td className="p-3 text-muted-foreground">{parseRider(i.notes) || '-'}</td>}
               <td className="p-3 text-right font-semibold text-emerald-400 whitespace-nowrap">{fmt(i.amount)}</td>
+              {actionCols > 0 && <td className="p-3">{rowActions('income', i)}</td>}
             </tr>
           ))}
         </tbody>
@@ -176,6 +199,7 @@ export default function IncomePage() {
             <span className="text-xs text-muted-foreground">Amount</span>
             <span className="text-lg font-bold text-emerald-400 break-words text-right">{fmt(i.amount)}</span>
           </div>
+          {actionCols > 0 && <div className="border-t border-border pt-2">{rowActions('income', i)}</div>}
         </CardContent></Card>
       ))}
     </div>
@@ -210,17 +234,22 @@ export default function IncomePage() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {tab === 'sales' && selected.length > 0 && (
-            <Button size="sm" variant="outline" className="border-sky-500 text-sky-400" onClick={() => setBulkOpen(true)}>
-              <BadgePercent className="w-4 h-4 mr-1" /> Deductions ({selected.length})
-            </Button>
+          {tab === 'sales' && selected.length > 0 && canEdit && (
+            <>
+              <Button size="sm" variant="outline" className="border-sky-500 text-sky-400" onClick={() => setBulkOpen(true)}>
+                <BadgePercent className="w-4 h-4 mr-1" /> Deductions ({selected.length})
+              </Button>
+              <Button size="sm" variant="outline" className="border-emerald-500 text-emerald-400" onClick={() => setBulkRevOpen(true)}>
+                <Coins className="w-4 h-4 mr-1" /> Revenues ({selected.length})
+              </Button>
+            </>
           )}
           <ViewToggle value={viewMode} onChange={setViewMode} />
-          <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExport}><Download className="w-4 h-4 mr-1" /> Export</Button>
-          {tab === 'sales' && (
+          {can('income', 'export') && <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExport}><Download className="w-4 h-4 mr-1" /> Export</Button>}
+          {can('income', 'import') && (tab === 'sales' || tab === 'other') && (
             <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10" onClick={() => setImportOpen(true)}><Upload className="w-4 h-4 mr-1" /> Import</Button>
           )}
-          {tab === 'other' && (
+          {tab === 'other' && can('income', 'create') && (
             <Button size="sm" onClick={() => setShowIncome(true)}><TrendingUp className="w-4 h-4 mr-1" /> Add Other Income</Button>
           )}
         </div>
@@ -270,18 +299,19 @@ export default function IncomePage() {
                         <SortTh c={tcS} k="deductions" className="text-right">Deductions</SortTh>
                         <SortTh c={tcS} k="rider" className="text-left">Rider</SortTh>
                         <SortTh c={tcS} k="status" className="text-center">Status</SortTh>
+                        {actionCols > 0 && <th className="p-3 w-20" />}
                       </tr>
                     </thead>
                     <tbody>
                       {loading ? (
                         [...Array(5)].map((_, i) => (
                           <tr key={i} className="border-b border-border">
-                            {[...Array(9)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}
+                            {[...Array(9 + actionCols)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}
                           </tr>
                         ))
                       ) : rows.length === 0 ? (
                         <tr>
-                          <td colSpan={9} className="text-center py-12 text-muted-foreground">
+                          <td colSpan={9 + actionCols} className="text-center py-12 text-muted-foreground">
                             <Receipt className="w-10 h-10 mx-auto mb-2 opacity-40" />
                             No sales yet. Create your first sale in POS or import a file.
                           </td>
@@ -299,6 +329,7 @@ export default function IncomePage() {
                           <td className="p-3 text-center">
                             <Badge variant="secondary" className={statusColors[s.status || ''] || ''}>{s.status}</Badge>
                           </td>
+                          {actionCols > 0 && <td className="p-3">{rowActions('sale', s)}</td>}
                         </tr>
                       ))}
                     </tbody>
@@ -348,6 +379,7 @@ export default function IncomePage() {
                       <span className="text-xs text-muted-foreground">Total</span>
                       <span className="text-lg font-bold text-primary break-words text-right">{fmt(s.total)}</span>
                     </div>
+                    {actionCols > 0 && <div className="border-t border-border pt-2">{rowActions('sale', s)}</div>}
                   </CardContent>
                 </Card>
               ))}
@@ -366,18 +398,29 @@ export default function IncomePage() {
 
       <OtherIncomeDialog open={showIncome} onOpenChange={setShowIncome} onSaved={() => { setTab('other'); load(); }} />
 
+      <BulkRevenuesDialog open={bulkRevOpen} onOpenChange={setBulkRevOpen} saleIds={selected} presets={currentBranch?.incomes || []} onDone={() => { setSelected([]); load(); }} />
+      <EditEntryDialog open={!!editT} onOpenChange={o => { if (!o) setEditT(null); }} kind={editT?.kind || 'income'} entry={editT?.entry || null} onSaved={load} />
+      <DeleteEntryDialog open={!!delT} onOpenChange={o => { if (!o) setDelT(null); }} kind={delT?.kind || 'income'} entry={delT?.entry || null} onDone={load} />
+
       <BulkDeductionsDialog open={bulkOpen} onOpenChange={setBulkOpen} saleIds={selected} presets={currentBranch?.commissions || []} onDone={() => { setSelected([]); load(); }} />
 
       <ImportDialog
         open={importOpen}
         onOpenChange={setImportOpen}
-        title="Import Sales"
-        template="sales"
-        optionLabel="Also deduct the imported quantities from current stock (leave off for old sales already reflected in your stock counts)"
-        description={<>
+        title={tab === 'other' ? 'Import Other Income' : 'Import Sales'}
+        template={tab === 'other' ? 'income' : 'sales'}
+        optionLabel={tab === 'other' ? undefined : 'Also deduct the imported quantities from current stock (leave off for old sales already reflected in your stock counts)'}
+        description={tab === 'other' ? <>
+          Upload a CSV with one row per income entry. Columns: <span className="font-medium text-foreground">Description, Amount, Notes</span>
+          {canBackdate && <>, plus <span className="font-medium text-foreground">Date</span> (YYYY-MM-DD or DD/MM/YYYY) for backdated entries, and <span className="font-medium text-foreground">Entry Number</span> to change the date (or details) of an existing entry</>}.
+          {!canBackdate && <> Entries are dated today. Only the Owner and Admin can import backdated or re-dated entries.</>} Press OK to start.
+        </> : <>
           Upload a CSV with one row per product line. Rows sharing the same <span className="font-medium text-foreground">Sale Ref</span> become one sale.
           Columns: <span className="font-medium text-foreground">Sale Ref, Date, Customer Name, Customer Phone, Payment Method, Product SKU, Quantity, Unit Price, Discount, Notes</span>.
-          <br />The <span className="font-medium text-foreground">Date</span> can be in the past (YYYY-MM-DD or DD/MM/YYYY, optionally with a time like 14:30); leave it empty to use today. Products are matched by SKU. Sale Refs already imported are skipped. Press OK to start.
+          <br />The <span className="font-medium text-foreground">Date</span> can be in the past (YYYY-MM-DD or DD/MM/YYYY, optionally with a time like 14:30); leave it empty to use today. Products are matched by SKU. Sale Refs already imported are skipped.
+          {canBackdate
+            ? <> To change the date of an existing sale, add a row with its <span className="font-medium text-foreground">Sale Number</span> and the new Date (its delivery fee / revenues move too).</>
+            : <> Only the Owner and Admin can import backdated sales or change sale dates; your file must be dated today (leave Date empty).</>} Press OK to start.
         </>}
         onImport={runImport}
         onDone={load}
