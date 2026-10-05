@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getSuppliers, saveSupplier, deleteRecord, exportCsv, importCsv, bulkDeleteRecords, getSupplierDetails, recordDeposit, manageSupplierBills, getAddresses, saveAddress } from 'zitejs/api';
+import { getSuppliers, saveSupplier, deleteRecord, exportCsv, importCsv, bulkDeleteRecords, getSupplierDetails, recordDeposit, manageSupplierBills, getAddresses, saveAddress, syncSupplierAddresses } from 'zitejs/api';
 import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
@@ -16,6 +16,7 @@ import { downloadCsv } from '../lib/exportHelper';
 import LocationPickerDialog from '../components/LocationPickerDialog';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
 import ImportDialog from '../components/ImportDialog';
+import { usePermissions } from '../hooks/usePermissions';
 
 interface Supplier {
   id: string;
@@ -48,6 +49,7 @@ const fmt = (n?: number) => `KES ${(n || 0).toLocaleString()}`;
 const dateTxt = (d?: string | null) => { try { return d ? format(new Date(d), 'dd MMM yyyy') : '-'; } catch { return '-'; } };
 
 export default function SuppliersPage() {
+  const { can } = usePermissions();
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -98,6 +100,9 @@ export default function SuppliersPage() {
   };
 
   useEffect(() => { load(); }, [search]);
+
+  // Every supplier also has a Supplier-type location on the Addresses page: back-fill older ones once.
+  useEffect(() => { syncSupplierAddresses({}).then(r => { if (r.created > 0) load(); }).catch(() => {}); }, []);
 
   const refreshAcct = async (id: string) => {
     setAcctLoading(true);
@@ -285,8 +290,8 @@ export default function SuppliersPage() {
   const renderActions = (s: Supplier) => (
     <div className="flex justify-end gap-1">
       <Button variant="ghost" size="sm" title="Account: deposits, bills & locations" onClick={() => openAccount(s)}><Wallet className="w-3.5 h-3.5" /></Button>
-      <Button variant="ghost" size="sm" onClick={() => openEdit(s)}><Pencil className="w-3.5 h-3.5" /></Button>
-      <AlertDialog>
+      {can('suppliers', 'edit') && <Button variant="ghost" size="sm" onClick={() => openEdit(s)}><Pencil className="w-3.5 h-3.5" /></Button>}
+      {can('suppliers', 'delete') && <AlertDialog>
         <AlertDialogTrigger asChild><Button variant="ghost" size="sm" className="text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button></AlertDialogTrigger>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -298,7 +303,7 @@ export default function SuppliersPage() {
             <AlertDialogAction onClick={() => handleDelete(s.id)} className="bg-destructive">Delete</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
-      </AlertDialog>
+      </AlertDialog>}
     </div>
   );
 
@@ -314,7 +319,7 @@ export default function SuppliersPage() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <ViewToggle value={viewMode} onChange={setViewMode} />
-          {selectedIds.size > 0 && (
+          {selectedIds.size > 0 && can('suppliers', 'delete') && (
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button variant="outline" size="sm" className="border-destructive text-destructive hover:bg-destructive/10">
@@ -333,9 +338,9 @@ export default function SuppliersPage() {
               </AlertDialogContent>
             </AlertDialog>
           )}
-          <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExport}><Download className="w-4 h-4 mr-1" /> Export</Button>
-          <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10" onClick={() => setImportOpen(true)}><Upload className="w-4 h-4 mr-1" /> Import</Button>
-          <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" /> Add Supplier</Button>
+          {can('suppliers', 'export') && <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExport}><Download className="w-4 h-4 mr-1" /> Export</Button>}
+          {can('suppliers', 'import') && <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10" onClick={() => setImportOpen(true)}><Upload className="w-4 h-4 mr-1" /> Import</Button>}
+          {can('suppliers', 'create') && <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" /> Add Supplier</Button>}
         </div>
       </div>
 
@@ -499,11 +504,11 @@ export default function SuppliersPage() {
                   <p className="text-lg font-bold text-pink-500">{fmt(acctPending)}</p>
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2">
+              {can('suppliers', 'edit') && <div className="flex flex-wrap gap-2">
                 <Button size="sm" onClick={() => setDepositOpen(true)}><Plus className="w-4 h-4 mr-1" /> Add Deposit</Button>
                 <Button size="sm" variant="outline" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={() => setBillOpen(true)}><Receipt className="w-4 h-4 mr-1" /> Add Bill</Button>
                 <Button size="sm" variant="outline" onClick={() => setLocOpen(true)}><MapPin className="w-4 h-4 mr-1" /> Add Location</Button>
-              </div>
+              </div>}
 
               <Tabs value={acctTab} onValueChange={setAcctTab}>
                 <TabsList className="bg-muted">
