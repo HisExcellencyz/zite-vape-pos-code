@@ -7,6 +7,7 @@ import { Label } from '@project/components/ui/label';
 import { DatePicker } from '@project/components/ui/date-picker';
 import { toast } from 'sonner';
 import { useBranch } from '../hooks/useBranch';
+import { usePermissions } from '../hooks/usePermissions';
 
 interface Props {
   open: boolean;
@@ -26,6 +27,7 @@ export default function OtherIncomeDialog({ open, onOpenChange, onSaved }: Props
   const [date, setDate] = useState<Date | undefined>(new Date());
   const [saving, setSaving] = useState(false);
   const { currentBranch } = useBranch();
+  const { canBackdate } = usePermissions();
 
   useEffect(() => {
     if (open) {
@@ -38,7 +40,7 @@ export default function OtherIncomeDialog({ open, onOpenChange, onSaved }: Props
     if (!amount || Number(amount) <= 0) return toast.error('Enter a valid amount');
     setSaving(true);
     try {
-      let when = date || new Date();
+      let when = canBackdate ? (date || new Date()) : new Date();
       if (!isToday(when)) {
         when = new Date(when);
         when.setHours(12, 0, 0, 0); // backdated entries: keep the chosen calendar day
@@ -79,10 +81,12 @@ export default function OtherIncomeDialog({ open, onOpenChange, onSaved }: Props
               <Label>Amount (KES) *</Label>
               <Input type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" />
             </div>
-            <div>
-              <Label>Date</Label>
-              <DatePicker value={date} onChange={setDate} />
-            </div>
+            {canBackdate && (
+              <div>
+                <Label>Date</Label>
+                <DatePicker value={date} onChange={setDate} />
+              </div>
+            )}
           </div>
           <div>
             <Label>Notes</Label>
