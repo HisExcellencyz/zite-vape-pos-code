@@ -21,6 +21,7 @@ import { getInventoryValuation, GetInventoryValuationOutputType } from 'zitejs/a
 import { useTableControls, TableControls, SortTh, FieldDef } from '../components/TableControls';
 import DateRangeFilter, { Range, eatBounds } from '../components/DateRangeFilter';
 import SummaryTiles from '../components/SummaryTiles';
+import { usePermissions } from '../hooks/usePermissions';
 
 interface Product {
   id: string;
@@ -59,6 +60,7 @@ const FIELDS: FieldDef<any>[] = [
 ];
 
 export default function InventoryPage() {
+  const { can } = usePermissions();
   const { currentBranch } = useBranch();
   const [range, setRange] = useState<Range>({});
   const [valuation, setValuation] = useState<GetInventoryValuationOutputType | null>(null);
@@ -261,8 +263,8 @@ export default function InventoryPage() {
 
   const renderActions = (p: Product) => (
     <div className="flex justify-end gap-1">
-      <Button variant="ghost" size="sm" onClick={() => openEdit(p)}><Pencil className="w-3.5 h-3.5" /></Button>
-      <AlertDialog>
+      {can('inventory', 'edit') && <Button variant="ghost" size="sm" onClick={() => openEdit(p)}><Pencil className="w-3.5 h-3.5" /></Button>}
+      {can('inventory', 'delete') && <AlertDialog>
         <AlertDialogTrigger asChild><Button variant="ghost" size="sm" className="text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button></AlertDialogTrigger>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -274,7 +276,7 @@ export default function InventoryPage() {
             <AlertDialogAction onClick={() => handleDelete(p.id)} className="bg-destructive">Delete</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
-      </AlertDialog>
+      </AlertDialog>}
     </div>
   );
 
@@ -296,15 +298,15 @@ export default function InventoryPage() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <ViewToggle value={viewMode} onChange={setViewMode} />
-          {selectedIds.size > 0 && (
+          {selectedIds.size > 0 && can('inventory', 'edit') && (
             <Button variant="outline" size="sm" onClick={() => setShowBulk(true)}>
               <CheckSquare className="w-4 h-4 mr-1" /> Bulk Actions ({selectedIds.size})
             </Button>
           )}
-          <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExport}><Download className="w-4 h-4 mr-1" /> Export</Button>
-          <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10" onClick={() => setImportOpen(true)}><Upload className="w-4 h-4 mr-1" /> Import</Button>
-          <Button asChild variant="outline" size="sm"><Link to="/categories"><FolderTree className="w-4 h-4 mr-1" /> Categories</Link></Button>
-          <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" /> Add Product</Button>
+          {can('inventory', 'export') && <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExport}><Download className="w-4 h-4 mr-1" /> Export</Button>}
+          {can('inventory', 'import') && <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10" onClick={() => setImportOpen(true)}><Upload className="w-4 h-4 mr-1" /> Import</Button>}
+          {can('categories', 'view') && <Button asChild variant="outline" size="sm"><Link to="/categories"><FolderTree className="w-4 h-4 mr-1" /> Categories</Link></Button>}
+          {can('inventory', 'create') && <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" /> Add Product</Button>}
         </div>
       </div>
 
