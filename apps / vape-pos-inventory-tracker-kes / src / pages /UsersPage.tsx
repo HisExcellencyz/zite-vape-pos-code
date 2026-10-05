@@ -15,17 +15,9 @@ import { toast } from 'sonner';
 import { downloadCsv } from '../lib/exportHelper';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
 
-const AREAS = ['pos', 'customers', 'inventory', 'purchases', 'suppliers', 'expenses', 'reports', 'users', 'settings'] as const;
-const ACTIONS = ['view', 'create', 'edit', 'delete', 'export', 'import', 'approve', 'backdate'] as const;
-type Area = typeof AREAS[number];
-type Action = typeof ACTIONS[number];
-type PermMatrix = Record<Area, Record<Action, boolean>>;
+import { AREAS, ACTIONS, AREA_LABELS, Area, Action, PermMatrix, emptyPermissions, fullPermissions, normalizePerms, isAdminRoleName } from '../lib/permissionAreas';
 
-function emptyPerms(): PermMatrix {
-  const p: any = {};
-  AREAS.forEach(a => { p[a] = {}; ACTIONS.forEach(ac => { p[a][ac] = false; }); });
-  return p;
-}
+const emptyPerms = (): PermMatrix => emptyPermissions();
 
 interface AppUser {
   id: string;
@@ -50,14 +42,14 @@ interface Role {
   active?: boolean;
 }
 
-function countPerms(json?: string): number {
+/** Counts granted permissions for the current areas (older roles inherit the older area's rights for newer areas). */
+function countPerms(json?: string, roleName?: string): number {
+  if (isAdminRoleName(roleName)) return AREAS.length * ACTIONS.length;
   if (!json) return 0;
   try {
-    const p = JSON.parse(json);
+    const p = normalizePerms(JSON.parse(json));
     let n = 0;
-    Object.values(p || {}).forEach((area: any) => {
-      Object.values(area || {}).forEach(v => { if (v === true) n++; });
-    });
+    Object.values(p).forEach(area => { Object.values(area).forEach(v => { if (v === true) n++; }); });
     return n;
   } catch { return 0; }
 }
@@ -151,11 +143,16 @@ export default function UsersPage() {
     setRoleName(r.roleName || '');
     setRoleDesc(r.description || '');
     setRoleDefault(r.isDefault || false);
-    try { setRolePerms(r.permissions ? JSON.parse(r.permissions) : emptyPerms()); } catch { setRolePerms(emptyPerms()); }
+    // normalizePerms gives roles saved before newer areas existed the older area's rights as a starting point.
+    try { setRolePerms(r.permissions ? normalizePerms(JSON.parse(r.permissions)) : emptyPerms()); } catch { setRolePerms(emptyPerms()); }
     setRoleOpen(true);
   };
 
+  /** Any role with "admin" in its name has every permission, exactly like the Owner. */
+  const adminRole = isAdminRoleName(roleName);
+
   const togglePerm = (area: Area, action: Action) => {
+    if (adminRole) return;
     setRolePerms(prev => ({ ...prev, [area]: { ...prev[area], [action]: !prev[area]?.[action] } }));
   };
 
@@ -166,7 +163,7 @@ export default function UsersPage() {
         id: editRole?.id,
         roleName: roleName.trim(),
         description: roleDesc.trim() || undefined,
-        permissions: JSON.stringify(rolePerms),
+        permissions: JSON.stringify(adminRole ? fullPermissions() : rolePerms),
         isDefault: roleDefault,
         active: true,
       });
@@ -339,7 +336,7 @@ export default function UsersPage() {
             <div className="space-y-4">
               {roles.map(r => {
                 let perms: PermMatrix | null = null;
-                try { perms = r.permissions ? JSON.parse(r.permissions) : null; } catch {}
+                try { perms = isAdminRoleName(r.roleName) ? fullPermissions() : r.permissions ? normalizePerms(JSON.parse(r.permissions)) : null; } catch {}
                 return (
                   <Card key={r.id}>
                     <CardContent className="p-4 space-y-3">
@@ -380,7 +377,7 @@ export default function UsersPage() {
                           </td>
                           <td className="p-3 text-muted-foreground break-words whitespace-normal max-w-md">{r.description || '-'}</td>
                           <td className="p-3">{r.isDefault ? <Badge variant="outline" className="text-xs">Default</Badge> : '-'}</td>
-                          <td className="p-3 text-muted-foreground">{countPerms(r.permissions)} of {AREAS.length * ACTIONS.length}</td>
+                          <td className="p-3 text-muted-foreground">{countPerms(r.permissions, r.roleName)} of {AREAS.length * ACTIONS.length}</td>
                           <td className="p-3"><div className="flex justify-end">{roleActions(r)}</div></td>
                         </tr>
                       ))}
@@ -436,6 +433,11 @@ export default function UsersPage() {
             </div>
             <div>
               <Label className="mb-2 block">Permissions Matrix</Label>
+              {adminRole && (
+                <p className="text-xs rounded-md border border-primary/30 bg-primary/10 text-foreground px-3 py-2 mb-2">
+                  Roles with "admin" in the name always get every permission (including changing dates and backdating), the same as the Owner, so the boxes below are locked.
+                </p>
+              )}
               <div className="overflow-x-auto rounded-lg border border-border">
                 <table className="w-full text-sm">
                   <thead>
@@ -447,16 +449,17 @@ export default function UsersPage() {
                   <tbody>
                     {AREAS.map(area => (
                       <tr key={area} className="border-t border-border/50 hover:bg-muted/20">
-                        <td className="p-2 font-medium text-foreground capitalize">{area}</td>
+                        <td className="p-2 font-medium text-foreground">{AREA_LABELS[area]}</td>
                         {ACTIONS.map(action => (
                           <td key={action} className="p-2 text-center">
                             <button
                               onClick={() => togglePerm(area, action)}
+                              disabled={adminRole}
                               className={`w-7 h-7 rounded-md flex items-center justify-center transition-colors ${
-                                rolePerms[area]?.[action] ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30' : 'bg-muted/50 text-muted-foreground hover:bg-muted'
+                                (adminRole || rolePerms[area]?.[action]) ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30' : 'bg-muted/50 text-muted-foreground hover:bg-muted'
                               }`}
                             >
-                              {rolePerms[area]?.[action] ? <Check className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
+                              {(adminRole || rolePerms[area]?.[action]) ? <Check className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
                             </button>
                           </td>
                         ))}
@@ -465,7 +468,11 @@ export default function UsersPage() {
                   </tbody>
                 </table>
               </div>
-              <p className="text-xs text-muted-foreground mt-2">"view" controls whether the menu item and page are visible. Tip: for an admin role, tick users → edit.</p>
+              <div className="text-xs text-muted-foreground mt-2 space-y-1">
+                <p>"view" controls whether the menu item and page are visible. "create", "edit" and "delete" control adding, changing (including bulk deductions / revenues and customer locations) and removing entries; "export" and "import" control the CSV buttons.</p>
+                <p>Changing an entry's date (backdate) and importing dated or backdated entries are not in this matrix: they are always reserved for the Owner and Admin.</p>
+                <p>Areas added since a role was created start with the rights of the older area they came from (for example Income from POS) until the role is saved again.</p>
+              </div>
             </div>
           </div>
           <DialogFooter>
@@ -491,7 +498,7 @@ function PermissionsGrid({ perms }: { perms: PermMatrix }) {
         <tbody>
           {AREAS.map(area => (
             <tr key={area} className="border-t border-border/50">
-              <td className="p-1.5 font-medium text-foreground capitalize">{area}</td>
+              <td className="p-1.5 font-medium text-foreground">{AREA_LABELS[area]}</td>
               {ACTIONS.map(action => (
                 <td key={action} className="p-1.5 text-center">
                   {perms[area]?.[action] ? <Check className="w-3.5 h-3.5 text-green-400 mx-auto" /> : <span className="text-muted-foreground/40">—</span>}
