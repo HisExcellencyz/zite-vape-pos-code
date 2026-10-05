@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { getProducts, getCustomers, createSale, saveCustomer, getSales, manageHeldOrders, manageSupplierBills } from 'zitejs/api';
+import { useState, useEffect, useRef } from 'react';
+import { getProducts, getCustomers, getCustomerDetails, createSale, saveCustomer, getSales, manageHeldOrders, manageSupplierBills } from 'zitejs/api';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
@@ -19,7 +19,7 @@ import { useBranch, commissionAmount, autoOn, Commission } from '../hooks/useBra
 import SummaryTiles from '../components/SummaryTiles';
 import DateRangeFilter, { Range, inRange } from '../components/DateRangeFilter';
 import { isCashPayment } from '../lib/payments';
-import { parseCoordinates } from '../lib/geocode';
+import { parseCoordinates, geocode } from '../lib/geocode';
 import { RiderType, DEFAULT_DELIVERY_FEE, DEFAULT_RIDER_FEE } from '../lib/delivery';
 
 interface Product {
@@ -371,20 +371,60 @@ export default function POSPage() {
    * Opens the Route Plan dialog. The linked customer's saved location, and that of every merged order,
    * is added as a drop-off point (replacing any earlier auto-added ones so they are never stale).
    */
-  const openRoutePlanner = () => {
+  /**
+   * Finds a customer's drop-off location even when the loaded list or a held order's copy lacks coordinates:
+   * list/copy -> saved record -> geocoding the saved address.
+   */
+  const resolveDrop = async (c: Customer | null | undefined, id: string) => {
+    if (!c) return null;
+    const quick = dropFor(c, id);
+    if (quick) return quick;
+    try {
+      const res: any = await getCustomerDetails({ customerId: c.id });
+      const rec = res?.customer;
+      const f = rec?.fields || rec || {};
+      const coords = f.coordinates ?? rec?.coordinates;
+      const addr = f.address ?? rec?.address ?? c.address;
+      const name = f.customerName ?? rec?.customerName ?? c.customerName;
+      const p = parseCoordinates(coords);
+      if (p) return { id, label: addr || name || `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`, tag: 'dropoff', lat: p.lat, lng: p.lng };
+      if (addr) {
+        const g: any = await geocode(String(addr));
+        const r = g?.results?.[0];
+        if (r) return { id, label: addr, tag: 'dropoff', lat: r.lat, lng: r.lng };
+      }
+    } catch { /* fall through */ }
+    if (c.address) {
+      try {
+        const g: any = await geocode(String(c.address));
+        const r = g?.results?.[0];
+        if (r) return { id, label: c.address, tag: 'dropoff', lat: r.lat, lng: r.lng };
+      } catch { /* ignore */ }
+    }
+    return null;
+  };
+
+  const mergedRef = useRef<string[]>([]);
+  useEffect(() => { mergedRef.current = mergedIds; }, [mergedIds]);
+
+  /**
+   * Opens the Route Plan dialog. The linked customer's saved location, and that of every merged order,
+   * is added as a drop-off point (replacing any earlier auto-added ones so they are never stale).
+   */
+  const openRoutePlanner = async () => {
+    setShowDeliveryMap(true);
     const wanted: any[] = [];
-    const own = dropFor(selectedCustomer, `c_${selectedCustomer?.id}`);
+    const own = await resolveDrop(selectedCustomer, `c_${selectedCustomer?.id}`);
     if (own) wanted.push(own);
-    mergeList.forEach(h => {
-      const d = dropFor(h.customer, `m_${h.id}_c_${h.customer?.id}`);
+    for (const h of mergeList) {
+      const d = await resolveDrop(h.customer, `m_${h.id}_c_${h.customer?.id}`);
       if (d) wanted.push(d);
-    });
+    }
     setRoutePoints(pts => {
       const keep = pts.filter(p => !isAutoCustomerPoint(p));
-      const fresh = wanted.filter(w => !keep.some(p => p.tag === 'dropoff' && p.lat === w.lat && p.lng === w.lng));
+      const fresh = wanted.filter((w, i) => !keep.some(p => p.tag === 'dropoff' && p.lat === w.lat && p.lng === w.lng) && wanted.findIndex(x => x.lat === w.lat && x.lng === w.lng) === i);
       return sortRoutePoints([...keep, ...fresh]);
     });
-    setShowDeliveryMap(true);
   };
 
   // ── Hold / resume / delete ──
@@ -489,7 +529,7 @@ export default function POSPage() {
   };
 
   // ── Merge pending orders into this delivery route ──
-  const toggleMerge = (h: HeldOrder) => {
+  const toggleMerge = async (h: HeldOrder) => {
     if (mergedIds.includes(h.id)) {
       setMergedIds(ids => ids.filter(x => x !== h.id));
       setRoutePoints(pts => pts.filter(p => !String(p.id).startsWith(`m_${h.id}_`)));
@@ -501,8 +541,9 @@ export default function POSPage() {
       .filter(p => p.tag !== 'start' && p.tag !== 'end' && p.tag !== 'pickup')
       .map(p => ({ ...p, id: `m_${h.id}_${p.id}` }));
     // The merged order's customer location is a drop-off too.
-    const cust = dropFor(h.customer, `m_${h.id}_c_${h.customer?.id}`);
+    const cust = await resolveDrop(h.customer, `m_${h.id}_c_${h.customer?.id}`);
     if (cust) add.push(cust);
+    if (!mergedRef.current.includes(h.id)) return; // unmerged while the location was being looked up
     setRoutePoints(pts => {
       const fresh = add.filter((a, i) => !pts.some(p => p.lat === a.lat && p.lng === a.lng) && add.findIndex(b => b.lat === a.lat && b.lng === a.lng) === i);
       return fresh.length === 0 ? pts : sortRoutePoints([...pts, ...fresh]);
@@ -576,7 +617,7 @@ export default function POSPage() {
           if (oldRider > 0 && !heldDeductions.some(d => isRiderFeeName(d.name))) heldDeductions.push({ name: 'Rider Fee', amount: oldRider });
           // When a route was planned, the merged order's customer location is its drop-off.
           const heldPoints: any[] = [...(h.routePoints || [])];
-          const custDrop = routePoints.length > 0 ? dropFor(h.customer, 'x') : null;
+          const custDrop = routePoints.length > 0 ? await resolveDrop(h.customer, 'x') : null;
           if (custDrop && !heldPoints.some(p => p.tag === 'dropoff' && p.lat === custDrop.lat && p.lng === custDrop.lng)) heldPoints.push(custDrop);
           await createSale({
             items: h.items.map(i => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice })),
