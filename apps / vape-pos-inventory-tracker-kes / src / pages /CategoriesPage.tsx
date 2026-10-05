@@ -13,6 +13,7 @@ import { Textarea } from '@project/components/ui/textarea';
 import { Search, Plus, Pencil, Trash2, FolderTree, CheckSquare } from 'lucide-react';
 import { toast } from 'sonner';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
+import { usePermissions } from '../hooks/usePermissions';
 
 interface Category {
   id: string;
@@ -22,6 +23,7 @@ interface Category {
 }
 
 export default function CategoriesPage() {
+  const { can } = usePermissions();
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -142,14 +144,14 @@ export default function CategoriesPage() {
 
   const renderActions = (c: Category) => (
     <div className="flex items-center gap-1">
-      <Button variant="ghost" size="sm" onClick={() => openEdit(c)}><Pencil className="w-3.5 h-3.5" /></Button>
-      <AlertDialog>
+      {can('categories', 'edit') && <Button variant="ghost" size="sm" onClick={() => openEdit(c)}><Pencil className="w-3.5 h-3.5" /></Button>}
+      {can('categories', 'delete') && <AlertDialog>
         <AlertDialogTrigger asChild><Button variant="ghost" size="sm" className="text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button></AlertDialogTrigger>
         <AlertDialogContent>
           <AlertDialogHeader><AlertDialogTitle>Delete category?</AlertDialogTitle><AlertDialogDescription>This will remove "{c.categoryName}" permanently.</AlertDialogDescription></AlertDialogHeader>
           <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleDelete(c.id)}>Delete</AlertDialogAction></AlertDialogFooter>
         </AlertDialogContent>
-      </AlertDialog>
+      </AlertDialog>}
     </div>
   );
 
@@ -162,17 +164,19 @@ export default function CategoriesPage() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <ViewToggle value={viewMode} onChange={setViewMode} />
-          {selectedIds.size > 0 && (
+          {selectedIds.size > 0 && can('categories', 'edit') && (
             <Button variant="outline" size="sm" onClick={() => setShowBulkCat(true)}>
               <CheckSquare className="w-4 h-4 mr-1" /> Bulk Actions ({selectedIds.size})
             </Button>
           )}
-          <Button variant="outline" size="sm" onClick={() => setBulkOpen(true)}>
-            <FolderTree className="w-4 h-4 mr-1" /> Bulk Create
-          </Button>
-          <Button size="sm" onClick={openNew}>
-            <Plus className="w-4 h-4 mr-1" /> Add Category
-          </Button>
+          {can('categories', 'create') && <>
+            <Button variant="outline" size="sm" onClick={() => setBulkOpen(true)}>
+              <FolderTree className="w-4 h-4 mr-1" /> Bulk Create
+            </Button>
+            <Button size="sm" onClick={openNew}>
+              <Plus className="w-4 h-4 mr-1" /> Add Category
+            </Button>
+          </>}
         </div>
       </div>
 
