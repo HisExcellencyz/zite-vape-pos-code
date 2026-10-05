@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
+import { getAccess } from '../lib/permissions';
+import { todayEAT } from '../lib/entryDates';
+import { syncSupplierAddress } from '../lib/supplierAddress';
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 const normRow = (r: Record<string, string>) => {
@@ -43,17 +46,21 @@ function lpoStatus(s: string) {
 }
 
 export default createEndpoint({
-  description: 'Bulk import (optionally backdated) purchase orders (LPOs) from CSV rows. Rows with the same LPO Number form one LPO.',
+  description: 'Bulk import purchase orders (LPOs) from CSV rows. Rows with the same LPO Number form one LPO. Order dates other than today, and re-importing an existing LPO Number to change its dates, are only accepted from the Owner and Admin.',
   authenticated: true,
   inputSchema: z.object({
     rows: z.array(z.record(z.string())),
   }),
-  outputSchema: z.object({ imported: z.number(), skipped: z.number(), errors: z.array(z.string()) }),
-  execute: async ({ input }) => {
+  outputSchema: z.object({ imported: z.number(), updated: z.number().optional(), skipped: z.number(), errors: z.array(z.string()) }),
+  execute: async ({ input, context }) => {
     if (input.rows.length > 1500) throw new Error('Too many rows. Import up to 1,500 rows at a time.');
+
+    const access = await getAccess(context.user.id);
+    if (!access.can('purchaseOrders', 'import')) throw new Error('You do not have permission to import purchase orders. Ask an administrator to update your role.');
 
     const errors: string[] = [];
     let imported = 0;
+    let updated = 0;
     let skipped = 0;
 
     const { records: products } = await zite.products.findAll({ limit: 2000 });
@@ -62,6 +69,7 @@ export default createEndpoint({
     const supplierMap = new Map<string, any>(suppliers.map(s => [(s.supplierName || '').toLowerCase(), s]));
     const { records: existingLpos } = await zite.purchaseOrders.findAll({ limit: 2000 });
     const usedNumbers = new Set(existingLpos.map(o => (o.lpoNumber || '').toLowerCase()));
+    const lpoByNumber = new Map(existingLpos.map(o => [(o.lpoNumber || '').toLowerCase(), o]));
 
     const groups = new Map<string, { line: number; r: Record<string, string> }[]>();
     input.rows.forEach((raw, i) => {
@@ -75,16 +83,39 @@ export default createEndpoint({
     for (const [lpoNumber, lines] of groups) {
       const label = `LPO ${lpoNumber}`;
       try {
-        if (usedNumbers.has(lpoNumber.toLowerCase())) {
-          skipped++; errors.push(`${label}: number already exists, skipped`); continue;
-        }
         const first = lines[0].r;
+        const existingLpo = lpoByNumber.get(lpoNumber.toLowerCase());
+        if (existingLpo) {
+          // Re-importing an existing LPO Number changes its dates (Owner/Admin only).
+          const newOrder = lines.map(l => l.r['orderdate'] || l.r['date']).find(Boolean) || '';
+          const newExp = lines.map(l => l.r['expecteddeliverydate'] || l.r['expecteddelivery']).find(Boolean) || '';
+          if (!access.canBackdate || (!newOrder && !newExp)) {
+            skipped++; errors.push(`${label}: number already exists, skipped`); continue;
+          }
+          const record: Record<string, unknown> = {};
+          if (newOrder) {
+            const d = parseDay(newOrder);
+            if (!d) { skipped++; errors.push(`${label}: invalid order date "${newOrder}"`); continue; }
+            record.orderDate = d;
+          }
+          if (newExp) {
+            const d = parseDay(newExp);
+            if (!d) { skipped++; errors.push(`${label}: invalid expected delivery date "${newExp}"`); continue; }
+            record.expectedDeliveryDate = d;
+          }
+          await zite.purchaseOrders.update({ id: existingLpo.id, record });
+          updated++;
+          continue;
+        }
 
         const orderStr = lines.map(l => l.r['orderdate'] || l.r['date']).find(Boolean) || '';
-        let orderDate = new Date().toISOString().slice(0, 10);
+        let orderDate = todayEAT();
         if (orderStr) {
           const d = parseDay(orderStr);
           if (!d) { skipped++; errors.push(`${label}: invalid order date "${orderStr}" (use YYYY-MM-DD or DD/MM/YYYY)`); continue; }
+          if (d !== todayEAT() && !access.canBackdate) {
+            skipped++; errors.push(`${label}: only the Owner and Admin can import backdated purchase orders (date ${d})`); continue;
+          }
           orderDate = d;
         }
         const expStr = lines.map(l => l.r['expecteddeliverydate'] || l.r['expecteddelivery']).find(Boolean) || '';
@@ -100,6 +131,7 @@ export default createEndpoint({
         if (!supplier) {
           supplier = await zite.suppliers.create({ record: { supplierName, depositBalance: 0, phone: null, email: null, address: null, notes: null } });
           supplierMap.set(supplierName.toLowerCase(), supplier);
+          try { await syncSupplierAddress({ id: supplier.id, supplierName, address: null }); } catch {}
         }
 
         const status = lpoStatus(first['status'] || '');
@@ -149,6 +181,6 @@ export default createEndpoint({
       }
     }
 
-    return { imported, skipped, errors: errors.slice(0, 50) };
+    return { imported, updated, skipped, errors: errors.slice(0, 50) };
   },
 });
