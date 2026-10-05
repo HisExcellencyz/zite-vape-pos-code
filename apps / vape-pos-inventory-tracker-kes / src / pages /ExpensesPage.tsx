@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getExpenses, getPurchases, getSales, getProducts, getSuppliers, createPurchase, createExpense, exportCsv, importPurchases } from 'zitejs/api';
+import { getExpenses, getPurchases, getSales, getProducts, getSuppliers, createPurchase, createExpense, exportCsv, importPurchases, importEntries } from 'zitejs/api';
 import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
@@ -8,7 +8,10 @@ import { Badge } from '@project/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@project/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
-import { Plus, Download, Upload, ShoppingBag, Trash2, Search, FileText, BadgePercent, Wallet } from 'lucide-react';
+import { Plus, Download, Upload, ShoppingBag, Trash2, Search, FileText, BadgePercent, Wallet, Pencil } from 'lucide-react';
+import { DatePicker } from '@project/components/ui/date-picker';
+import { EditEntryDialog, DeleteEntryDialog, EntryKind } from '../components/EntryDialogs';
+import { usePermissions } from '../hooks/usePermissions';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -25,6 +28,7 @@ interface Purchase { id: string; purchaseNumber?: number; purchaseDate?: string;
 interface Product { id: string; productName?: string; sku?: string; costPrice?: number; }
 interface Supplier { id: string; supplierName?: string; depositBalance?: number; }
 interface CartItem { product: Product; quantity: number; unitPrice: number; }
+interface DiscountRow { id: string; saleNumber?: number; saleDate?: string; subtotal: number; saleTotal: number; amount: number; }
 interface DeductionRow { id: string; saleNumber?: number; saleDate?: string; details: string; saleTotal: number; amount: number; }
 
 const PF: FieldDef<Purchase>[] = [
@@ -39,6 +43,9 @@ const EF: FieldDef<Expense>[] = [
 ];
 const DF: FieldDef<DeductionRow>[] = [
   { key: 'saleNumber', label: 'Sale #' }, { key: 'saleDate', label: 'Date' }, { key: 'details', label: 'Deductions' }, { key: 'saleTotal', label: 'Sale Total' }, { key: 'amount', label: 'Amount' },
+];
+const XF: FieldDef<DiscountRow>[] = [
+  { key: 'saleNumber', label: 'Sale #' }, { key: 'saleDate', label: 'Date' }, { key: 'subtotal', label: 'Before Discount' }, { key: 'saleTotal', label: 'Sale Total' }, { key: 'amount', label: 'Discount' },
 ];
 
 const fmt = (n?: number) => `KES ${(n || 0).toLocaleString()}`;
@@ -55,6 +62,10 @@ export default function ExpensesPage() {
   const [viewMode, setViewMode] = useViewMode('expenses', 'list');
   const { currentBranch } = useBranch();
   const [range, setRange] = useState<Range>({});
+  const { can, canBackdate } = usePermissions();
+  const [editT, setEditT] = useState<{ kind: EntryKind; entry: any } | null>(null);
+  const [delT, setDelT] = useState<{ kind: EntryKind; entry: any } | null>(null);
+  const [formDate, setFormDate] = useState<Date | undefined>(new Date());
 
   // Other expense form
   const [showForm, setShowForm] = useState(false);
@@ -88,7 +99,15 @@ export default function ExpensesPage() {
     });
   const tcP = useTableControls(dP, PF);
   const tcE = useTableControls(dE, EF);
+  // Discounts given at the till are an expense too (the Before Discount column shows the full price, so sales revenue is counted gross).
+  const dX: DiscountRow[] = sales
+    .filter(s => s.status !== 'Voided' && (s.discount || 0) > 0 && inRange(range, s.saleDate))
+    .map(s => ({
+      id: s.id, saleNumber: s.saleNumber, saleDate: s.saleDate,
+      subtotal: (s.total || 0) + (s.discount || 0), saleTotal: s.total || 0, amount: s.discount || 0,
+    }));
   const tcD = useTableControls(dD, DF);
+  const tcX = useTableControls(dX, XF);
 
   const load = async () => {
     setLoading(true);
@@ -110,11 +129,29 @@ export default function ExpensesPage() {
 
   useEffect(() => { load(); }, [currentBranch?.id]);
 
+  // Purchases are allowed by either the Expenses or the Purchases area.
+  const areaOf = (kind: EntryKind) => (kind === 'purchase' ? ['expenses', 'purchases'] : ['expenses']);
+  const allow = (kind: EntryKind, action: string) => areaOf(kind).some(a => can(a, action));
+  const rowActions = (kind: EntryKind, entry: any) => {
+    const e = allow(kind, 'edit'), d = allow(kind, 'delete');
+    if (!e && !d) return null;
+    return (
+      <div className="flex justify-end gap-0.5">
+        {e && <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Edit" onClick={() => setEditT({ kind, entry })}><Pencil className="w-3.5 h-3.5" /></Button>}
+        {d && <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" title={kind === 'deduction' ? 'Clear deductions' : 'Delete'} onClick={() => setDelT({ kind, entry })}><Trash2 className="w-3.5 h-3.5" /></Button>}
+      </div>
+    );
+  };
+  const colsP = allow('purchase', 'edit') || allow('purchase', 'delete') ? 1 : 0;
+  const colsD = allow('deduction', 'edit') || allow('deduction', 'delete') ? 1 : 0;
+  const colsE = allow('expense', 'edit') || allow('expense', 'delete') ? 1 : 0;
+
   const sumOf = (xs: any[], k: string) => xs.reduce((s, x) => s + (x[k] || 0), 0);
   const totalPurchases = sumOf(dP, 'total');
   const totalExpenses = sumOf(dE, 'amount');
   const totalDeductions = sumOf(dD, 'amount');
-  const grandTotal = totalPurchases + totalExpenses + totalDeductions;
+  const totalDiscounts = sumOf(dX, 'amount');
+  const grandTotal = totalPurchases + totalExpenses + totalDeductions + totalDiscounts;
 
   // ── Other expenses ──
   const handleSave = async () => {
@@ -122,9 +159,12 @@ export default function ExpensesPage() {
     if (!formAmount || Number(formAmount) <= 0) return toast.error('Valid amount is required');
     setSaving(true);
     try {
-      await createExpense({ description: formDesc, amount: Number(formAmount), notes: formNotes || undefined, branchId: currentBranch?.id });
+      await createExpense({
+        description: formDesc, amount: Number(formAmount), notes: formNotes || undefined, branchId: currentBranch?.id,
+        date: canBackdate && formDate && format(formDate, 'yyyy-MM-dd') !== format(new Date(), 'yyyy-MM-dd') ? new Date(format(formDate, 'yyyy-MM-dd') + 'T12:00:00').toISOString() : undefined,
+      });
       toast.success('Expense recorded');
-      setShowForm(false); setFormDesc(''); setFormAmount(''); setFormNotes('');
+      setShowForm(false); setFormDesc(''); setFormAmount(''); setFormNotes(''); setFormDate(new Date());
       load();
     } catch (e: any) { toast.error(e.message || 'Failed'); } finally { setSaving(false); }
   };
@@ -168,13 +208,22 @@ export default function ExpensesPage() {
   };
 
   const runImport = async (rows: Record<string, string>[], adjustStock: boolean) => {
+    if (tab === 'other') {
+      const r = await importEntries({ kind: 'expenses', rows });
+      return { imported: r.imported, updated: r.updated, skipped: r.skipped, errors: r.errors };
+    }
     const res = await importPurchases({ rows, adjustStock });
-    return { imported: res.imported, skipped: res.skipped, errors: res.errors };
+    return { imported: res.imported, updated: res.updated, skipped: res.skipped, errors: res.errors };
   };
 
   const handleExport = async () => {
     try {
-      if (tab === 'deductions') {
+      if (tab === 'discounts') {
+        const lines = [['Sale #', 'Date', 'Before Discount', 'Sale Total', 'Discount'].join(',')].concat(
+          tcX.view.map(r => [r.saleNumber, r.saleDate, r.subtotal, r.saleTotal, r.amount].map(q).join(',')),
+        );
+        downloadCsv(lines.join('\n'), 'discounts_export.csv');
+      } else if (tab === 'deductions') {
         const lines = [['Sale #', 'Date', 'Deductions', 'Sale Total', 'Amount'].join(',')].concat(
           tcD.view.map(r => [r.saleNumber, r.saleDate, r.details, r.saleTotal, r.amount].map(q).join(',')),
         );
@@ -199,6 +248,11 @@ export default function ExpensesPage() {
       { label: 'Paid Cash', value: fmt(sumOf(dP.filter(x => x.paymentType !== 'From Deposit'), 'total')) },
       { label: 'From Deposits', value: fmt(sumOf(dP.filter(x => x.paymentType === 'From Deposit'), 'total')) },
       { label: 'Average Purchase', value: fmt(dP.length ? Math.round(totalPurchases / dP.length) : 0) },
+    ] : tab === 'discounts' ? [
+      { label: 'Discounts', value: fmt(totalDiscounts), sub: `${dX.length} sales` },
+      { label: 'Average Discount', value: fmt(dX.length ? Math.round(totalDiscounts / dX.length) : 0) },
+      { label: 'Purchases + Other + Deductions', value: fmt(totalPurchases + totalExpenses + totalDeductions) },
+      { label: 'Grand Total', value: fmt(grandTotal) },
     ] : tab === 'deductions' ? [
       { label: 'Deductions', value: fmt(totalDeductions), sub: `${dD.length} sales` },
       { label: 'Average Deduction', value: fmt(dD.length ? Math.round(totalDeductions / dD.length) : 0) },
@@ -207,11 +261,11 @@ export default function ExpensesPage() {
     ] : [
       { label: 'Other Expenses', value: fmt(totalExpenses), sub: `${dE.length} records` },
       { label: 'Average Expense', value: fmt(dE.length ? Math.round(totalExpenses / dE.length) : 0) },
-      { label: 'Purchases + Deductions', value: fmt(totalPurchases + totalDeductions) },
+      { label: 'Purchases + Deductions + Discounts', value: fmt(totalPurchases + totalDeductions + totalDiscounts) },
       { label: 'Grand Total', value: fmt(grandTotal) },
     ];
 
-  const activeControls = (tab === 'purchases' ? tcP : tab === 'other' ? tcE : tcD) as any;
+  const activeControls = (tab === 'purchases' ? tcP : tab === 'other' ? tcE : tab === 'discounts' ? tcX : tcD) as any;
 
   return (
     <div className="p-6 space-y-6">
@@ -223,16 +277,19 @@ export default function ExpensesPage() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <ViewToggle value={viewMode} onChange={setViewMode} />
-          <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExport}><Download className="w-4 h-4 mr-1" /> Export</Button>
+          {allow(tab === 'purchases' ? 'purchase' : 'expense', 'export') && <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExport}><Download className="w-4 h-4 mr-1" /> Export</Button>}
           {tab === 'purchases' && (
             <>
-              <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10" onClick={() => setImportOpen(true)}><Upload className="w-4 h-4 mr-1" /> Import</Button>
-              <Button asChild variant="outline" size="sm"><Link to="/purchase-orders"><FileText className="w-4 h-4 mr-1" /> Purchase Orders</Link></Button>
-              <Button size="sm" onClick={() => setShowPurchaseForm(true)}><Plus className="w-4 h-4 mr-1" /> Add Purchase</Button>
+              {allow('purchase', 'import') && <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10" onClick={() => setImportOpen(true)}><Upload className="w-4 h-4 mr-1" /> Import</Button>}
+              {can('purchaseOrders', 'view') && <Button asChild variant="outline" size="sm"><Link to="/purchase-orders"><FileText className="w-4 h-4 mr-1" /> Purchase Orders</Link></Button>}
+              {allow('purchase', 'create') && <Button size="sm" onClick={() => setShowPurchaseForm(true)}><Plus className="w-4 h-4 mr-1" /> Add Purchase</Button>}
             </>
           )}
           {tab === 'other' && (
-            <Button size="sm" onClick={() => setShowForm(true)}><Plus className="w-4 h-4 mr-1" /> Add Expense</Button>
+            <>
+              {allow('expense', 'import') && <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10" onClick={() => setImportOpen(true)}><Upload className="w-4 h-4 mr-1" /> Import</Button>}
+              {allow('expense', 'create') && <Button size="sm" onClick={() => setShowForm(true)}><Plus className="w-4 h-4 mr-1" /> Add Expense</Button>}
+            </>
           )}
         </div>
       </div>
@@ -248,6 +305,7 @@ export default function ExpensesPage() {
         <TabsList className="bg-muted">
           <TabsTrigger value="purchases">Purchases ({dP.length})</TabsTrigger>
           <TabsTrigger value="deductions">Deductions ({dD.length})</TabsTrigger>
+          <TabsTrigger value="discounts">Discounts ({dX.length})</TabsTrigger>
           <TabsTrigger value="other">Other Expenses ({dE.length})</TabsTrigger>
         </TabsList>
 
@@ -262,16 +320,17 @@ export default function ExpensesPage() {
                   <SortTh c={tcP} k="paymentType" className="text-left">Payment</SortTh>
                   <SortTh c={tcP} k="total" className="text-right">Total</SortTh>
                   <SortTh c={tcP} k="notes" className="text-left">Notes</SortTh>
+                  {colsP > 0 && <th className="p-3 w-20" />}
                 </tr></thead>
                 <tbody>
                   {loading ? (
                     [...Array(5)].map((_, i) => (
                       <tr key={i} className="border-b border-border">
-                        {[...Array(5)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}
+                        {[...Array(5 + colsP)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}
                       </tr>
                     ))
                   ) : tcP.view.length === 0 ? (
-                    <tr><td colSpan={5} className="text-center py-12 text-muted-foreground">
+                    <tr><td colSpan={5 + colsP} className="text-center py-12 text-muted-foreground">
                       <ShoppingBag className="w-10 h-10 mx-auto mb-2 opacity-40" />
                       No purchases recorded yet
                     </td></tr>
@@ -282,6 +341,7 @@ export default function ExpensesPage() {
                       <td className="p-3">{paymentBadge(p)}</td>
                       <td className="p-3 text-right font-semibold text-foreground whitespace-nowrap">{fmt(p.total)}</td>
                       <td className="p-3 text-muted-foreground text-xs break-words whitespace-normal max-w-xs">{p.notes || '-'}</td>
+                      {colsP > 0 && <td className="p-3">{rowActions('purchase', p)}</td>}
                     </tr>
                   ))}
                 </tbody>
@@ -305,6 +365,7 @@ export default function ExpensesPage() {
                     <span className="text-xs text-muted-foreground">Total</span>
                     <span className="text-lg font-bold text-primary break-words text-right">{fmt(p.total)}</span>
                   </div>
+                  {colsP > 0 && <div className="border-t border-border pt-2">{rowActions('purchase', p)}</div>}
                 </CardContent></Card>
               ))}
             </div>
@@ -322,10 +383,11 @@ export default function ExpensesPage() {
                   <SortTh c={tcD} k="details" className="text-left">Deductions</SortTh>
                   <SortTh c={tcD} k="saleTotal" className="text-right">Sale Total</SortTh>
                   <SortTh c={tcD} k="amount" className="text-right">Amount</SortTh>
+                  {colsD > 0 && <th className="p-3 w-20" />}
                 </tr></thead>
                 <tbody>
                   {tcD.view.length === 0 ? (
-                    <tr><td colSpan={5} className="text-center py-12 text-muted-foreground"><BadgePercent className="w-10 h-10 mx-auto mb-2 opacity-40" />{loading ? 'Loading...' : 'No deductions applied to sales'}</td></tr>
+                    <tr><td colSpan={5 + colsD} className="text-center py-12 text-muted-foreground"><BadgePercent className="w-10 h-10 mx-auto mb-2 opacity-40" />{loading ? 'Loading...' : 'No deductions applied to sales'}</td></tr>
                   ) : tcD.view.map(r => (
                     <tr key={r.id} className="border-b border-border hover:bg-muted/30">
                       <td className="p-3 font-mono text-xs text-muted-foreground">#{r.saleNumber}</td>
@@ -333,6 +395,7 @@ export default function ExpensesPage() {
                       <td className="p-3 text-foreground break-words whitespace-normal max-w-md">{r.details}</td>
                       <td className="p-3 text-right text-muted-foreground whitespace-nowrap">{fmt(r.saleTotal)}</td>
                       <td className="p-3 text-right font-semibold text-pink-400 whitespace-nowrap">{fmt(r.amount)}</td>
+                      {colsD > 0 && <td className="p-3">{rowActions('deduction', sales.find(s => s.id === r.id) || r)}</td>}
                     </tr>
                   ))}
                 </tbody>
@@ -353,6 +416,55 @@ export default function ExpensesPage() {
                     <span className="text-xs text-muted-foreground">Amount</span>
                     <span className="text-lg font-bold text-pink-400 break-words text-right">{fmt(r.amount)}</span>
                   </div>
+                  {colsD > 0 && <div className="border-t border-border pt-2">{rowActions('deduction', sales.find(s => s.id === r.id) || r)}</div>}
+                </CardContent></Card>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* Discounts given on sales (an expense, like deductions) */}
+        <TabsContent value="discounts" className="mt-4">
+          {viewMode === 'list' ? (
+            <Card className="bg-card border-border"><CardContent className="p-0"><div className="overflow-auto max-h-[65vh]">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 z-10 bg-card"><tr className="border-b border-border text-muted-foreground bg-card">
+                  <SortTh c={tcX} k="saleNumber" className="text-left">Sale #</SortTh>
+                  <SortTh c={tcX} k="saleDate" className="text-left">Date</SortTh>
+                  <SortTh c={tcX} k="subtotal" className="text-right">Before Discount</SortTh>
+                  <SortTh c={tcX} k="saleTotal" className="text-right">Sale Total</SortTh>
+                  <SortTh c={tcX} k="amount" className="text-right">Discount</SortTh>
+                </tr></thead>
+                <tbody>
+                  {tcX.view.length === 0 ? (
+                    <tr><td colSpan={5} className="text-center py-12 text-muted-foreground"><BadgePercent className="w-10 h-10 mx-auto mb-2 opacity-40" />{loading ? 'Loading...' : 'No discounts given on sales'}</td></tr>
+                  ) : tcX.view.map(r => (
+                    <tr key={r.id} className="border-b border-border hover:bg-muted/30">
+                      <td className="p-3 font-mono text-xs text-muted-foreground">#{r.saleNumber}</td>
+                      <td className="p-3 text-foreground whitespace-nowrap">{r.saleDate ? format(new Date(r.saleDate), 'dd MMM yyyy HH:mm') : '-'}</td>
+                      <td className="p-3 text-right text-muted-foreground whitespace-nowrap">{fmt(r.subtotal)}</td>
+                      <td className="p-3 text-right text-muted-foreground whitespace-nowrap">{fmt(r.saleTotal)}</td>
+                      <td className="p-3 text-right font-semibold text-pink-400 whitespace-nowrap">{fmt(r.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div></CardContent></Card>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+              {tcX.view.length === 0 ? (
+                <Card className="col-span-full bg-card border-border"><CardContent className="py-12 text-center text-muted-foreground"><BadgePercent className="w-10 h-10 mx-auto mb-2 opacity-40" />No discounts given on sales</CardContent></Card>
+              ) : tcX.view.map(r => (
+                <Card key={r.id} className="bg-card border-border"><CardContent className="p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="font-mono text-sm font-semibold text-foreground">Sale #{r.saleNumber}</p>
+                    <p className="text-xs text-muted-foreground">{r.saleDate ? format(new Date(r.saleDate), 'dd MMM yyyy') : '-'}</p>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{fmt(r.subtotal)} → {fmt(r.saleTotal)}</p>
+                  <div className="border-t border-border pt-2 flex items-center justify-between gap-2">
+                    <span className="text-xs text-muted-foreground">Discount</span>
+                    <span className="text-lg font-bold text-pink-400 break-words text-right">{fmt(r.amount)}</span>
+                  </div>
                 </CardContent></Card>
               ))}
             </div>
@@ -369,16 +481,18 @@ export default function ExpensesPage() {
                   <SortTh c={tcE} k="expenseDate" className="text-left">Date</SortTh>
                   <SortTh c={tcE} k="description" className="text-left">Description</SortTh>
                   <SortTh c={tcE} k="amount" className="text-right">Amount</SortTh>
+                  {colsE > 0 && <th className="p-3 w-20" />}
                 </tr></thead>
                 <tbody>
                   {tcE.view.length === 0 ? (
-                    <tr><td colSpan={4} className="text-center py-12 text-muted-foreground"><Wallet className="w-10 h-10 mx-auto mb-2 opacity-40" />No expenses</td></tr>
+                    <tr><td colSpan={4 + colsE} className="text-center py-12 text-muted-foreground"><Wallet className="w-10 h-10 mx-auto mb-2 opacity-40" />No expenses</td></tr>
                   ) : tcE.view.map(e => (
                     <tr key={e.id} className="border-b border-border hover:bg-muted/30">
                       <td className="p-3 font-mono text-xs text-muted-foreground">#{e.expenseNumber}</td>
                       <td className="p-3 text-foreground">{e.expenseDate ? format(new Date(e.expenseDate), 'dd MMM yyyy') : '-'}</td>
                       <td className="p-3 text-foreground break-words whitespace-normal max-w-md">{e.description}</td>
                       <td className="p-3 text-right font-semibold whitespace-nowrap">{fmt(e.amount)}</td>
+                      {colsE > 0 && <td className="p-3">{rowActions('expense', e)}</td>}
                     </tr>
                   ))}
                 </tbody>
@@ -400,6 +514,7 @@ export default function ExpensesPage() {
                     <span className="text-xs text-muted-foreground">Amount</span>
                     <span className="text-lg font-bold text-primary break-words text-right">{fmt(e.amount)}</span>
                   </div>
+                  {colsE > 0 && <div className="border-t border-border pt-2">{rowActions('expense', e)}</div>}
                 </CardContent></Card>
               ))}
             </div>
@@ -410,13 +525,20 @@ export default function ExpensesPage() {
       <ImportDialog
         open={importOpen}
         onOpenChange={setImportOpen}
-        title="Import Purchases"
-        template="purchases"
-        optionLabel="Also add the imported quantities to current stock (leave off for old purchases already reflected in your stock counts)"
-        description={<>
+        title={tab === 'other' ? 'Import Other Expenses' : 'Import Purchases'}
+        template={tab === 'other' ? 'expenses' : 'purchases'}
+        optionLabel={tab === 'other' ? undefined : 'Also add the imported quantities to current stock (leave off for old purchases already reflected in your stock counts)'}
+        description={tab === 'other' ? <>
+          Upload a CSV with one row per expense. Columns: <span className="font-medium text-foreground">Description, Amount, Notes</span>
+          {canBackdate && <>, plus <span className="font-medium text-foreground">Date</span> (YYYY-MM-DD or DD/MM/YYYY) for backdated entries, and <span className="font-medium text-foreground">Entry Number</span> to change the date (or details) of an existing expense</>}.
+          {!canBackdate && <> Entries are dated today. Only the Owner and Admin can import backdated or re-dated entries.</>} Press OK to start.
+        </> : <>
           Upload a CSV with one row per product line. Rows sharing the same <span className="font-medium text-foreground">Purchase Ref</span> become one purchase.
           Columns: <span className="font-medium text-foreground">Purchase Ref, Date, Supplier Name, Payment Type, Product SKU, Quantity, Unit Price, Notes</span>.
-          <br />The <span className="font-medium text-foreground">Date</span> can be in the past (YYYY-MM-DD or DD/MM/YYYY). Payment Type is <span className="font-medium text-foreground">Cash</span> or <span className="font-medium text-foreground">From Deposit</span> (deducts the supplier deposit, needs enough balance). Unknown suppliers are created. Refs already imported are skipped. Press OK to start.
+          <br />The <span className="font-medium text-foreground">Date</span> can be in the past (YYYY-MM-DD or DD/MM/YYYY). Payment Type is <span className="font-medium text-foreground">Cash</span> or <span className="font-medium text-foreground">From Deposit</span> (deducts the supplier deposit, needs enough balance). Unknown suppliers are created. Refs already imported are skipped.
+          {canBackdate
+            ? <> To change the date of an existing purchase, add a row with its <span className="font-medium text-foreground">Purchase Number</span> and the new Date.</>
+            : <> Only the Owner and Admin can import backdated purchases or change purchase dates; your file must be dated today (leave Date empty).</>} Press OK to start.
         </>}
         onImport={runImport}
         onDone={load}
@@ -502,6 +624,9 @@ export default function ExpensesPage() {
         </DialogContent>
       </Dialog>
 
+      <EditEntryDialog open={!!editT} onOpenChange={o => { if (!o) setEditT(null); }} kind={editT?.kind || 'expense'} entry={editT?.entry || null} onSaved={load} />
+      <DeleteEntryDialog open={!!delT} onOpenChange={o => { if (!o) setDelT(null); }} kind={delT?.kind || 'expense'} entry={delT?.entry || null} onDone={load} />
+
       {/* New other expense */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
         <DialogContent className="max-w-md">
@@ -510,6 +635,7 @@ export default function ExpensesPage() {
             <div><Label>Description *</Label><Input value={formDesc} onChange={e => setFormDesc(e.target.value)} placeholder="e.g. Rent, Electricity, Transport" /></div>
             <div><Label>Amount (KES) *</Label><Input type="number" value={formAmount} onChange={e => setFormAmount(e.target.value)} placeholder="0.00" /></div>
             <div><Label>Notes</Label><Input value={formNotes} onChange={e => setFormNotes(e.target.value)} placeholder="Optional notes" /></div>
+            {canBackdate && <div><Label>Date</Label><DatePicker value={formDate} onChange={d => d && setFormDate(d)} /></div>}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
