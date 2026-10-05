@@ -1,9 +1,10 @@
 import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
+import { getArchivedLocations } from '../lib/customerLocations';
 
 export default createEndpoint({
-  description: 'Get customer details with order history',
+  description: 'Get customer details with order history and previous (secondary) locations',
   authenticated: true,
   inputSchema: z.object({ customerId: z.string() }),
   outputSchema: z.object({
@@ -11,6 +12,7 @@ export default createEndpoint({
     orderCount: z.number(),
     totalSpent: z.number(),
     orders: z.array(z.any()),
+    previousLocations: z.array(z.any()),
   }),
   execute: async ({ input }) => {
     const customer = await zite.customers.findOne({ id: input.customerId });
@@ -50,6 +52,7 @@ export default createEndpoint({
         status: String(r.status || ''),
         paymentMethod: String(r.paymentMethod || ''),
       })),
+      previousLocations: await getArchivedLocations(input.customerId),
     };
   },
 });
