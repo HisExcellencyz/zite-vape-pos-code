@@ -14,6 +14,7 @@ import { format } from 'date-fns';
 import LocationPickerDialog from '../components/LocationPickerDialog';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
 import ImportDialog from '../components/ImportDialog';
+import { usePermissions } from '../hooks/usePermissions';
 
 interface Customer {
   id: string;
@@ -43,6 +44,7 @@ import { useTableControls, TableControls, SortTh, FieldDef } from '../components
 const FIELDS: FieldDef<Customer>[] = [{ key: 'customerName', label: 'Name' }, { key: 'phoneNumber', label: 'Phone' }, { key: 'email', label: 'Email' }, { key: 'address', label: 'Address' }, { key: 'notes', label: 'Notes' }, { key: 'orderCount', label: 'Orders' }, { key: 'totalSpent', label: 'Total Spent' }];
 
 export default function CustomersPage() {
+  const { can } = usePermissions();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -54,6 +56,8 @@ export default function CustomersPage() {
   const [formPhone, setFormPhone] = useState('');
   const [formEmail, setFormEmail] = useState('');
   const [formAddress, setFormAddress] = useState('');
+  const [formCoords, setFormCoords] = useState('');
+  const [prevLocations, setPrevLocations] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
   const [duplicateMatch, setDuplicateMatch] = useState<Customer | null>(null);
   const [showDetails, setShowDetails] = useState(false);
@@ -82,7 +86,7 @@ export default function CustomersPage() {
 
   const openNew = () => {
     setEditing(null);
-    setFormName(''); setFormPhone(''); setFormEmail(''); setFormAddress('');
+    setFormName(''); setFormPhone(''); setFormEmail(''); setFormAddress(''); setFormCoords('');
     setDuplicateMatch(null);
     setShowForm(true);
   };
@@ -93,6 +97,7 @@ export default function CustomersPage() {
     setFormPhone(c.phoneNumber || '');
     setFormEmail(c.email || '');
     setFormAddress(c.address || '');
+    setFormCoords('');
     setDuplicateMatch(null);
     setShowForm(true);
   };
@@ -124,6 +129,7 @@ export default function CustomersPage() {
         phoneNumber: formPhone,
         email: formEmail || undefined,
         address: formAddress || undefined,
+        coordinates: formCoords || undefined,
       });
       toast.success(editing ? 'Customer updated' : 'Customer created');
       setShowForm(false);
@@ -168,6 +174,7 @@ export default function CustomersPage() {
       setDetailCustomer(res.customer);
       setDetailOrders(res.orders);
       setDetailStats({ orderCount: res.orderCount, totalSpent: res.totalSpent });
+      setPrevLocations((res as any).previousLocations || []);
       setShowDetails(true);
     } catch { toast.error('Failed to load details'); }
   };
@@ -194,8 +201,8 @@ export default function CustomersPage() {
   const renderActions = (c: Customer) => (
     <div className="flex justify-end gap-1">
       <Button variant="ghost" size="sm" onClick={() => openDetails(c)}><Eye className="w-3.5 h-3.5" /></Button>
-      <Button variant="ghost" size="sm" onClick={() => openEdit(c)}><Pencil className="w-3.5 h-3.5" /></Button>
-      <AlertDialog>
+      {can('customers', 'edit') && <Button variant="ghost" size="sm" onClick={() => openEdit(c)}><Pencil className="w-3.5 h-3.5" /></Button>}
+      {can('customers', 'delete') && <AlertDialog>
         <AlertDialogTrigger asChild><Button variant="ghost" size="sm" className="text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button></AlertDialogTrigger>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -207,7 +214,7 @@ export default function CustomersPage() {
             <AlertDialogAction onClick={() => handleDelete(c.id)} className="bg-destructive">Delete</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
-      </AlertDialog>
+      </AlertDialog>}
     </div>
   );
 
@@ -221,7 +228,7 @@ export default function CustomersPage() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <ViewToggle value={viewMode} onChange={setViewMode} />
-          {selectedIds.size > 0 && (
+          {selectedIds.size > 0 && can('customers', 'delete') && (
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button variant="outline" size="sm" className="border-destructive text-destructive hover:bg-destructive/10">
@@ -240,9 +247,9 @@ export default function CustomersPage() {
               </AlertDialogContent>
             </AlertDialog>
           )}
-          <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExport}><Download className="w-4 h-4 mr-1" /> Export</Button>
-          <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10" onClick={() => setImportOpen(true)}><Upload className="w-4 h-4 mr-1" /> Import</Button>
-          <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" /> Add Customer</Button>
+          {can('customers', 'export') && <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExport}><Download className="w-4 h-4 mr-1" /> Export</Button>}
+          {can('customers', 'import') && <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10" onClick={() => setImportOpen(true)}><Upload className="w-4 h-4 mr-1" /> Import</Button>}
+          {can('customers', 'create') && <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" /> Add Customer</Button>}
         </div>
       </div>
 
@@ -404,7 +411,7 @@ export default function CustomersPage() {
         onOpenChange={setShowLocationPicker}
         title="Customer Location"
         value={formAddress}
-        onSelect={(address) => { setFormAddress(address); }}
+        onSelect={(address, coords) => { setFormAddress(address); setFormCoords(coords); }}
       />
 
       <Dialog open={showDetails} onOpenChange={setShowDetails}>
@@ -425,6 +432,32 @@ export default function CustomersPage() {
                   <p className="text-xs text-muted-foreground">Total Spent</p>
                   <p className="text-2xl font-bold text-primary">{fmt(detailStats.totalSpent)}</p>
                 </CardContent></Card>
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-foreground mb-2">Saved Location</h3>
+                {detailCustomer.address || detailCustomer.coordinates ? (
+                  <div className="p-3 bg-muted/30 rounded-lg text-sm">
+                    <p className="text-foreground break-words">{detailCustomer.address || detailCustomer.coordinates}</p>
+                    {detailCustomer.address && detailCustomer.coordinates && <p className="text-xs font-mono text-muted-foreground">{detailCustomer.coordinates}</p>}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No location saved</p>
+                )}
+                {prevLocations.length > 0 && (
+                  <div className="mt-3">
+                    <h4 className="text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wider">Previous locations (archived)</h4>
+                    <div className="space-y-1.5">
+                      {prevLocations.map((l: any, i: number) => (
+                        <div key={i} className="p-2 bg-muted/20 rounded-lg text-xs">
+                          <p className="text-foreground break-words">{l.address || l.coordinates}</p>
+                          <p className="text-muted-foreground">
+                            {l.address && l.coordinates ? `${l.coordinates} · ` : ''}replaced {l.archivedAt ? format(new Date(l.archivedAt), 'dd MMM yyyy') : ''}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
               <div>
                 <h3 className="text-sm font-semibold text-foreground mb-2">Order History</h3>
