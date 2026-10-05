@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
-import { getAddresses, saveAddress, deleteRecord, getSuppliers } from 'zitejs/api';
+import { useState, useEffect, useRef } from 'react';
+import { getAddresses, saveAddress, deleteRecord, getSuppliers, syncSupplierAddresses } from 'zitejs/api';
+import { usePermissions } from '../hooks/usePermissions';
 import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
@@ -32,6 +33,8 @@ interface Address {
 interface SupplierLite { id: string; supplierName?: string; }
 
 export default function AddressesPage() {
+  const { can } = usePermissions();
+  const synced = useRef(false);
   const [tab, setTab] = useState('branches');
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [suppliers, setSuppliers] = useState<SupplierLite[]>([]);
@@ -56,6 +59,8 @@ export default function AddressesPage() {
     setLoading(true);
     try {
       // Addresses and suppliers are shared by every outlet, so nothing is filtered by outlet here.
+      // Every supplier has a Supplier-type location: back-fill older suppliers once per visit.
+      if (!synced.current) { synced.current = true; await syncSupplierAddresses({}).catch(() => {}); }
       const [res, sup] = await Promise.all([getAddresses({}), getSuppliers({})]);
       setAddresses(res.addresses as Address[]);
       setSuppliers(sup.suppliers as SupplierLite[]);
@@ -145,8 +150,8 @@ export default function AddressesPage() {
 
   const renderActions = (a: Address) => (
     <div className="flex gap-0.5 shrink-0" onClick={e => e.stopPropagation()}>
-      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEdit(a)}><Edit className="w-3 h-3" /></Button>
-      <AlertDialog>
+      {can('addresses', 'edit') && <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEdit(a)}><Edit className="w-3 h-3" /></Button>}
+      {can('addresses', 'delete') && <AlertDialog>
         <AlertDialogTrigger asChild>
           <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive"><Trash2 className="w-3 h-3" /></Button>
         </AlertDialogTrigger>
@@ -154,7 +159,7 @@ export default function AddressesPage() {
           <AlertDialogHeader><AlertDialogTitle>Delete this location?</AlertDialogTitle><AlertDialogDescription>This cannot be undone.</AlertDialogDescription></AlertDialogHeader>
           <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleDelete(a.id)}>Delete</AlertDialogAction></AlertDialogFooter>
         </AlertDialogContent>
-      </AlertDialog>
+      </AlertDialog>}
     </div>
   );
 
@@ -169,13 +174,13 @@ export default function AddressesPage() {
               {tab === 'branches' ? `${addresses.length} locations saved` : 'Where your orders are delivered'}
             </span>
           </div>
-          {tab === 'branches' && (
+          {tab === 'branches' && can('addresses', 'create') && (
             <Button size="sm" className="h-8" onClick={openNew}><Plus className="w-4 h-4 mr-1" /> Add Location</Button>
           )}
         </div>
         <TabsList className="bg-muted mt-1.5">
           <TabsTrigger value="branches">Branches</TabsTrigger>
-          <TabsTrigger value="deliveries">Deliveries</TabsTrigger>
+          {can('deliveries', 'view') && <TabsTrigger value="deliveries">Deliveries</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="branches" className="mt-2">
