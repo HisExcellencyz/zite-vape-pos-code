@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
+import { assertCan } from '../lib/permissions';
 
 export default createEndpoint({
   description: 'Create a purchase with items, optionally deducting from supplier deposit',
@@ -18,6 +19,7 @@ export default createEndpoint({
   }),
   outputSchema: z.object({ success: z.boolean(), purchase: z.any() }),
   execute: async ({ input, context }) => {
+    await assertCan(context.user.id, ['expenses', 'purchases'], 'create');
     const total = input.items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
 
     // If paying from deposit, check balance
