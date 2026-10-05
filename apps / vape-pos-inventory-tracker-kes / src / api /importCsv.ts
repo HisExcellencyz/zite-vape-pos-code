@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
 import { normalizeImageUrl, isHttpUrl } from '../lib/imageUrl';
+import { assertCan } from '../lib/permissions';
+import { syncSupplierAddress } from '../lib/supplierAddress';
 
 export default createEndpoint({
   description: 'Import CSV data for products, customers, or suppliers',
@@ -11,7 +13,8 @@ export default createEndpoint({
     rows: z.array(z.record(z.string())),
   }),
   outputSchema: z.object({ imported: z.number(), updated: z.number(), errors: z.array(z.string()) }),
-  execute: async ({ input }) => {
+  execute: async ({ input, context }) => {
+    await assertCan(context.user.id, input.table, 'import');
     let imported = 0;
     let updated = 0;
     const errors: string[] = [];
@@ -136,7 +139,7 @@ export default createEndpoint({
             const name = row['Supplier Name'] || row['supplierName'] || row['name'] || '';
             if (!name) { errors.push(`Row missing name`); continue; }
 
-            await zite.suppliers.create({
+            const createdSupplier = await zite.suppliers.create({
               record: {
                 supplierName: name,
                 phone: row['Phone'] || row['phone'] || null,
@@ -146,6 +149,8 @@ export default createEndpoint({
                 notes: null,
               },
             });
+            // Every supplier is also added as a Supplier-type location on the Addresses page.
+            try { await syncSupplierAddress({ id: createdSupplier.id, supplierName: name, address: row['Address'] || row['address'] || null }); } catch {}
             imported++;
           } catch (e: any) {
             errors.push(e.message || 'Unknown error');
