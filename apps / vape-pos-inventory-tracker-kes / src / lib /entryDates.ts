@@ -32,6 +32,22 @@ export function parseEntryDate(s: string): { iso: string; day: string } | null {
   return { iso: dt.toISOString(), day: `${y}-${pad(mo)}-${pad(d)}` };
 }
 
+/**
+ * Works out the new timestamp when someone edits an entry's date. `input` is a calendar day (YYYY-MM-DD).
+ * Returns null when the day is unchanged (the original time is kept). Changing the day is a backdate,
+ * so it throws unless the user is the Owner or an Admin. The original time of day is kept.
+ */
+export function resolveDateChange(input: string | undefined | null, currentIso: string | null | undefined, canBackdate: boolean): string | null {
+  if (!input) return null;
+  const wanted = parseEntryDate(input);
+  if (!wanted) throw new Error('Invalid date');
+  const curDay = currentIso ? dayEAT(currentIso) : null;
+  if (curDay === wanted.day) return null;
+  if (!canBackdate) throw new Error('Only the Owner and Admin can change or backdate entry dates');
+  const time = currentIso ? new Date(new Date(currentIso).getTime() + 3 * 3600 * 1000).toISOString().slice(11, 16) : '12:00';
+  return (parseEntryDate(`${wanted.day} ${time}`) || wanted).iso;
+}
+
 /** Ids of the Other Income entries created together with a sale (delivery fee and other revenues). */
 export async function linkedIncomeIds(saleNumber?: number | null): Promise<string[]> {
   if (saleNumber == null) return [];
@@ -40,6 +56,19 @@ export async function linkedIncomeIds(saleNumber?: number | null): Promise<strin
     params: [`% - Sale #${saleNumber}`],
   });
   return r.rows.map(x => String(x.id));
+}
+
+/** Changes a purchase's date and moves its supplier-ledger line (deposit payments) to the same date. */
+export async function movePurchaseDate(purchaseId: string, purchaseNumber: number | undefined | null, iso: string) {
+  await zite.purchases.update({ id: purchaseId, record: { purchaseDate: iso } });
+  if (purchaseNumber == null) return;
+  try {
+    const tx = await zite.sql({
+      query: `SELECT id FROM "SupplierTransactions" WHERE "type" = 'Purchase Deduction' AND ("notes" = $1 OR "notes" LIKE $2)`,
+      params: [`Purchase #${purchaseNumber}`, `Purchase #${purchaseNumber} (%`],
+    });
+    for (const r of tx.rows) await zite.supplierTransactions.update({ id: String(r.id), record: { transactionDate: iso } });
+  } catch {}
 }
 
 /** Changes a sale's date and moves its linked revenue entries to the same date. */
