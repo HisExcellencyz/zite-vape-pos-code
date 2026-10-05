@@ -18,6 +18,7 @@ const DEFAULT_LOGO = 'https://images.fillout.com/orgid-811092/flowpublicid-6heps
 
 import CommissionEditor from '../components/CommissionEditor';
 import type { Commission } from '../hooks/useBranch';
+import { usePermissions } from '../hooks/usePermissions';
 
 const defaultIncomes = (): Commission[] => [{ name: 'Delivery Fee', type: 'fixed', value: DEFAULT_DELIVERY_FEE, enabled: true }];
 
@@ -30,6 +31,7 @@ const STANDARD_DEDUCTIONS: Commission[] = [
 const sameName = (a?: string, b?: string) => (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
 
 export default function SettingsPage() {
+  const { can } = usePermissions();
   const { branches, currentBranch, setCurrentBranchId, refresh: refreshBranches } = useBranch();
   const [outletDialogOpen, setOutletDialogOpen] = useState(false);
   const [editingOutlet, setEditingOutlet] = useState<Branch | null>(null);
@@ -159,7 +161,7 @@ export default function SettingsPage() {
     <Card className="bg-card border-border">
       <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
         <CardTitle className="text-base flex items-center gap-2"><Icon className="w-4 h-4 text-primary" /> {RIDER_LABELS[type]}</CardTitle>
-        <Button size="sm" onClick={() => openRider(type)}><Plus className="w-4 h-4 mr-1" /> Add</Button>
+        {can('settings', 'create') && <Button size="sm" onClick={() => openRider(type)}><Plus className="w-4 h-4 mr-1" /> Add</Button>}
       </CardHeader>
       <CardContent className="space-y-2">
         {riders[type].length === 0 ? (
@@ -171,8 +173,8 @@ export default function SettingsPage() {
               {r.phone && <p className="text-xs text-muted-foreground flex items-center gap-1"><Phone className="w-3 h-3" /> {r.phone}</p>}
               {r.notes && <p className="text-xs text-muted-foreground break-words">{r.notes}</p>}
             </div>
-            <Button variant="ghost" size="sm" onClick={() => openRider(type, r)}><Pencil className="w-3.5 h-3.5" /></Button>
-            <Button variant="ghost" size="sm" className="text-destructive" onClick={() => handleDeleteRider(type, r)}><Trash2 className="w-3.5 h-3.5" /></Button>
+            {can('settings', 'edit') && <Button variant="ghost" size="sm" onClick={() => openRider(type, r)}><Pencil className="w-3.5 h-3.5" /></Button>}
+            {can('settings', 'delete') && <Button variant="ghost" size="sm" className="text-destructive" onClick={() => handleDeleteRider(type, r)}><Trash2 className="w-3.5 h-3.5" /></Button>}
           </div>
         ))}
       </CardContent>
@@ -196,7 +198,7 @@ export default function SettingsPage() {
           <h1 className="text-2xl font-bold text-foreground">Settings</h1>
           <p className="text-sm text-muted-foreground">Manage your outlets, business overview and delivery</p>
         </div>
-        <Button asChild variant="outline" size="sm"><Link to="/users"><Shield className="w-4 h-4 mr-1" /> Users</Link></Button>
+        {can('users', 'view') && <Button asChild variant="outline" size="sm"><Link to="/users"><Shield className="w-4 h-4 mr-1" /> Users</Link></Button>}
       </div>
 
       <Tabs defaultValue="outlets">
@@ -213,7 +215,7 @@ export default function SettingsPage() {
               business name across outlets. Switch between them from the sidebar, and the Dashboard can be
               filtered to a single outlet at a time. Suppliers, customers and addresses are shared by all outlets.
             </p>
-            <Button size="sm" onClick={openNewOutlet}><Plus className="w-4 h-4 mr-1" /> Add Outlet</Button>
+            {can('settings', 'create') && <Button size="sm" onClick={openNewOutlet}><Plus className="w-4 h-4 mr-1" /> Add Outlet</Button>}
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -237,7 +239,7 @@ export default function SettingsPage() {
                     <Button variant="outline" size="sm" className="flex-1" onClick={() => setCurrentBranchId(b.id)} disabled={b.id === currentBranch?.id}>
                       <Store className="w-3.5 h-3.5 mr-1" /> Switch here
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => openEditOutlet(b)}><Pencil className="w-3.5 h-3.5" /></Button>
+                    {can('settings', 'edit') && <Button variant="ghost" size="sm" onClick={() => openEditOutlet(b)}><Pencil className="w-3.5 h-3.5" /></Button>}
                   </div>
                 </CardContent>
               </Card>
