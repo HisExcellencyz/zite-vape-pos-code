@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
+import { assertCan } from '../lib/permissions';
 
 export default createEndpoint({
   description: 'Export data as CSV for any supported table',
@@ -9,7 +10,8 @@ export default createEndpoint({
     table: z.enum(['products', 'customers', 'suppliers', 'sales', 'purchases', 'expenses']),
   }),
   outputSchema: z.object({ csv: z.string(), filename: z.string() }),
-  execute: async ({ input }) => {
+  execute: async ({ input, context }) => {
+    await assertCan(context.user.id, input.table === 'sales' ? 'income' : input.table === 'purchases' ? ['purchases', 'expenses'] : input.table, 'export');
     let rows: Record<string, unknown>[] = [];
     let headers: string[] = [];
     let filename = '';
