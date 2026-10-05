@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
+import { getAccess } from '../lib/permissions';
+import { todayEAT, resolveDateChange, moveSaleDate } from '../lib/entryDates';
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 const normRow = (r: Record<string, string>) => {
@@ -45,18 +47,22 @@ function paymentMethod(s: string) {
 }
 
 export default createEndpoint({
-  description: 'Bulk import (optionally backdated) sales from CSV rows. Rows with the same Sale Ref form one sale.',
+  description: 'Bulk import sales from CSV rows. Rows with the same Sale Ref form one sale. Dated (backdated) rows, and rows that change the date of an existing sale (Sale Number), are only accepted from the Owner and Admin.',
   authenticated: true,
   inputSchema: z.object({
     rows: z.array(z.record(z.string())),
     adjustStock: z.boolean().optional(),
   }),
-  outputSchema: z.object({ imported: z.number(), skipped: z.number(), errors: z.array(z.string()) }),
+  outputSchema: z.object({ imported: z.number(), updated: z.number().optional(), skipped: z.number(), errors: z.array(z.string()) }),
   execute: async ({ input, context }) => {
     if (input.rows.length > 1500) throw new Error('Too many rows. Import up to 1,500 rows at a time.');
 
+    const access = await getAccess(context.user.id);
+    if (!access.can('income', 'import')) throw new Error('You do not have permission to import sales. Ask an administrator to update your role.');
+
     const errors: string[] = [];
     let imported = 0;
+    let updated = 0;
     let skipped = 0;
 
     const { records: products } = await zite.products.findAll({ limit: 2000 });
@@ -74,8 +80,11 @@ export default createEndpoint({
     );
 
     const groups = new Map<string, { line: number; r: Record<string, string> }[]>();
+    const dateChanges: { line: number; r: Record<string, string> }[] = [];
     input.rows.forEach((raw, i) => {
       const r = normRow(raw);
+      // A Sale Number means "change the date of this existing sale" (Owner/Admin only).
+      if (r['salenumber']) { dateChanges.push({ line: i + 2, r }); return; }
       const ref = r['saleref'] || r['ref'] || '';
       const key = ref || `__row${i}`;
       if (!groups.has(key)) groups.set(key, []);
@@ -83,6 +92,28 @@ export default createEndpoint({
     });
 
     const stockDelta = new Map<string, number>();
+
+    for (const { line, r } of dateChanges) {
+      const label = `Row ${line} (sale #${r['salenumber']})`;
+      try {
+        if (!access.canBackdate) { skipped++; errors.push(`${label}: only the Owner and Admin can change the date of an existing sale`); continue; }
+        const n = Number(r['salenumber']);
+        const found = Number.isFinite(n) ? await zite.sql({ query: `SELECT id, "saleDate" FROM "Sales" WHERE "saleNumber" = $1`, params: [n] }) : null;
+        const row = found?.rows[0];
+        if (!row) { skipped++; errors.push(`${label}: no sale with that number`); continue; }
+        const dateStr = r['date'] || r['saledate'] || '';
+        if (!dateStr) { skipped++; errors.push(`${label}: a Date is required`); continue; }
+        const pd = parseDate(dateStr);
+        if (!pd) { skipped++; errors.push(`${label}: invalid date "${dateStr}"`); continue; }
+        const iso = resolveDateChange(pd.day, row.saleDate ? String(row.saleDate) : null, true);
+        if (!iso) { skipped++; errors.push(`${label}: already dated ${pd.day}, nothing to change`); continue; }
+        await moveSaleDate(String(row.id), n, iso);
+        updated++;
+      } catch (e: any) {
+        skipped++;
+        errors.push(`${label}: ${e.message || 'failed'}`);
+      }
+    }
 
     for (const [key, lines] of groups) {
       const ref = key.startsWith('__row') ? '' : key;
@@ -95,6 +126,10 @@ export default createEndpoint({
         if (dateStr) {
           const pd = parseDate(dateStr);
           if (!pd) { skipped++; errors.push(`${label}: invalid date "${dateStr}" (use YYYY-MM-DD or DD/MM/YYYY)`); continue; }
+          // Only the Owner and Admin may import sales with a date other than today.
+          if (pd.day !== todayEAT() && !access.canBackdate) {
+            skipped++; errors.push(`${label}: only the Owner and Admin can import backdated sales (date ${pd.day})`); continue;
+          }
           saleDate = pd.iso;
         }
 
@@ -178,6 +213,6 @@ export default createEndpoint({
       await zite.products.update({ id: productId, record: { stockQuantity: Math.max(0, (p.stockQuantity || 0) - delta) } });
     }
 
-    return { imported, skipped, errors: errors.slice(0, 50) };
+    return { imported, updated, skipped, errors: errors.slice(0, 50) };
   },
 });
