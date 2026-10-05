@@ -261,10 +261,11 @@ export default function DeliveriesPanel() {
                               <p className="font-medium text-foreground break-words leading-snug">{cust?.customerName || 'Customer'}</p>
                               <p className="text-[10px] text-muted-foreground">{c.orders} order{c.orders === 1 ? '' : 's'} · {fmt(c.revenue)}</p>
                             </div>
+                            {saved && (
+                              <span className="flex items-center gap-1 text-[10px] text-emerald-400 shrink-0 ml-auto"><UserCheck className="w-3 h-3" /> Saved</span>
+                            )}
                           </div>
-                          {saved ? (
-                            <span className="flex items-center gap-1 text-[10px] text-emerald-400 pl-[18px]"><UserCheck className="w-3 h-3" /> Saved</span>
-                          ) : (
+                          {!saved && (
                             <Button
                               size="sm"
                               variant="outline"
