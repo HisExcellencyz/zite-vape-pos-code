@@ -9,7 +9,8 @@ import { Button } from '@project/components/ui/button';
 import { Checkbox } from '@project/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { cn } from '@project/components/lib/utils';
-import { Trash2, BookMarked, Loader2, Clock, Flag, RefreshCw, PackageCheck, Search } from 'lucide-react';
+import { Trash2, BookMarked, Loader2, Clock, Flag, RefreshCw, PackageCheck, Search, ChevronUp, ChevronDown, GripVertical, Route as RouteIcon } from 'lucide-react';
+import { toast } from 'sonner';
 import LocationTabs, { PinStatus } from './LocationTabs';
 import { geocode } from '../lib/geocode';
 import { numberedPin } from '../lib/pinIcon';
@@ -136,6 +137,71 @@ function haversineM(a: { lat: number; lng: number }, b: { lat: number; lng: numb
 let nextId = 1;
 function genId() { return `rp_${nextId++}_${Date.now()}`; }
 
+/** Straight-line distance inflated by a typical road factor: used when Google can't give a road distance. */
+const roadGuessM = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => haversineM(a, b) * 1.3;
+
+/**
+ * Best order of the drop-offs (indices 0..k-1). `D` is the distance matrix between the nodes
+ * [anchor?, ...drop-offs, terminal?]; the anchor (last pick-up/start) and the terminal (end point) stay fixed.
+ * Exact (Held-Karp) for up to 12 drop-offs, nearest-neighbour + 2-opt beyond that.
+ */
+function bestDropOrder(D: number[][], k: number, hasAnchor: boolean, hasTerminal: boolean): number[] {
+  const a = hasAnchor ? 1 : 0;
+  const t = hasTerminal ? a + k : -1;
+  const between = (i: number, j: number) => D[a + i][a + j];
+  const first = (j: number) => (hasAnchor ? D[0][a + j] : 0);
+  const last = (j: number) => (hasTerminal ? D[a + j][t] : 0);
+  const total = (o: number[]) => first(o[0]) + o.slice(1).reduce((s, v, i) => s + between(o[i], v), 0) + last(o[o.length - 1]);
+
+  if (k <= 12) {
+    const N = 1 << k;
+    const dp = new Float64Array(N * k).fill(Infinity);
+    const par = new Int8Array(N * k).fill(-1);
+    for (let j = 0; j < k; j++) dp[(1 << j) * k + j] = first(j);
+    for (let m = 1; m < N; m++) {
+      for (let j = 0; j < k; j++) {
+        const cur = dp[m * k + j];
+        if (!(m & (1 << j)) || cur === Infinity) continue;
+        for (let n = 0; n < k; n++) {
+          if (m & (1 << n)) continue;
+          const nm = m | (1 << n);
+          const c = cur + between(j, n);
+          if (c < dp[nm * k + n]) { dp[nm * k + n] = c; par[nm * k + n] = j; }
+        }
+      }
+    }
+    let bestJ = 0, best = Infinity;
+    for (let j = 0; j < k; j++) {
+      const c = dp[(N - 1) * k + j] + last(j);
+      if (c < best) { best = c; bestJ = j; }
+    }
+    const order: number[] = [];
+    let m = N - 1, j = bestJ;
+    while (j !== -1) { order.push(j); const p = par[m * k + j]; m &= ~(1 << j); j = p; }
+    return order.reverse();
+  }
+
+  // Many drop-offs: nearest neighbour, then 2-opt improvements.
+  const left = new Set(Array.from({ length: k }, (_, i) => i));
+  let cur = [...left].sort((x, y) => first(x) - first(y))[0];
+  const order = [cur]; left.delete(cur);
+  while (left.size) {
+    cur = [...left].sort((x, y) => between(order[order.length - 1], x) - between(order[order.length - 1], y))[0];
+    order.push(cur); left.delete(cur);
+  }
+  let improved = true;
+  while (improved) {
+    improved = false;
+    for (let i = 0; i < k - 1; i++) {
+      for (let j = i + 1; j < k; j++) {
+        const cand = [...order.slice(0, i), ...order.slice(i, j + 1).reverse(), ...order.slice(j + 1)];
+        if (total(cand) + 1e-6 < total(order)) { order.splice(0, k, ...cand); improved = true; }
+      }
+    }
+  }
+  return order;
+}
+
 interface SavedAddr { id: string; addressName?: string; type?: string; coordinates?: string; fullAddress?: string; supplierId?: string | null; supplierName?: string; }
 
 interface PointExtra { supplierId?: string; supplierName?: string; tag?: 'pickup' | 'dropoff'; }
@@ -164,6 +230,8 @@ export default function DeliveryRouteMap({
   const [tripInfo, setTripInfo] = useState<TripInfo | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
   const [pickupFor, setPickupFor] = useState<RoutePoint | null>(null);
+  const [planning, setPlanning] = useState(false);
+  const dragId = useRef<string | null>(null);
 
   // Which part of the route the next picked location (search, coordinates, plus code or map click) goes to.
   const [target, setTargetState] = useState<Target>(() => (points.some(p => p.tag === 'start') ? 'stops' : 'start'));
@@ -410,6 +478,77 @@ export default function DeliveryRouteMap({
     commit(points.filter(p => p.id !== id));
   };
 
+  // ── Drop-off order: drag, use the arrows, or "Plan best route" ──
+  const dropoffs = points.filter(p => p.tag === 'dropoff');
+  /** Replaces the drop-offs with `next` (in that order). Start, pick-ups and end are untouched and stay before / after. */
+  const setDropoffs = (next: RoutePoint[]) => commit([...points.filter(p => p.tag !== 'dropoff'), ...next]);
+  const moveDrop = (id: string, dir: -1 | 1) => {
+    const i = dropoffs.findIndex(p => p.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= dropoffs.length) return;
+    const next = [...dropoffs];
+    [next[i], next[j]] = [next[j], next[i]];
+    setDropoffs(next);
+  };
+  const dropOnto = (fromId: string | null, toId: string) => {
+    if (!fromId || fromId === toId) return;
+    const from = dropoffs.findIndex(p => p.id === fromId);
+    const to = dropoffs.findIndex(p => p.id === toId);
+    if (from < 0 || to < 0) return;
+    const next = [...dropoffs];
+    const [item] = next.splice(from, 1);
+    next.splice(to, 0, item);
+    setDropoffs(next);
+  };
+
+  /** Re-orders the drop-offs for the shortest driving distance: from the last pick-up (or start) to the end point. */
+  const planBestRoute = async () => {
+    if (dropoffs.length < 2) { toast.info('Add at least two drop-off points to plan the best route'); return; }
+    setPlanning(true);
+    try {
+      const anchor = points.filter(p => p.tag !== 'dropoff' && p.tag !== 'end').slice(-1)[0];
+      const terminal = endPt || (showReturn ? startPt : undefined);
+      const nodes: RoutePoint[] = [...(anchor ? [anchor] : []), ...dropoffs, ...(terminal ? [terminal] : [])];
+      const n = nodes.length;
+      const D: number[][] = nodes.map((p, i) => nodes.map((q, j) => (i === j ? 0 : roadGuessM(p, q))));
+      let usedRoads = false;
+
+      if (apiKey && n <= 25) {
+        try {
+          const wpt = (p: RoutePoint) => ({ waypoint: { location: { latLng: { latitude: p.lat, longitude: p.lng } } } });
+          const r = await fetch('https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Goog-Api-Key': apiKey,
+              'X-Goog-FieldMask': 'originIndex,destinationIndex,distanceMeters,condition',
+            },
+            body: JSON.stringify({ origins: nodes.map(wpt), destinations: nodes.map(wpt), travelMode: 'DRIVE' }),
+          });
+          if (r.ok) {
+            const rows: { originIndex?: number; destinationIndex?: number; distanceMeters?: number; condition?: string }[] = await r.json();
+            rows.forEach(e => {
+              const o = e.originIndex ?? 0, d = e.destinationIndex ?? 0;
+              if (o !== d && typeof e.distanceMeters === 'number' && (!e.condition || e.condition === 'ROUTE_EXISTS')) { D[o][d] = e.distanceMeters; usedRoads = true; }
+            });
+          }
+        } catch { /* fall back to estimated distances */ }
+      }
+
+      const order = bestDropOrder(D, !!anchor, !!terminal);
+      const a = anchor ? 1 : 0;
+      const seq = [...(anchor ? [0] : []), ...order.map(i => a + i), ...(terminal ? [n - 1] : [])];
+      const meters = seq.slice(1).reduce((s, v, i) => s + D[seq[i]][v], 0);
+      const changed = order.some((v, i) => v !== i);
+      if (changed) setDropoffs(order.map(i => dropoffs[i]));
+      toast.success(
+        `${changed ? 'Drop-offs re-ordered' : 'Drop-offs are already in the best order'} · about ${(meters / 1000).toFixed(1)} km${usedRoads ? '' : ' (estimated, road distances unavailable)'}`,
+      );
+    } finally {
+      setPlanning(false);
+    }
+  };
+
   const toggleDiffEnd = (on: boolean) => {
     setDiffEnd(on);
     if (on) {
@@ -492,6 +631,18 @@ export default function DeliveryRouteMap({
           {error && <div className="absolute inset-0 flex items-center justify-center bg-background text-red-500 text-sm">{error}</div>}
         </div>
 
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full h-9 text-xs border-pink-500/70 text-pink-400 hover:bg-pink-500/10 hover:text-pink-400"
+          onClick={planBestRoute}
+          disabled={planning || dropoffs.length < 2}
+          title={dropoffs.length < 2 ? 'Add at least two drop-off points' : 'Re-order the drop-offs for the shortest route'}
+        >
+          {planning ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <RouteIcon className="w-3.5 h-3.5 mr-1.5" />}
+          Plan best route
+        </Button>
+
         <PinStatus text={statusText} />
 
         <div className="space-y-2.5 pt-1">
@@ -523,8 +674,19 @@ export default function DeliveryRouteMap({
             }
             const isSupplierPickup = pt.tag === 'pickup' && !!pt.supplierId;
             const picked = isSupplierPickup ? selectedFor(pt.id).length : 0;
+            const isDrop = pt.tag === 'dropoff';
+            const dropIdx = isDrop ? dropoffs.findIndex(d => d.id === pt.id) : -1;
             return (
-              <div key={pt.id} className="flex items-center gap-2 bg-muted/50 rounded-md px-2 py-1.5 text-xs">
+              <div
+                key={pt.id}
+                className="flex items-center gap-2 bg-muted/50 rounded-md px-2 py-1.5 text-xs"
+                draggable={isDrop}
+                onDragStart={isDrop ? e => { dragId.current = pt.id; e.dataTransfer.effectAllowed = 'move'; } : undefined}
+                onDragOver={isDrop ? e => { if (dragId.current && dragId.current !== pt.id) e.preventDefault(); } : undefined}
+                onDrop={isDrop ? e => { e.preventDefault(); dropOnto(dragId.current, pt.id); dragId.current = null; } : undefined}
+                onDragEnd={() => { dragId.current = null; }}
+              >
+                {isDrop && dropoffs.length > 1 && <GripVertical className="w-3.5 h-3.5 text-muted-foreground cursor-grab shrink-0 -mr-1" />}
                 <span className="w-5 h-5 rounded-full text-white text-[10px] font-bold flex items-center justify-center shrink-0" style={{ background: pt.tag ? tagColors[pt.tag] : '#6b7280' }}>
                   {i + 1}
                 </span>
@@ -541,6 +703,16 @@ export default function DeliveryRouteMap({
                   </SelectContent>
                 </Select>
                 <span className="flex-1 truncate text-foreground">{pt.label}</span>
+                {isDrop && dropoffs.length > 1 && (
+                  <div className="flex shrink-0">
+                    <button type="button" onClick={() => moveDrop(pt.id, -1)} disabled={dropIdx <= 0} title="Move earlier" className="p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30">
+                      <ChevronUp className="w-4 h-4" />
+                    </button>
+                    <button type="button" onClick={() => moveDrop(pt.id, 1)} disabled={dropIdx >= dropoffs.length - 1} title="Move later" className="p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30">
+                      <ChevronDown className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
                 {isSupplierPickup && (
                   <button
                     type="button"
