@@ -137,9 +137,9 @@ export default function DashboardPage({ scope = 'outlet' }: { scope?: 'outlet' |
   useEffect(() => { if (scope === 'business' || currentBranch) load(); }, [branchId, scope, startDate?.getTime(), endDate?.getTime()]);
 
   const kpis = data ? [
-    { label: 'Total Sales', value: fmt(data.totalRevenue), icon: ShoppingCart, color: 'text-sky-500', tint: 'sky', change: `${data.totalSales} orders` },
+    { label: 'Total Sales', value: fmt(data.totalRevenue), icon: ShoppingCart, color: 'text-sky-500', tint: 'sky', change: `${data.totalSales} orders, before discounts` },
     { label: 'Profit / Loss', value: fmt(data.profitLoss), icon: data.profitLoss >= 0 ? TrendingUp : TrendingDown, color: data.profitLoss >= 0 ? 'text-emerald-500' : 'text-red-500', tint: data.profitLoss >= 0 ? 'emerald' : 'red', change: data.profitLoss >= 0 ? 'Profit' : 'Loss' },
-    { label: 'Total Expenses', value: fmt(data.totalExpenses), icon: DollarSign, color: 'text-pink-500', tint: 'pink', change: `Incl. ${fmt(data.totalPurchases)} purchases` },
+    { label: 'Total Expenses', value: fmt(data.totalExpenses), icon: DollarSign, color: 'text-pink-500', tint: 'pink', change: `Incl. ${fmt(data.totalPurchases)} purchases, ${fmt(data.totalDiscounts || 0)} discounts` },
     { label: 'Stock Value', value: fmt(data.stockValue), icon: Package, color: 'text-amber-500', tint: 'amber', change: 'At cost price' },
   ] : [];
 
