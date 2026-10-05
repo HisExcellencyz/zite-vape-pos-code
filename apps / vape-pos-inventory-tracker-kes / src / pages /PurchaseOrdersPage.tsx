@@ -21,6 +21,7 @@ import { DatePicker } from '@project/components/ui/date-picker';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
 import ImportDialog from '../components/ImportDialog';
 import { useBranch } from '../hooks/useBranch';
+import { usePermissions } from '../hooks/usePermissions';
 
 interface LPOItem {
   productId: string;
@@ -57,6 +58,7 @@ const statusColors: Record<string, string> = {
 };
 
 export default function PurchaseOrdersPage() {
+  const { can } = usePermissions();
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -203,7 +205,7 @@ export default function PurchaseOrdersPage() {
   const renderActions = (o: PurchaseOrder) => (
     <div className="flex items-center justify-end gap-1 flex-wrap">
       <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowDetail(o)} title="View"><Eye className="w-3.5 h-3.5" /></Button>
-      {o.status !== 'verified' && o.status !== 'cancelled' && (
+      {o.status !== 'verified' && o.status !== 'cancelled' && can('purchaseOrders', 'approve') && (
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openVerify(o)} title="Verify"><ClipboardCheck className="w-3.5 h-3.5" /></Button>
       )}
       <DropdownMenu>
@@ -216,10 +218,10 @@ export default function PurchaseOrdersPage() {
         </DropdownMenuContent>
       </DropdownMenu>
       <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDownloadExcel(o)} title="Excel"><FileSpreadsheet className="w-3.5 h-3.5" /></Button>
-      {o.status === 'draft' && (
+      {o.status === 'draft' && can('purchaseOrders', 'edit') && (
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditForm(o)} title="Edit"><Search className="w-3.5 h-3.5" /></Button>
       )}
-      <AlertDialog>
+      {can('purchaseOrders', 'delete') && <AlertDialog>
         <AlertDialogTrigger asChild>
           <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button>
         </AlertDialogTrigger>
@@ -233,7 +235,7 @@ export default function PurchaseOrdersPage() {
             <AlertDialogAction onClick={() => handleDelete(o.id)}>Delete</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
-      </AlertDialog>
+      </AlertDialog>}
     </div>
   );
 
@@ -250,8 +252,8 @@ export default function PurchaseOrdersPage() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <ViewToggle value={viewMode} onChange={setViewMode} />
-          <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10" onClick={() => setImportOpen(true)}><Upload className="w-4 h-4 mr-1" /> Import</Button>
-          <Button size="sm" onClick={openNewForm}><Plus className="w-4 h-4 mr-1" /> New LPO</Button>
+          {can('purchaseOrders', 'import') && <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10" onClick={() => setImportOpen(true)}><Upload className="w-4 h-4 mr-1" /> Import</Button>}
+          {can('purchaseOrders', 'create') && <Button size="sm" onClick={openNewForm}><Plus className="w-4 h-4 mr-1" /> New LPO</Button>}
         </div>
       </div>
 
