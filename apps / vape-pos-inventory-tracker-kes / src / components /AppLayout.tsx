@@ -27,11 +27,11 @@ const navItems: { to: string; icon: any; label: string; area: string; alt?: stri
   { to: '/', icon: LayoutDashboard, label: 'Dashboard', area: 'reports' },
   { to: '/pos', icon: ShoppingCart, label: 'POS', area: 'pos' },
   { to: '/inventory', icon: Package, label: 'Inventory', area: 'inventory' },
-  { to: '/income', icon: Receipt, label: 'Income', area: 'pos' },
+  { to: '/income', icon: Receipt, label: 'Income', area: 'income' },
   { to: '/expenses', icon: Wallet, label: 'Expenses', area: 'expenses', alt: 'purchases' },
   { to: '/customers', icon: Users, label: 'Customers', area: 'customers' },
   { to: '/suppliers', icon: Truck, label: 'Suppliers', area: 'suppliers' },
-  { to: '/addresses', icon: MapPin, label: 'Addresses', area: 'pos' },
+  { to: '/addresses', icon: MapPin, label: 'Addresses', area: 'addresses' },
   { to: '/settings', icon: Settings, label: 'Settings', area: 'settings' },
 ];
 
@@ -50,7 +50,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const visibleItems = navItems.filter(item => can(item.area, 'view') || (!!item.alt && can(item.alt, 'view')));
   const outletLogo = currentBranch?.logoUrl || DEFAULT_LOGO;
   const outletName = currentBranch?.branchName || 'Uptown Vapes';
-  const canArchive = can('settings', 'view');
+  const canArchive = can('archive', 'view');
 
   const handleArchive = async () => {
     if (archiving) return;
