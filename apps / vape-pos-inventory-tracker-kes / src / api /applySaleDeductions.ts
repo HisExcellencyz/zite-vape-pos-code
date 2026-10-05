@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
+import { assertCan } from '../lib/permissions';
 
 export default createEndpoint({
   description: 'Applies deductions such as commissions to one or more sales',
@@ -11,7 +12,8 @@ export default createEndpoint({
     mode: z.enum(['add', 'replace']),
   }),
   outputSchema: z.object({ updated: z.number() }),
-  execute: async ({ input }) => {
+  execute: async ({ input, context }) => {
+    await assertCan(context.user.id, 'income', 'edit');
     let updated = 0;
     for (const id of input.saleIds) {
       const sale = await zite.sales.findOne({ id });
