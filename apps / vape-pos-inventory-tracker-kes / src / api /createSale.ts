@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
+import { assertCan } from '../lib/permissions';
 
 export default createEndpoint({
   description: 'Create a POS sale with items. An optional delivery fee (and other incomes) is recorded as income; an optional rider is noted on the sale.',
@@ -31,6 +32,7 @@ export default createEndpoint({
   }),
   outputSchema: z.object({ success: z.boolean(), sale: z.any() }),
   execute: async ({ input, context }) => {
+    await assertCan(context.user.id, 'pos', 'create');
     let subtotal = 0;
     let totalTax = 0;
 
