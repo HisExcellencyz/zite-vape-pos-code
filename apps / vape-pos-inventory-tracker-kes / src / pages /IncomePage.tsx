@@ -35,6 +35,11 @@ interface Sale {
   deductions?: number;
   deliveryAddress?: string;
   notes?: string;
+  /** Added on this page: the sale's revenues (delivery fee and others, from its linked Other Income entries). */
+  revenues?: number;
+  revenueList?: { id: string; name: string; amount: number }[];
+  /** Subtotal + Revenues, shown as Total in the list. */
+  grandTotal?: number;
 }
 
 interface Income { id: string; incomeNumber?: number; incomeDate?: string; description?: string; amount?: number; notes?: string; }
@@ -44,7 +49,8 @@ const SF: FieldDef<Sale>[] = [
   { key: 'saleDate', label: 'Date', get: s => s.saleDate || '' },
   { key: 'paymentMethod', label: 'Payment', get: s => paymentLabel(s.paymentMethod) },
   { key: 'subtotal', label: 'Subtotal' },
-  { key: 'total', label: 'Total' },
+  { key: 'revenues', label: 'Revenues' },
+  { key: 'grandTotal', label: 'Total' },
   { key: 'deductions', label: 'Deductions' },
   { key: 'rider', label: 'Rider', get: s => parseRider(s.notes) },
   { key: 'status', label: 'Status' },
@@ -68,6 +74,23 @@ const statusColors: Record<string, string> = {
   Voided: 'bg-red-500/10 text-red-400 border-red-500/20',
 };
 
+const SALE_LINK = /\s-\sSale\s#(\d+)$/;
+
+/** Revenues of each sale: Other Income entries whose description ends with " - Sale #n" (the delivery fee included). */
+function revenuesBySale(income: Income[]) {
+  const map = new Map<number, { total: number; list: { id: string; name: string; amount: number }[] }>();
+  for (const i of income) {
+    const m = SALE_LINK.exec(i.description || '');
+    if (!m) continue;
+    const n = Number(m[1]);
+    const cur = map.get(n) || { total: 0, list: [] };
+    cur.total += i.amount || 0;
+    cur.list.push({ id: i.id, name: (i.description || '').replace(SALE_LINK, ''), amount: i.amount || 0 });
+    map.set(n, cur);
+  }
+  return map;
+}
+
 const q = (v: unknown) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
 
 export default function IncomePage() {
@@ -88,7 +111,13 @@ export default function IncomePage() {
   const [delT, setDelT] = useState<{ kind: EntryKind; entry: any } | null>(null);
   const [range, setRange] = useState<Range>({});
 
-  const dated = sales.filter(x => inRange(range, x.saleDate));
+  const revMap = revenuesBySale(income);
+  const salesWithRevenues: Sale[] = sales.map(s => {
+    const r = s.saleNumber != null ? revMap.get(s.saleNumber) : undefined;
+    const revenues = Math.round((r?.total || 0) * 100) / 100;
+    return { ...s, revenues, revenueList: r?.list || [], grandTotal: (s.subtotal || 0) + revenues };
+  });
+  const dated = salesWithRevenues.filter(x => inRange(range, x.saleDate));
   const fees = income.filter(isDeliveryFeeIncome).filter(x => inRange(range, x.incomeDate));
   const other = income.filter(x => !isDeliveryFeeIncome(x)).filter(x => inRange(range, x.incomeDate));
   const tcS = useTableControls(dated, SF);
@@ -105,7 +134,7 @@ export default function IncomePage() {
     try {
       const [s, i] = await Promise.all([
         getSales({ branchId: currentBranch?.id, status: statusFilter && statusFilter !== 'all' ? statusFilter : undefined }),
-        getIncome({ branchId: currentBranch?.id }),
+        getIncome({ branchId: currentBranch?.id, limit: 2000 }),
       ]);
       setSales(s.sales as Sale[]);
       setIncome(i.income as Income[]);
@@ -295,7 +324,8 @@ export default function IncomePage() {
                         <SortTh c={tcS} k="saleDate" className="text-left">Date</SortTh>
                         <SortTh c={tcS} k="paymentMethod" className="text-left">Payment</SortTh>
                         <SortTh c={tcS} k="subtotal" className="text-right">Subtotal</SortTh>
-                        <SortTh c={tcS} k="total" className="text-right">Total</SortTh>
+                        <SortTh c={tcS} k="revenues" className="text-right">Revenues</SortTh>
+                        <SortTh c={tcS} k="grandTotal" className="text-right">Total</SortTh>
                         <SortTh c={tcS} k="deductions" className="text-right">Deductions</SortTh>
                         <SortTh c={tcS} k="rider" className="text-left">Rider</SortTh>
                         <SortTh c={tcS} k="status" className="text-center">Status</SortTh>
@@ -306,12 +336,12 @@ export default function IncomePage() {
                       {loading ? (
                         [...Array(5)].map((_, i) => (
                           <tr key={i} className="border-b border-border">
-                            {[...Array(9 + actionCols)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}
+                            {[...Array(10 + actionCols)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}
                           </tr>
                         ))
                       ) : rows.length === 0 ? (
                         <tr>
-                          <td colSpan={9 + actionCols} className="text-center py-12 text-muted-foreground">
+                          <td colSpan={10 + actionCols} className="text-center py-12 text-muted-foreground">
                             <Receipt className="w-10 h-10 mx-auto mb-2 opacity-40" />
                             No sales yet. Create your first sale in POS or import a file.
                           </td>
@@ -323,7 +353,8 @@ export default function IncomePage() {
                           <td className="p-3 text-foreground">{s.saleDate ? format(new Date(s.saleDate), 'dd MMM yyyy HH:mm') : '-'}</td>
                           <td className="p-3 text-muted-foreground break-words">{paymentLabel(s.paymentMethod)}</td>
                           <td className="p-3 text-right text-muted-foreground whitespace-nowrap">{fmt(s.subtotal)}</td>
-                          <td className="p-3 text-right font-semibold text-foreground whitespace-nowrap">{fmt(s.total)}</td>
+                          <td className="p-3 text-right text-emerald-400 whitespace-nowrap">{s.revenues ? `+${fmt(s.revenues)}` : '-'}</td>
+                          <td className="p-3 text-right font-semibold text-foreground whitespace-nowrap">{fmt(s.grandTotal)}</td>
                           <td className="p-3 text-right text-pink-400 whitespace-nowrap">{s.deductions ? `-${fmt(s.deductions)}` : '-'}</td>
                           <td className="p-3 text-muted-foreground break-words">{parseRider(s.notes) || '-'}</td>
                           <td className="p-3 text-center">
@@ -359,6 +390,7 @@ export default function IncomePage() {
                         <div>
                           <p className="font-mono text-sm font-semibold text-foreground">#{s.saleNumber}</p>
                           <p className="text-xs text-muted-foreground break-words">{s.saleDate ? format(new Date(s.saleDate), 'dd MMM yyyy HH:mm') : '-'}</p>
+                          {!!s.revenues && <p className="text-xs text-emerald-400">Revenues +{fmt(s.revenues)}</p>}
                           {!!s.deductions && <p className="text-xs text-pink-400">Deductions -{fmt(s.deductions)}</p>}
                           {parseRider(s.notes) && <p className="text-xs text-muted-foreground">Rider: {parseRider(s.notes)}</p>}
                         </div>
@@ -377,7 +409,7 @@ export default function IncomePage() {
                     </div>
                     <div className="border-t border-border pt-2 flex items-center justify-between gap-2">
                       <span className="text-xs text-muted-foreground">Total</span>
-                      <span className="text-lg font-bold text-primary break-words text-right">{fmt(s.total)}</span>
+                      <span className="text-lg font-bold text-primary break-words text-right">{fmt(s.grandTotal)}</span>
                     </div>
                     {actionCols > 0 && <div className="border-t border-border pt-2">{rowActions('sale', s)}</div>}
                   </CardContent>
