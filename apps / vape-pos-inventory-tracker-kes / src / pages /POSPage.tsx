@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { getProducts, getCustomers, getCustomerDetails, createSale, saveCustomer, getSales, manageHeldOrders, manageSupplierBills } from 'zitejs/api';
+import { getProducts, getCategories, getCustomers, getCustomerDetails, createSale, saveCustomer, getSales, manageHeldOrders, manageSupplierBills } from 'zitejs/api';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
@@ -17,6 +17,7 @@ import ProductImage from '../components/ProductImage';
 import CustomerPicker, { PickableCustomer } from '../components/CustomerPicker';
 import { useBranch, commissionAmount, autoOn, Commission } from '../hooks/useBranch';
 import SummaryTiles from '../components/SummaryTiles';
+import CategoryRibbon, { CategoryLite, matchesCategory, productCategoryId } from '../components/CategoryRibbon';
 import DateRangeFilter, { Range, inRange } from '../components/DateRangeFilter';
 import { isCashPayment } from '../lib/payments';
 import { parseCoordinates, geocode } from '../lib/geocode';
@@ -31,6 +32,7 @@ interface Product {
   stockQuantity?: number;
   taxRate?: number;
   status?: string;
+  category?: string | string[];
   images?: { url: string }[];
 }
 
@@ -179,6 +181,8 @@ export default function POSPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [search, setSearch] = useState('');
+  const [categories, setCategories] = useState<CategoryLite[]>([]);
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [paymentMethod, setPaymentMethod] = useState('Cash/M-PESA');
@@ -281,9 +285,15 @@ export default function POSPage() {
     });
   }, [currentBranch?.id]);
 
+  useEffect(() => {
+    getCategories({}).then(r => setCategories(r.categories as CategoryLite[])).catch(() => {});
+  }, []);
+
   const filtered = products.filter(p =>
-    (p.productName || '').toLowerCase().includes(search.toLowerCase()) ||
-    (p.sku || '').toLowerCase().includes(search.toLowerCase())
+    matchesCategory(categoryFilter, productCategoryId(p), categories) && (
+      (p.productName || '').toLowerCase().includes(search.toLowerCase()) ||
+      (p.sku || '').toLowerCase().includes(search.toLowerCase())
+    )
   );
 
   const qtyInCart = (productId: string) => cart.find(c => c.product.id === productId)?.quantity || 0;
@@ -764,6 +774,7 @@ export default function POSPage() {
               { label: 'Cash/M-PESA', value: fmt(sum(cash, 'total')) },
             ];
           })()} />
+          <CategoryRibbon categories={categories} selected={categoryFilter} onSelect={setCategoryFilter} />
         </div>
 
         <div className="relative mb-4">
