@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
 import { assertCan } from '../lib/permissions';
+import { loadCategoryRows } from '../lib/categoryParents';
 
 export default createEndpoint({
   description: 'Export data as CSV for any supported table',
@@ -19,19 +20,16 @@ export default createEndpoint({
     switch (input.table) {
       case 'products': {
         const { records } = await zite.products.findAll({ limit: 2000 });
-        const categoryIds = [...new Set(
-          records
-            .map(r => (Array.isArray(r.category) ? r.category[0] : r.category))
-            .filter((x): x is string => !!x)
-        )];
-        const categoryMap: Record<string, string> = {};
-        for (const cid of categoryIds) {
-          const cat = await zite.categories.findOne({ id: cid });
-          if (cat) categoryMap[cid] = cat.categoryName || '';
-        }
-        headers = ['Product Name', 'SKU', 'Cost Price', 'Selling Price', 'Stock Quantity', 'Status', 'Tax Rate', 'Category'];
+        // Category = the top-level category; Subcategory = the one under it (blank when the product sits directly in a top-level category).
+        const catRows = await loadCategoryRows();
+        const catById = new Map<string, { categoryName?: string; parentId: string | null }>(
+          catRows.map((c: any) => [c.id, { categoryName: c.categoryName, parentId: c.parentId }]),
+        );
+        headers = ['Product Name', 'SKU', 'Cost Price', 'Selling Price', 'Stock Quantity', 'Status', 'Tax Rate', 'Category', 'Subcategory'];
         rows = records.map(r => {
           const catId = Array.isArray(r.category) ? r.category[0] : r.category;
+          const cat = catId ? catById.get(catId) : undefined;
+          const parent = cat?.parentId ? catById.get(cat.parentId) : undefined;
           return {
             'Product Name': r.productName || '',
             'SKU': r.sku || '',
@@ -40,7 +38,8 @@ export default createEndpoint({
             'Stock Quantity': r.stockQuantity || 0,
             'Status': r.status || '',
             'Tax Rate': r.taxRate || 0,
-            'Category': catId ? (categoryMap[catId] || '') : '',
+            'Category': parent ? (parent.categoryName || '') : (cat?.categoryName || ''),
+            'Subcategory': parent ? (cat?.categoryName || '') : '',
           };
         });
         filename = 'products_export.csv';
