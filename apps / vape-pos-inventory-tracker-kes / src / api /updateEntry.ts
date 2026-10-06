@@ -5,6 +5,9 @@ import { getAccess } from '../lib/permissions';
 import { resolveDateChange, moveSaleDate } from '../lib/entryDates';
 
 const SALE_SUFFIX = /\s-\sSale\s#\d+$/;
+const riderOf = (notes?: string | null) => /Rider \((?:3PL|Own)\): [^|]+/.exec(notes || '')?.[0]?.trim() || null;
+const firstId = (v: any) => (Array.isArray(v) ? v[0] : v) || null;
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export default createEndpoint({
   description: 'Edit an entry on the Income or Expenses pages (sale, income, purchase, other expense or sale deductions). Changing the date (backdating) is only allowed for the Owner and Admin.',
@@ -18,7 +21,13 @@ export default createEndpoint({
     amount: z.number().optional(),
     notes: z.string().optional(),
     paymentMethod: z.string().optional(),
+    /** kind 'deduction' and kind 'sale': the full list of deductions on the sale (replaces what is there). */
     deductions: z.array(z.object({ name: z.string().min(1), amount: z.number().min(0) })).optional(),
+    /**
+     * kind 'sale': the full list of revenues (delivery fee and other revenues) on the sale. Rows with an id update that
+     * revenue, rows without one are added, and revenues of the sale that are not listed are removed.
+     */
+    revenues: z.array(z.object({ id: z.string().optional(), name: z.string().min(1), amount: z.number().positive() })).optional(),
   }),
   outputSchema: z.object({ success: z.boolean() }),
   execute: async ({ input, context }) => {
@@ -37,6 +46,56 @@ export default createEndpoint({
         if (input.paymentMethod) record.paymentMethod = input.paymentMethod;
         if (input.notes !== undefined) record.notes = input.notes || null;
         if (Object.keys(record).length) await zite.sales.update({ id: input.id, record });
+
+        // Deductions on the sale (pink) — same storage as the Expenses page uses.
+        if (input.deductions) {
+          const list = input.deductions.map(d => ({ name: d.name.trim(), amount: round2(d.amount) }));
+          if (list.some(d => !d.name)) throw new Error('Each deduction needs a name');
+          await zite.sales.update({
+            id: input.id,
+            record: {
+              deductions: list.reduce((s, d) => s + d.amount, 0),
+              deductionDetails: list.length ? JSON.stringify(list) : null,
+            },
+          });
+        }
+
+        // Revenues on the sale (green) are Other Income entries whose description ends with " - Sale #n".
+        if (input.revenues) {
+          if (sale.status === 'Voided') throw new Error('Revenues cannot be changed on a voided sale');
+          if (sale.saleNumber == null) throw new Error('This sale has no number, so its revenues cannot be linked');
+          const suffix = ` - Sale #${sale.saleNumber}`;
+          const linked = await zite.sql({
+            query: `SELECT id FROM "OtherIncome" WHERE "description" LIKE $1`,
+            params: [`%${suffix}`],
+          });
+          const existingIds = new Set(linked.rows.map(r => String(r.id)));
+          const keep = new Set<string>();
+          for (const rev of input.revenues) {
+            const clean = rev.name.trim().replace(SALE_SUFFIX, '').trim();
+            if (!clean) throw new Error('Each revenue needs a name');
+            const description = `${/^delivery\s*fee$/i.test(clean) ? 'Delivery fee' : clean}${suffix}`;
+            const amount = round2(rev.amount);
+            if (rev.id && existingIds.has(rev.id)) {
+              keep.add(rev.id);
+              await zite.otherIncome.update({ id: rev.id, record: { description, amount } });
+            } else {
+              await zite.otherIncome.create({
+                record: {
+                  incomeDate: sale.saleDate || new Date().toISOString(),
+                  description,
+                  amount,
+                  branch: firstId(sale.branch),
+                  notes: riderOf(sale.notes),
+                  createdBy: context.user.id,
+                },
+              });
+            }
+          }
+          for (const id of existingIds) if (!keep.has(id)) await zite.otherIncome.delete({ id });
+        }
+
+        // Done last so revenues added above move to the new date together with the rest.
         if (newDate) await moveSaleDate(input.id, sale.saleNumber, newDate);
         break;
       }
