@@ -10,9 +10,10 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { Switch } from '@project/components/ui/switch';
 import { Textarea } from '@project/components/ui/textarea';
-import { Search, Plus, Pencil, Trash2, FolderTree, CheckSquare } from 'lucide-react';
+import { Search, Plus, Pencil, Trash2, FolderTree, CheckSquare, CornerDownRight } from 'lucide-react';
 import { toast } from 'sonner';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
+import { buildCategoryTree } from '../components/CategoryRibbon';
 import { usePermissions } from '../hooks/usePermissions';
 
 interface Category {
@@ -20,7 +21,13 @@ interface Category {
   categoryName?: string;
   description?: string;
   active?: boolean;
+  /** Set for sub-categories: the id of the category they sit under. */
+  parentId?: string | null;
 }
+
+type Row = Category & { depth: 0 | 1 };
+
+const NO_PARENT = '__none__';
 
 export default function CategoriesPage() {
   const { can } = usePermissions();
@@ -35,6 +42,7 @@ export default function CategoriesPage() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [active, setActive] = useState(true);
+  const [parentId, setParentId] = useState<string>(NO_PARENT);
 
   // Bulk create
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -49,18 +57,23 @@ export default function CategoriesPage() {
     setLoading(true);
     try {
       const res = await getCategories({});
-      setCategories(res.categories);
+      setCategories(res.categories as Category[]);
     } catch { toast.error('Failed to load categories'); }
     setLoading(false);
   };
 
   useEffect(() => { load(); }, []);
 
-  const openNew = () => {
+  const tree = buildCategoryTree(categories);
+  const nameOfId = (id?: string | null) => (id ? tree.byId.get(id)?.categoryName || '' : '');
+  const kidCount = (id: string) => (tree.kids.get(id) || []).length;
+
+  const openNew = (underId?: string) => {
     setEditing(null);
     setName('');
     setDescription('');
     setActive(true);
+    setParentId(underId || NO_PARENT);
     setDialogOpen(true);
   };
 
@@ -69,14 +82,21 @@ export default function CategoriesPage() {
     setName(c.categoryName || '');
     setDescription(c.description || '');
     setActive(c.active !== false);
+    setParentId(c.parentId && tree.byId.has(c.parentId) ? c.parentId : NO_PARENT);
     setDialogOpen(true);
   };
 
   const handleSave = async () => {
     if (!name.trim()) { toast.error('Name required'); return; }
     try {
-      await saveCategory({ id: editing?.id, categoryName: name.trim(), description: description.trim() || undefined, active });
-      toast.success(editing ? 'Category updated' : 'Category created');
+      await saveCategory({
+        id: editing?.id,
+        categoryName: name.trim(),
+        description: description.trim() || undefined,
+        active,
+        parentId: parentId === NO_PARENT ? null : parentId,
+      });
+      toast.success(editing ? 'Category updated' : parentId !== NO_PARENT ? 'Subcategory created' : 'Category created');
       setDialogOpen(false);
       load();
     } catch (err: any) { toast.error(err.message || 'Save failed'); }
@@ -90,25 +110,74 @@ export default function CategoriesPage() {
     } catch { toast.error('Delete failed'); }
   };
 
+  /**
+   * One category per line. Write "Parent > Subcategory" for a subcategory, e.g.
+   *   E-Liquids
+   *   E-Liquids > Salt Nic
+   * Names that already exist (under the same parent) are skipped.
+   */
   const handleBulkCreate = async () => {
-    const names = bulkText.split('\n').map(n => n.trim()).filter(Boolean);
-    if (!names.length) { toast.error('Enter at least one category name'); return; }
-    let created = 0;
-    for (const n of names) {
+    const lines = bulkText.split('\n').map(n => n.trim()).filter(Boolean);
+    if (!lines.length) { toast.error('Enter at least one category name'); return; }
+    const norm = (s: string) => s.trim().toLowerCase();
+    const topIds = new Map<string, string>(); // lower-case name -> id of a top-level category
+    tree.tops.forEach(t => topIds.set(norm(t.categoryName || ''), t.id));
+    const subKeys = new Set<string>(); // "parentId|name" of existing subcategories
+    tree.kids.forEach((list, pid) => list.forEach(k => subKeys.add(`${pid}|${norm(k.categoryName || '')}`)));
+
+    let created = 0, skipped = 0, failed = 0;
+    const ensureTop = async (n: string): Promise<string | null> => {
+      const hit = topIds.get(norm(n));
+      if (hit) return hit;
       try {
-        await saveCategory({ categoryName: n, active: true });
+        const res = await saveCategory({ categoryName: n, active: true });
+        topIds.set(norm(n), res.category.id);
         created++;
-      } catch {}
+        return res.category.id as string;
+      } catch { failed++; return null; }
+    };
+
+    // Top-level names first (explicit lines and the parents named in "Parent > Child" lines), so order in the box does not matter.
+    for (const line of lines) {
+      const parts = line.split('>').map(p => p.trim()).filter(Boolean);
+      if (parts.length === 1) {
+        if (topIds.has(norm(parts[0]))) skipped++; else await ensureTop(parts[0]);
+      }
     }
-    toast.success(`Created ${created} categories`);
+    for (const line of lines) {
+      const parts = line.split('>').map(p => p.trim()).filter(Boolean);
+      if (parts.length < 2) continue;
+      const pid = await ensureTop(parts[0]);
+      if (!pid) continue;
+      const sub = parts.slice(1).join(' > ');
+      const key = `${pid}|${norm(sub)}`;
+      if (subKeys.has(key)) { skipped++; continue; }
+      try {
+        await saveCategory({ categoryName: sub, active: true, parentId: pid });
+        subKeys.add(key);
+        created++;
+      } catch { failed++; }
+    }
+
+    toast.success(`Created ${created} categories${skipped ? `, ${skipped} already existed` : ''}${failed ? `, ${failed} failed` : ''}`);
     setBulkOpen(false);
     setBulkText('');
     load();
   };
 
-  const filtered = categories.filter(c =>
-    !search || c.categoryName?.toLowerCase().includes(search.toLowerCase())
-  );
+  // Each top-level category followed by its subcategories. A search keeps a parent's subcategories when the parent matches,
+  // and keeps the parent (for context) when only a subcategory matches.
+  const q = search.trim().toLowerCase();
+  const filtered: Row[] = [];
+  for (const t of tree.tops) {
+    const kids = tree.kids.get(t.id) || [];
+    const topHit = !q || (t.categoryName || '').toLowerCase().includes(q);
+    const kidHits = kids.filter(k => topHit || (k.categoryName || '').toLowerCase().includes(q));
+    if (topHit || kidHits.length) {
+      filtered.push({ ...t, depth: 0 });
+      kidHits.forEach(k => filtered.push({ ...k, depth: 1 }));
+    }
+  }
 
   const toggleSelect = (id: string) => {
     const next = new Set(selectedIds);
@@ -142,25 +211,36 @@ export default function CategoriesPage() {
     } catch (err: any) { toast.error(err.message || 'Failed'); }
   };
 
-  const renderActions = (c: Category) => (
+  const renderActions = (c: Row) => (
     <div className="flex items-center gap-1">
+      {can('categories', 'create') && c.depth === 0 && (
+        <Button variant="ghost" size="sm" title="Add subcategory" onClick={() => openNew(c.id)}><Plus className="w-3.5 h-3.5 mr-0.5" /><span className="text-xs">Sub</span></Button>
+      )}
       {can('categories', 'edit') && <Button variant="ghost" size="sm" onClick={() => openEdit(c)}><Pencil className="w-3.5 h-3.5" /></Button>}
       {can('categories', 'delete') && <AlertDialog>
         <AlertDialogTrigger asChild><Button variant="ghost" size="sm" className="text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button></AlertDialogTrigger>
         <AlertDialogContent>
-          <AlertDialogHeader><AlertDialogTitle>Delete category?</AlertDialogTitle><AlertDialogDescription>This will remove "{c.categoryName}" permanently.</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete category?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will remove "{c.categoryName}" permanently.
+              {c.depth === 0 && kidCount(c.id) > 0 && <> Its {kidCount(c.id)} subcategor{kidCount(c.id) === 1 ? 'y' : 'ies'} will be kept and shown as main categories.</>}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
           <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleDelete(c.id)}>Delete</AlertDialogAction></AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>}
     </div>
   );
 
+  const editingHasKids = !!editing && kidCount(editing.id) > 0;
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Categories</h1>
-          <p className="text-sm text-muted-foreground">Manage product categories</p>
+          <p className="text-sm text-muted-foreground">Manage product categories and their subcategories</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <ViewToggle value={viewMode} onChange={setViewMode} />
@@ -173,7 +253,7 @@ export default function CategoriesPage() {
             <Button variant="outline" size="sm" onClick={() => setBulkOpen(true)}>
               <FolderTree className="w-4 h-4 mr-1" /> Bulk Create
             </Button>
-            <Button size="sm" onClick={openNew}>
+            <Button size="sm" onClick={() => openNew()}>
               <Plus className="w-4 h-4 mr-1" /> Add Category
             </Button>
           </>}
@@ -199,13 +279,15 @@ export default function CategoriesPage() {
       ) : viewMode === 'grid' ? (
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
           {filtered.map(c => (
-            <Card key={c.id} className={`hover:border-primary/30 transition-colors ${selectedIds.has(c.id) ? 'border-primary' : ''}`}>
+            <Card key={c.id} className={`hover:border-primary/30 transition-colors ${c.depth === 1 ? 'border-l-4 border-l-primary/40 ml-3' : ''} ${selectedIds.has(c.id) ? 'border-primary' : ''}`}>
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1 flex items-start gap-2">
                     <input type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} className="mt-1 rounded shrink-0" />
                     <div className="min-w-0">
+                      {c.depth === 1 && <p className="text-[11px] text-muted-foreground flex items-center gap-1"><CornerDownRight className="w-3 h-3" />Under {nameOfId(c.parentId)}</p>}
                       <h3 className="font-semibold text-foreground break-words whitespace-normal leading-snug">{c.categoryName}</h3>
+                      {c.depth === 0 && kidCount(c.id) > 0 && <p className="text-[11px] text-muted-foreground mt-0.5">{kidCount(c.id)} subcategor{kidCount(c.id) === 1 ? 'y' : 'ies'}</p>}
                       {c.description && <p className="text-xs text-muted-foreground mt-1 break-words whitespace-normal">{c.description}</p>}
                     </div>
                   </div>
@@ -236,7 +318,11 @@ export default function CategoriesPage() {
                   {filtered.map(c => (
                     <tr key={c.id} className="border-b border-border hover:bg-muted/30">
                       <td className="p-3"><input type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} className="rounded" /></td>
-                      <td className="p-3 font-medium text-foreground break-words whitespace-normal">{c.categoryName}</td>
+                      <td className={`p-3 font-medium text-foreground break-words whitespace-normal ${c.depth === 1 ? 'pl-8' : ''}`}>
+                        {c.depth === 1 && <CornerDownRight className="inline w-3.5 h-3.5 mr-1 text-muted-foreground" />}
+                        {c.categoryName}
+                        {c.depth === 0 && kidCount(c.id) > 0 && <span className="ml-2 text-[11px] font-normal text-muted-foreground">{kidCount(c.id)} sub</span>}
+                      </td>
                       <td className="p-3 text-muted-foreground break-words whitespace-normal max-w-md">{c.description || '-'}</td>
                       <td className="p-3 text-center">
                         <Badge variant={c.active !== false ? 'default' : 'secondary'}>{c.active !== false ? 'Active' : 'Inactive'}</Badge>
@@ -254,9 +340,26 @@ export default function CategoriesPage() {
       {/* Add/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>{editing ? 'Edit Category' : 'Add Category'}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editing ? 'Edit Category' : parentId !== NO_PARENT ? 'Add Subcategory' : 'Add Category'}</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            <div><Label>Name</Label><Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. E-Liquids" /></div>
+            <div><Label>Name</Label><Input value={name} onChange={e => setName(e.target.value)} placeholder={parentId !== NO_PARENT ? 'e.g. Salt Nic' : 'e.g. E-Liquids'} /></div>
+            <div>
+              <Label>Parent category</Label>
+              <Select value={parentId} onValueChange={setParentId} disabled={editingHasKids}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_PARENT}>None (main category)</SelectItem>
+                  {tree.tops.filter(t => t.id !== editing?.id).map(t => (
+                    <SelectItem key={t.id} value={t.id}>{t.categoryName}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                {editingHasKids
+                  ? 'This category has subcategories, so it stays a main category. Move or delete its subcategories first.'
+                  : 'Pick a parent to make this a subcategory. Only two levels are allowed.'}
+              </p>
+            </div>
             <div><Label>Description</Label><Textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Optional description..." rows={3} /></div>
             <div className="flex items-center gap-3">
               <Switch checked={active} onCheckedChange={setActive} />
@@ -275,8 +378,11 @@ export default function CategoriesPage() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader><DialogTitle>Bulk Create Categories</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">Enter one category name per line:</p>
-            <Textarea value={bulkText} onChange={e => setBulkText(e.target.value)} placeholder={"E-Liquids\nDisposables\nMods & Kits\nAccessories"} rows={8} />
+            <p className="text-sm text-muted-foreground">
+              Enter one category per line. For a subcategory write <span className="font-medium text-foreground">Category &gt; Subcategory</span>.
+              The main category is created automatically if it does not exist, and names that already exist are skipped.
+            </p>
+            <Textarea value={bulkText} onChange={e => setBulkText(e.target.value)} placeholder={"E-Liquids\nE-Liquids > Salt Nic\nE-Liquids > Freebase\nDisposables\nAccessories > Coils"} rows={8} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setBulkOpen(false)}>Cancel</Button>
