@@ -7,8 +7,9 @@ export const setTemplateBackdate = (v: boolean) => { canBackdateTemplates = v; }
 
 const IMPORT_TEMPLATES: Record<TemplateKey, { headers: string[]; samples: string[][] }> = {
   products: {
-    headers: ['Product Name', 'SKU', 'Cost Price', 'Selling Price', 'Stock Quantity', 'Category', 'Image URL'],
-    samples: [],
+    // Category = top-level category; Subcategory (optional) = the category under it. Both are created if they do not exist yet.
+    headers: ['Product Name', 'SKU', 'Cost Price', 'Selling Price', 'Stock Quantity', 'Category', 'Subcategory', 'Image URL'],
+    samples: [], // no sample rows: a sample SKU could overwrite a real product if the template were imported as is
   },
   customers: {
     headers: ['Customer Name', 'Phone Number', 'Email', 'Address'],
