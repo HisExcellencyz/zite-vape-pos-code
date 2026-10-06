@@ -1,14 +1,13 @@
 import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
-import { zite } from 'zitejs/db';
+import { loadCategoryRows } from '../lib/categoryParents';
 
 export default createEndpoint({
-  description: 'List categories',
+  description: 'List categories. Each row carries parentId (null for a top-level category, otherwise the id of the category it sits under).',
   authenticated: true,
   inputSchema: z.object({}),
   outputSchema: z.object({ categories: z.array(z.any()) }),
   execute: async () => {
-    const { records } = await zite.categories.findAll({ limit: 200 });
-    return { categories: records };
+    return { categories: await loadCategoryRows() };
   },
 });
