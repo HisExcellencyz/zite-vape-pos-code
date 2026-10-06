@@ -4,6 +4,7 @@ import { zite } from 'zitejs/db';
 import { normalizeImageUrl, isHttpUrl } from '../lib/imageUrl';
 import { assertCan } from '../lib/permissions';
 import { syncSupplierAddress } from '../lib/supplierAddress';
+import { loadCategoryRows, writeCategoryParent, sameName } from '../lib/categoryParents';
 
 export default createEndpoint({
   description: 'Import CSV data for products, customers, or suppliers',
@@ -21,6 +22,21 @@ export default createEndpoint({
 
     switch (input.table) {
       case 'products': {
+        // Two-level categories: "Category" is the top-level one, "Subcategory" (optional) the one under it.
+        // Both are matched by name (ignoring capitals) and created when they do not exist yet.
+        type CatRow = { id: string; categoryName?: string; parentId: string | null };
+        const cats: CatRow[] = (await loadCategoryRows()) as CatRow[];
+        const findCat = (name: string, parentId: string | null) =>
+          cats.find(c => sameName(c.categoryName, name) && (c.parentId || null) === parentId);
+        const ensureCat = async (name: string, parentId: string | null): Promise<string> => {
+          const hit = findCat(name, parentId);
+          if (hit) return hit.id;
+          const created = await zite.categories.create({ record: { categoryName: name, active: true } });
+          if (parentId) await writeCategoryParent(created.id, parentId);
+          cats.push({ id: created.id, categoryName: name, parentId });
+          return created.id;
+        };
+
         for (const row of input.rows) {
           try {
             const name = row['Product Name'] || row['productName'] || row['name'] || '';
@@ -34,14 +50,15 @@ export default createEndpoint({
 
             let categoryId: string | undefined;
             const categoryName = (row['Category'] || row['category'] || '').trim();
+            const subName = (row['Subcategory'] || row['subcategory'] || row['Sub Category'] || row['Sub-category'] || '').trim();
             if (categoryName) {
-              const existingCat = await zite.categories.findOne({ filters: { categoryName } });
-              if (existingCat) {
-                categoryId = existingCat.id;
-              } else {
-                const createdCat = await zite.categories.create({ record: { categoryName, active: true } });
-                categoryId = createdCat.id;
-              }
+              const topId = await ensureCat(categoryName, null);
+              categoryId = subName ? await ensureCat(subName, topId) : topId;
+            } else if (subName) {
+              // Subcategory without a Category: only usable when exactly one existing sub-category has that name.
+              const hits = cats.filter(c => c.parentId && sameName(c.categoryName, subName));
+              if (hits.length === 1) categoryId = hits[0].id;
+              else errors.push(`SKU ${sku}: Subcategory "${subName}" needs a Category in the same row, category left unchanged`);
             }
 
             // Optional photo link. Blank column = leave the existing photo untouched
