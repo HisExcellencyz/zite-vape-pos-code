@@ -21,6 +21,7 @@ import { getInventoryValuation, GetInventoryValuationOutputType } from 'zitejs/a
 import { useTableControls, TableControls, SortTh, FieldDef } from '../components/TableControls';
 import DateRangeFilter, { Range, eatBounds } from '../components/DateRangeFilter';
 import SummaryTiles from '../components/SummaryTiles';
+import CategoryRibbon, { CategoryLite, flattenCategories, matchesCategory, productCategoryId } from '../components/CategoryRibbon';
 import { usePermissions } from '../hooks/usePermissions';
 
 interface Product {
@@ -36,10 +37,7 @@ interface Product {
   images?: { url: string }[];
 }
 
-interface Category {
-  id: string;
-  categoryName?: string;
-}
+type Category = CategoryLite;
 
 type SortBy = 'name' | 'stock' | 'price' | 'value';
 type SortDir = 'asc' | 'desc';
@@ -76,6 +74,7 @@ export default function InventoryPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState('');
   const [sortBy, setSortBy] = useState<SortBy>('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
@@ -252,11 +251,15 @@ export default function InventoryPage() {
     setSelectedIds(next);
   };
 
+  // Products in the category chosen on the ribbon (a category includes its sub-categories).
+  const shown = products.filter(p => matchesCategory(categoryFilter, productCategoryId(p), categories));
+  const categoryOptions = flattenCategories(categories);
+
   const toggleAll = () => {
-    setSelectedIds(selectedIds.size === products.length ? new Set() : new Set(products.map(p => p.id)));
+    setSelectedIds(selectedIds.size === shown.length ? new Set() : new Set(shown.map(p => p.id)));
   };
 
-  const tc = useTableControls(products, FIELDS);
+  const tc = useTableControls(shown, FIELDS);
   const fmt = (n?: number) => n != null ? `KES ${n.toLocaleString()}` : 'KES 0';
 
   const toggleSortDir = () => setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
@@ -294,7 +297,7 @@ export default function InventoryPage() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Inventory</h1>
-          <p className="text-sm text-muted-foreground">{products.length} products</p>
+          <p className="text-sm text-muted-foreground">{shown.length} products</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <ViewToggle value={viewMode} onChange={setViewMode} />
@@ -337,6 +340,7 @@ export default function InventoryPage() {
           { label: 'Low Stock', value: String(products.filter(p => (p.stockQuantity || 0) <= (p.reorderLevel || 0)).length) },
         ]} />
       )}
+      <CategoryRibbon categories={categories} selected={categoryFilter} onSelect={setCategoryFilter} />
       </div>
 
       {viewMode === 'list' ? (
@@ -346,7 +350,7 @@ export default function InventoryPage() {
               <table className="w-full text-sm">
                 <thead className="sticky top-0 z-10 bg-card">
                   <tr className="border-b border-border text-muted-foreground bg-card">
-                    <th className="p-3 w-8"><input type="checkbox" checked={selectedIds.size === products.length && products.length > 0} onChange={toggleAll} className="rounded" /></th>
+                    <th className="p-3 w-8"><input type="checkbox" checked={selectedIds.size === shown.length && shown.length > 0} onChange={toggleAll} className="rounded" /></th>
                     <SortTh c={tc} k="productName" className="text-left">Product</SortTh>
                     <SortTh c={tc} k="sku" className="text-left">SKU</SortTh>
                     <SortTh c={tc} k="costPrice" className="text-right">Cost</SortTh>
@@ -399,9 +403,9 @@ export default function InventoryPage() {
         </Card>
       ) : (
         <div className="space-y-3">
-          {products.length > 0 && (
+          {shown.length > 0 && (
             <label className="flex items-center gap-2 text-xs text-muted-foreground select-none w-fit cursor-pointer">
-              <input type="checkbox" checked={selectedIds.size === products.length} onChange={toggleAll} className="rounded" />
+              <input type="checkbox" checked={selectedIds.size === shown.length} onChange={toggleAll} className="rounded" />
               Select all
             </label>
           )}
@@ -459,7 +463,7 @@ export default function InventoryPage() {
         template="products"
         chunkSize={100}
         description={<>
-          Upload a CSV with columns: <span className="font-medium text-foreground">Product Name, SKU, Cost Price, Selling Price, Stock Quantity, Category (optional), Image URL (optional)</span>. Products matched by SKU are updated. Unknown categories are created automatically.
+          Upload a CSV with columns: <span className="font-medium text-foreground">Product Name, SKU, Cost Price, Selling Price, Stock Quantity, Category (optional), Subcategory (optional), Image URL (optional)</span>. Products matched by SKU are updated. <span className="font-medium text-foreground">Category</span> is the main category and <span className="font-medium text-foreground">Subcategory</span> the one under it (e.g. E-Liquids / Salt Nic); put the Category in the same row as the Subcategory. Unknown categories and subcategories are created automatically.
           <br /><br />
           <span className="font-medium text-foreground">Image URL</span> must be a direct link to a photo already hosted online — Google Drive and Dropbox share links are converted automatically. For other sites, use the direct image address (right-click the photo → "Copy Image Address"), not a viewer page link. Free options: imgur.com, ImgBB, or Cloudinary. A blank Image URL leaves an existing product's photo unchanged. Press OK to start the import. (In Excel: File → Save As → CSV.)
         </>}
@@ -525,8 +529,8 @@ export default function InventoryPage() {
                 <Select value={formCategory} onValueChange={setFormCategory}>
                   <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
                   <SelectContent>
-                    {categories.map(c => (
-                      <SelectItem key={c.id} value={c.id}>{c.categoryName}</SelectItem>
+                    {categoryOptions.map(c => (
+                      <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -576,7 +580,7 @@ export default function InventoryPage() {
                 <Label>Category</Label>
                 <Select value={bulkCategory} onValueChange={setBulkCategory}>
                   <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
-                  <SelectContent>{categories.map(c => <SelectItem key={c.id} value={c.id}>{c.categoryName}</SelectItem>)}</SelectContent>
+                  <SelectContent>{categoryOptions.map(c => <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
             )}
