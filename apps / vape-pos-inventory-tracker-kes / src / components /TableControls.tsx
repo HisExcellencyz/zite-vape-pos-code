@@ -6,7 +6,7 @@ export type FieldDef<T> = { key: string; label: string; get?: (row: T) => unknow
 const val = <T,>(f: FieldDef<T>, r: T) => (f.get ? f.get(r) : (r as any)[f.key]);
 const txt = (v: unknown) => (v == null ? '' : Array.isArray(v) ? v.join(', ') : String(v));
 
-/** Filter (any or one field) + sort (any field) for list views. */
+/** Search (any or one field) + sort (any field) for list views. */
 export function useTableControls<T>(rows: T[], fields: FieldDef<T>[]) {
   const [q, setQ] = useState('');
   const [field, setField] = useState('all');
@@ -42,8 +42,9 @@ const sel = 'h-9 rounded-md border border-input bg-background px-2 text-xs text-
 export function TableControls<T>({ c }: { c: ReturnType<typeof useTableControls<T>> }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <input value={c.q} onChange={e => c.setQ(e.target.value)} placeholder="Filter..." className={`${sel} w-40`} />
-      <select value={c.field} onChange={e => c.setField(e.target.value)} className={sel} title="Filter field">
+      {/* Search box is twice as long as the old Filter box (w-40 -> w-80) */}
+      <input value={c.q} onChange={e => c.setQ(e.target.value)} placeholder="Search..." className={`${sel} w-80 max-w-full`} />
+      <select value={c.field} onChange={e => c.setField(e.target.value)} className={sel} title="Search field">
         <option value="all">All fields</option>
         {c.fields.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
       </select>
