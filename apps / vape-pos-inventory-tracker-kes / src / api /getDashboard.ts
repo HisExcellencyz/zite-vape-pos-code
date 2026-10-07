@@ -39,6 +39,14 @@ export default createEndpoint({
       longestKm: z.number(),
       shortestKm: z.number(),
     }),
+    riderStats: z.array(z.object({
+      name: z.string(),
+      type: z.string(),
+      orders: z.number(),
+      amount: z.number(),
+      km: z.number(),
+      riderCharge: z.number(),
+    })),
   }),
   execute: async ({ input }) => {
     const params: (string | Date)[] = [];
@@ -247,6 +255,53 @@ export default createEndpoint({
       params: expParams,
     });
 
+    // Rider metrics: the rider is noted on each sale as "Rider (3PL): Name" / "Rider (Own): Name".
+    // Orders, amount (sale total), distance and the Rider Fee deduction are added up per rider.
+    const riderMap = new Map<string, { name: string; type: string; orders: number; amount: number; km: number; riderCharge: number }>();
+    const RIDER_NOTE = /Rider \((3PL|Own)\): ([^|]+)/;
+    const PAGE = 2000;
+    for (let offset = 0; offset < PAGE * 20; offset += PAGE) {
+      const page = await zite.sql({
+        query: `
+          SELECT s.id, s."notes", s."total", s."deliveryDistanceKm", s."deductionDetails"
+          FROM "Sales" s
+          WHERE s."status" = 'Completed' AND s."notes" LIKE '%Rider (%'${dateFilter}
+          ORDER BY s.id
+          LIMIT ${PAGE} OFFSET ${offset}
+        `,
+        params,
+      });
+      for (const r of page.rows) {
+        const m = RIDER_NOTE.exec(String(r.notes || ''));
+        if (!m) continue;
+        const type = m[1];
+        const name = m[2].trim();
+        const key = `${type}|${name.toLowerCase()}`;
+        const cur = riderMap.get(key) || { name, type, orders: 0, amount: 0, km: 0, riderCharge: 0 };
+        cur.orders += 1;
+        cur.amount += Number(r.total || 0);
+        cur.km += Number(r.deliveryDistanceKm || 0);
+        try {
+          const list = r.deductionDetails ? JSON.parse(String(r.deductionDetails)) : [];
+          if (Array.isArray(list)) {
+            for (const d of list) {
+              if (String(d?.name || '').trim().toLowerCase() === 'rider fee') cur.riderCharge += Number(d.amount) || 0;
+            }
+          }
+        } catch {}
+        riderMap.set(key, cur);
+      }
+      if (page.rows.length < PAGE) break;
+    }
+    const riderStats = Array.from(riderMap.values())
+      .map(r => ({
+        ...r,
+        amount: Math.round(r.amount * 100) / 100,
+        km: Math.round(r.km * 10) / 10,
+        riderCharge: Math.round(r.riderCharge * 100) / 100,
+      }))
+      .sort((a, b) => b.orders - a.orders);
+
     const totalRevenue = Number(salesResult.rows[0]?.totalRevenue ?? 0);
     const totalDeductions = Number(salesResult.rows[0]?.totalDeductions ?? 0);
     const totalDiscounts = Number(salesResult.rows[0]?.totalDiscounts ?? 0);
@@ -311,6 +366,7 @@ export default createEndpoint({
         longestKm: Number(deliveryResult.rows[0]?.max_dist ?? 0),
         shortestKm: Number(deliveryResult.rows[0]?.min_dist ?? 0),
       },
+      riderStats,
     };
   },
 });
