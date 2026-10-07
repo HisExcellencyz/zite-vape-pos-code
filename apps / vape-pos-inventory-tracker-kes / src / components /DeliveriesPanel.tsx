@@ -94,17 +94,47 @@ export default function DeliveriesPanel() {
 
   const customerMap = useMemo(() => new Map<string, any>(customers.map(c => [c.id, c])), [customers]);
 
+  /** A contact is identified by its phone number (falling back to the customer id), so duplicates collapse into one. */
+  const contactKey = (customerId: string) => {
+    const phone = String(customerMap.get(customerId)?.phoneNumber || '').replace(/\D/g, '');
+    return phone || customerId;
+  };
+
   const drops = useMemo(() => {
-    const out: Drop[] = [];
+    const raw: Drop[] = [];
     for (const s of sales) {
       if (s.status !== 'Completed' || !inRange(range, s.saleDate)) continue;
       const ds = parseDrops(s.deliveryCoordinates, s.deliveryAddress);
       if (ds.length === 0) continue;
       const customerId = Array.isArray(s.customer) ? s.customer[0] || null : s.customer || null;
-      ds.forEach(d => out.push({ saleId: s.id, customerId, lat: d.lat, lng: d.lng, label: d.label, revenue: (s.total || 0) / ds.length, date: s.saleDate || '' }));
+      ds.forEach(d => raw.push({ saleId: s.id, customerId, lat: d.lat, lng: d.lng, label: d.label, revenue: (s.total || 0) / ds.length, date: s.saleDate || '' }));
+    }
+
+    // Each contact's most recent drop-off is where all of their deliveries are gathered.
+    const latest = new Map<string, Drop>();
+    for (const d of raw) {
+      if (!d.customerId) continue;
+      const k = contactKey(d.customerId);
+      const cur = latest.get(k);
+      if (!cur || d.date >= cur.date) latest.set(k, d);
+    }
+
+    const out: Drop[] = [];
+    const seen = new Map<string, Drop>(); // one entry per sale per contact
+    for (const d of raw) {
+      if (!d.customerId) { out.push(d); continue; }
+      const k = contactKey(d.customerId);
+      const l = latest.get(k)!;
+      const sk = `${d.saleId}|${k}`;
+      const prev = seen.get(sk);
+      if (prev) { prev.revenue += d.revenue; continue; }
+      const merged: Drop = { ...d, customerId: l.customerId, lat: l.lat, lng: l.lng, label: l.label };
+      seen.set(sk, merged);
+      out.push(merged);
     }
     return out;
-  }, [sales, range]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sales, range, customerMap]);
 
   const spots = useMemo(() => {
     const map = new Map<string, Spot>();
@@ -240,7 +270,7 @@ export default function DeliveriesPanel() {
             >
               <CardContent className="p-3 space-y-2">
                 <div className="flex items-start gap-2">
-                  <MapPin className="w-4 h-4 mt-0.5 shrink-0 text-amber-400" />
+                  <MapPin className="w-4 h-4 mt-0.5 shrink-0 text-red-500" />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-foreground break-words leading-snug">{s.label}</p>
                     <p className="text-[11px] text-muted-foreground">
