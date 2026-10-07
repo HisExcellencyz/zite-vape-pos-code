@@ -6,7 +6,8 @@ import { Label } from '@project/components/ui/label';
 import { Badge } from '@project/components/ui/badge';
 import { Checkbox } from '@project/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
-import { Search, Plus, Minus, ShoppingCart, Trash2, UserPlus, X, Receipt, DollarSign, MapPin, Route, UserCheck, Pause, Play, Clock, Layers } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator, DropdownMenuLabel } from '@project/components/ui/dropdown-menu';
+import { Search, Plus, Minus, ShoppingCart, Trash2, UserPlus, X, Receipt, DollarSign, MapPin, Route, UserCheck, Pause, Play, Clock, Layers, Truck, Bike, ChevronDown, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import DeliveryRouteMap, { PickupItem, sortRoutePoints } from '../components/DeliveryRouteMap';
 import LocationPickerDialog from '../components/LocationPickerDialog';
@@ -21,7 +22,7 @@ import CategoryRibbon, { CategoryLite, matchesCategory, productCategoryId } from
 import DateRangeFilter, { Range, inRange } from '../components/DateRangeFilter';
 import { isCashPayment } from '../lib/payments';
 import { parseCoordinates, geocode } from '../lib/geocode';
-import { RiderType, DEFAULT_DELIVERY_FEE, DEFAULT_RIDER_FEE } from '../lib/delivery';
+import { RiderType, Riders, RIDER_LABELS, DEFAULT_DELIVERY_FEE, DEFAULT_RIDER_FEE, loadRiders } from '../lib/delivery';
 
 interface Product {
   id: string;
@@ -223,8 +224,10 @@ export default function POSPage() {
   const [discountValue, setDiscountValue] = useState('');
   const [discountType, setDiscountType] = useState<DiscountType>('KES');
 
-  // Kept so held orders created earlier (which may carry a rider) still complete with it.
+  // The rider assigned to this order (3PL or own), chosen from the riders set up in Settings > Delivery.
   const [rider, setRider] = useState<SelectedRider | null>(null);
+  const [riders, setRiders] = useState<Riders>({ threePl: [], own: [] });
+  useEffect(() => { loadRiders().then(setRiders).catch(() => {}); }, []);
 
   const [showDeliveryMap, setShowDeliveryMap] = useState(false);
   const [showMergeDialog, setShowMergeDialog] = useState(false);
@@ -377,10 +380,6 @@ export default function POSPage() {
     return { id, label: full.address || full.customerName || `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`, tag: 'dropoff', lat: p.lat, lng: p.lng };
   };
 
-  /**
-   * Opens the Route Plan dialog. The linked customer's saved location, and that of every merged order,
-   * is added as a drop-off point (replacing any earlier auto-added ones so they are never stale).
-   */
   /**
    * Finds a customer's drop-off location even when the loaded list or a held order's copy lacks coordinates:
    * list/copy -> saved record -> geocoding the saved address.
@@ -949,17 +948,18 @@ export default function POSPage() {
           </div>
         ) : (
           <>
-            <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-2">
+            {/* Selected items: tighter rows so more of the order stays in view */}
+            <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-1">
               {cart.length === 0 ? (
                 <div className="text-center py-12 text-muted-foreground">
                   <Receipt className="w-10 h-10 mx-auto mb-2 opacity-30" />
                   <p className="text-sm">Cart is empty</p>
                 </div>
               ) : cart.map(item => (
-                <div key={item.product.id} className="flex items-center gap-2.5 bg-muted/50 rounded-lg px-3 py-2">
+                <div key={item.product.id} className="flex items-center gap-2 bg-muted/50 rounded-lg px-2.5 py-1">
                   <div className="flex-1 min-w-0">
                     <p className={`${cartNameSize(item.product.productName)} font-medium text-foreground break-words whitespace-normal leading-tight [overflow-wrap:anywhere]`}>{item.product.productName}</p>
-                    <p className="text-xs text-muted-foreground">{fmt(item.unitPrice)} each</p>
+                    <p className="text-[11px] leading-tight text-muted-foreground">{fmt(item.unitPrice)} each</p>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     <button onClick={() => updateQty(item.product.id, -1)} className="w-6 h-6 rounded bg-muted flex items-center justify-center hover:bg-border"><Minus className="w-3 h-3" /></button>
@@ -974,7 +974,7 @@ export default function POSPage() {
 
             <div className="border-t border-border flex flex-col shrink-0">
               {/* Scrollable options */}
-              <div className="p-4 pb-3 space-y-3 max-h-[45vh] overflow-y-auto">
+              <div className="px-3 pt-2.5 pb-2 space-y-2 max-h-[40vh] overflow-y-auto">
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Subtotal</span>
                   <span className="text-foreground">{fmt(subtotal)}</span>
@@ -1070,7 +1070,7 @@ export default function POSPage() {
 
                 {/* Outlet deductions (Glovo, Rider Fee, Promo and any others) */}
                 {outletDeductions.length > 0 && (
-                  <div className="space-y-1.5">
+                  <div className="space-y-1">
                     <p className="text-[11px] font-medium text-muted-foreground">Deductions (tap to switch on / off)</p>
                     <div className="flex flex-wrap gap-1.5">
                       {outletDeductions.map(d => {
@@ -1107,7 +1107,55 @@ export default function POSPage() {
                   </p>
                 )}
 
-                <div className="space-y-2 border-t border-border pt-3">
+                {/* Riders: pick a 3PL or own rider (set up in Settings > Delivery) for this order */}
+                <div className="space-y-1">
+                  <p className="text-[11px] font-medium text-muted-foreground">Rider (tap a button to choose)</p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {(['threePl', 'own'] as RiderType[]).map(type => {
+                      const active = rider?.type === type;
+                      const list = riders[type];
+                      const Icon = type === 'threePl' ? Truck : Bike;
+                      return (
+                        <DropdownMenu key={type}>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              type="button"
+                              className={`h-7 px-2 rounded-md border text-[11px] font-medium flex items-center justify-between gap-1 transition-all ${active ? 'border-sky-500 bg-sky-500 text-white' : 'border-border text-muted-foreground hover:border-sky-500/60'}`}
+                            >
+                              <span className="flex items-center gap-1 min-w-0">
+                                <Icon className="w-3.5 h-3.5 shrink-0" />
+                                <span className="truncate">{active ? rider!.name : RIDER_LABELS[type]}</span>
+                              </span>
+                              <ChevronDown className="w-3 h-3 shrink-0" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start" className="w-52 max-h-64 overflow-y-auto">
+                            <DropdownMenuLabel className="text-xs">{RIDER_LABELS[type]}</DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            {list.length === 0 ? (
+                              <p className="px-2 py-2 text-xs text-muted-foreground">No riders yet. Add them in Settings &gt; Delivery.</p>
+                            ) : list.map(r => (
+                              <DropdownMenuItem key={r.id} onSelect={() => setRider({ type, id: r.id, name: r.name })} className="gap-2 text-xs">
+                                {active && rider?.id === r.id ? <Check className="w-3.5 h-3.5" /> : <span className="w-3.5" />}
+                                <span className="truncate">{r.name}</span>
+                              </DropdownMenuItem>
+                            ))}
+                            {active && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onSelect={() => setRider(null)} className="gap-2 text-xs text-destructive">
+                                  <X className="w-3.5 h-3.5" /> Clear rider
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5 border-t border-border pt-2">
                   <div className="flex items-center justify-between">
                     <p className="text-xs font-medium text-muted-foreground flex items-center gap-1"><MapPin className="w-3 h-3" /> Delivery (optional)</p>
                     <Button variant="outline" size="sm" className="h-7 text-xs" onClick={openRoutePlanner}>
@@ -1130,7 +1178,7 @@ export default function POSPage() {
               </div>
 
               {/* Frozen footer */}
-              <div className="shrink-0 border-t border-border bg-card rounded-b-xl p-4 pt-3 space-y-2">
+              <div className="shrink-0 border-t border-border bg-card rounded-b-xl px-3 py-2.5 space-y-2">
                 {mergeList.length > 0 && (
                   <div className="flex items-center gap-2 rounded-md border border-emerald-500/60 bg-emerald-500/5 px-2 py-1">
                     <Layers className="w-3 h-3 text-emerald-400 shrink-0" />
