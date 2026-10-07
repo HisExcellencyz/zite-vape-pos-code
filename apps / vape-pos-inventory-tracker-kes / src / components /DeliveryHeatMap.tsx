@@ -151,7 +151,8 @@ export default function DeliveryHeatMap({ points, metric, focus = null, onSelect
         position: { lat: p.lat, lng: p.lng },
         map,
         title: `${p.label} — ${p.orders} order${p.orders === 1 ? '' : 's'}, KES ${Math.round(p.revenue).toLocaleString()}`,
-        icon: plainPin('#f5b301'),
+        // Red pins at 70% of the standard size
+        icon: plainPin('#ef4444', 0.7),
       });
       m.addListener('click', () => onSelectRef.current?.(p.key));
       return m;
