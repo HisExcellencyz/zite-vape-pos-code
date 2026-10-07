@@ -311,10 +311,11 @@ export default function CustomersPage() {
               Select all
             </label>
           )}
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+          {/* Smaller tiles: five per row on large screens */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
             {loading ? (
-              [...Array(4)].map((_, i) => (
-                <Card key={i} className="bg-card border-border"><CardContent className="p-4"><div className="h-24 bg-muted rounded animate-pulse" /></CardContent></Card>
+              [...Array(5)].map((_, i) => (
+                <Card key={i} className="bg-card border-border"><CardContent className="p-3"><div className="h-20 bg-muted rounded animate-pulse" /></CardContent></Card>
               ))
             ) : tc.view.length === 0 ? (
               <Card className="col-span-full bg-card border-border">
@@ -325,17 +326,17 @@ export default function CustomersPage() {
               </Card>
             ) : tc.view.map(c => (
               <Card key={c.id} className={`bg-card ${selectedIds.has(c.id) ? 'border-primary' : 'border-border'}`}>
-                <CardContent className="p-4 space-y-3">
+                <CardContent className="p-2.5 space-y-2">
                   <div className="flex items-start gap-2">
                     <input type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} className="mt-1 rounded shrink-0" />
-                    <p className="font-semibold text-foreground break-words whitespace-normal leading-snug min-w-0 flex-1">{c.customerName}</p>
+                    <p className="text-sm font-semibold text-foreground break-words whitespace-normal leading-snug min-w-0 flex-1">{c.customerName}</p>
                   </div>
-                  <div className="space-y-1.5 text-xs text-muted-foreground">
-                    <p className="flex items-start gap-1.5"><Phone className="w-3.5 h-3.5 mt-0.5 shrink-0" /><span className="break-all">{c.phoneNumber}</span></p>
-                    {c.email && <p className="flex items-start gap-1.5"><Mail className="w-3.5 h-3.5 mt-0.5 shrink-0" /><span className="break-all">{c.email}</span></p>}
-                    {c.address && <p className="flex items-start gap-1.5"><MapPin className="w-3.5 h-3.5 mt-0.5 shrink-0" /><span className="break-words whitespace-normal min-w-0">{c.address}</span></p>}
+                  <div className="space-y-1 text-[11px] text-muted-foreground">
+                    <p className="flex items-start gap-1.5"><Phone className="w-3 h-3 mt-0.5 shrink-0" /><span className="break-all">{c.phoneNumber}</span></p>
+                    {c.email && <p className="flex items-start gap-1.5"><Mail className="w-3 h-3 mt-0.5 shrink-0" /><span className="break-all">{c.email}</span></p>}
+                    {c.address && <p className="flex items-start gap-1.5"><MapPin className="w-3 h-3 mt-0.5 shrink-0" /><span className="break-words whitespace-normal min-w-0 line-clamp-2">{c.address}</span></p>}
                   </div>
-                  <div className="grid grid-cols-2 gap-2 text-xs border-t border-border pt-2">
+                  <div className="grid grid-cols-2 gap-2 text-[11px] border-t border-border pt-1.5">
                     <div>
                       <p className="text-muted-foreground">Orders</p>
                       <p className="font-semibold text-foreground">{c.orderCount || 0}</p>
@@ -345,7 +346,7 @@ export default function CustomersPage() {
                       <p className="font-semibold text-primary break-words">{fmt(c.totalSpent)}</p>
                     </div>
                   </div>
-                  <div className="border-t border-border pt-2">{renderActions(c)}</div>
+                  <div className="border-t border-border pt-1">{renderActions(c)}</div>
                 </CardContent>
               </Card>
             ))}
