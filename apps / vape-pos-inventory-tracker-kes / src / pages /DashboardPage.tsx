@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@project/components/ui
 import { Skeleton } from '@project/components/ui/skeleton';
 import {
   DollarSign, ShoppingCart, TrendingDown, TrendingUp, Package, Users, MapPin, Store,
-  LineChart as LineIcon, PieChart as PieIcon, BarChart3, Building2, Table2,
+  LineChart as LineIcon, PieChart as PieIcon, BarChart3, Building2, Table2, Bike,
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import DateRangeFilter from '../components/DateRangeFilter';
@@ -72,7 +72,7 @@ function MiniTable({ head, rows, maxH = 300 }: { head: string[]; rows: (string |
           <thead className="sticky top-0 bg-card">
             <tr className="border-b border-border text-muted-foreground">
               {head.map((h, i) => (
-                <th key={h} onClick={() => click(i)} className={cn('p-2 font-medium cursor-pointer select-none hover:text-foreground', i === 0 ? 'text-left' : 'text-right')}>
+                <th key={h} onClick={() => click(i)} className={cn('p-2 font-medium cursor-pointer select-none hover:text-foreground whitespace-nowrap', i === 0 ? 'text-left' : 'text-right')}>
                   {h}{sort?.col === i ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''}
                 </th>
               ))}
@@ -210,7 +210,7 @@ export default function DashboardPage({ scope = 'outlet' }: { scope?: 'outlet' |
             ) : <MiniTable head={['Category', 'Amount']} rows={data.expensesByCategory.map(r => [r.category, fmt(r.amount)])} />}
           </Tile>
 
-          {/* Left column: Top products shrinks so Delivery Distances ends level with Top Customers */}
+          {/* Left column: Top products, then Delivery Distances */}
           <div className="flex flex-col gap-6 min-h-0">
             <Tile title="Top Selling Products" icon={Package} className="flex-1" contentClassName="min-h-[180px]" view={views.get('prod')} onView={views.set('prod')}>
               {data.topProducts.length === 0 ? <Empty text="No sales data yet" /> : views.get('prod') === 'chart' ? (
@@ -243,19 +243,43 @@ export default function DashboardPage({ scope = 'outlet' }: { scope?: 'outlet' |
             </Tile>
           </div>
 
-          <Tile title={scope === 'business' ? 'Top Customers (all outlets)' : 'Top Customers (this outlet)'} icon={Users} view={views.get('cust', 'table')} onView={views.set('cust')}>
-            {data.topCustomers.length === 0 ? <Empty text="No customer data yet" /> : views.get('cust', 'table') === 'chart' ? (
-              <ResponsiveContainer width="100%" height={600}>
-                <BarChart data={data.topCustomers} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
-                  <XAxis type="number" tick={AXIS} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
-                  <YAxis type="category" dataKey="customerName" width={100} tick={AXIS} />
-                  <Tooltip contentStyle={TIP} formatter={(v: number) => [fmt(v), 'Spent']} />
-                  <Bar dataKey="totalSpent" fill="hsl(var(--chart-1))" radius={[0, 4, 4, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : <MiniTable head={['Customer', 'Phone', 'Orders', 'Spent']} rows={data.topCustomers.map(c => [c.customerName, c.phone, c.orderCount, fmt(c.totalSpent)])} maxH={560} />}
-          </Tile>
+          {/* Right column: Top customers (same size as Top products), then Rider metrics */}
+          <div className="flex flex-col gap-6 min-h-0">
+            <Tile title={scope === 'business' ? 'Top Customers (all outlets)' : 'Top Customers (this outlet)'} icon={Users} className="flex-1" contentClassName="min-h-[180px]" view={views.get('cust', 'table')} onView={views.set('cust')}>
+              {data.topCustomers.length === 0 ? <Empty text="No customer data yet" /> : views.get('cust', 'table') === 'chart' ? (
+                <div className="h-full min-h-[180px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={data.topCustomers.slice(0, 10)} layout="vertical">
+                      <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
+                      <XAxis type="number" tick={AXIS} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
+                      <YAxis type="category" dataKey="customerName" width={100} tick={AXIS} />
+                      <Tooltip contentStyle={TIP} formatter={(v: number) => [fmt(v), 'Spent']} />
+                      <Bar dataKey="totalSpent" fill="hsl(var(--chart-1))" radius={[0, 4, 4, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : <MiniTable head={['Customer', 'Phone', 'Orders', 'Spent']} rows={data.topCustomers.map(c => [c.customerName, c.phone, c.orderCount, fmt(c.totalSpent)])} />}
+            </Tile>
+
+            <Tile title="Rider Metrics" icon={Bike} view={views.get('rider', 'table')} onView={views.set('rider')}>
+              {data.riderStats.length === 0 ? <Empty text="No rider data yet. Choose a rider at POS when checking out." /> : views.get('rider', 'table') === 'chart' ? (
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={data.riderStats.slice(0, 10)} layout="vertical">
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
+                    <XAxis type="number" tick={AXIS} allowDecimals={false} />
+                    <YAxis type="category" dataKey="name" width={100} tick={AXIS} />
+                    <Tooltip contentStyle={TIP} />
+                    <Bar dataKey="orders" name="Orders" fill="hsl(var(--chart-3))" radius={[0, 4, 4, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <MiniTable
+                  head={['Rider', 'Type', 'Orders', 'Amount', 'Distance (km)', 'Rider Charge']}
+                  rows={data.riderStats.map(r => [r.name, r.type, r.orders, fmt(r.amount), r.km, fmt(r.riderCharge)])}
+                />
+              )}
+            </Tile>
+          </div>
         </div>
       )}
     </div>
