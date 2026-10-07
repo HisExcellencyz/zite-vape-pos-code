@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { useBranch, Branch, autoOn } from '../hooks/useBranch';
 import { Rider, Riders, RiderType, RIDER_LABELS, DEFAULT_DELIVERY_FEE, loadRiders, persistRiders, newRiderId } from '../lib/delivery';
 import DateRangeFilter, { Range, inRange } from '../components/DateRangeFilter';
+import { useTableControls, TableControls, SortTh, FieldDef } from '../components/TableControls';
 
 const DEFAULT_LOGO = 'https://images.fillout.com/orgid-811092/flowpublicid-6hepsbbapu/widgetid-default/xmArbfbmsBwLWSE2d2Et7u/pasted-image-1788367385543-n4ulma8b.png';
 
@@ -31,12 +32,32 @@ const STANDARD_DEDUCTIONS: Commission[] = [
 ];
 const sameName = (a?: string, b?: string) => (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
 
-/** Orders, amount (KES) and distance (km) handled by a rider or a whole category of riders. */
-interface Stat { orders: number; amount: number; km: number; }
-const emptyStat = (): Stat => ({ orders: 0, amount: 0, km: 0 });
+/** Orders, amount (KES), distance (km) and rider charge (KES, the "Rider Fee" deduction) handled by a rider or a whole category of riders. */
+interface Stat { orders: number; amount: number; km: number; charge: number; }
+const emptyStat = (): Stat => ({ orders: 0, amount: 0, km: 0, charge: 0 });
 const RIDER_NOTE = /Rider \((3PL|Own)\): ([^|]+)/;
 const fmtKes = (n: number) => `KES ${Math.round(n).toLocaleString()}`;
 const fmtKm = (n: number) => `${(Math.round(n * 10) / 10).toLocaleString()} km`;
+
+/** The Rider Fee deducted on a sale (from its deduction details). */
+const riderChargeOf = (details?: string | null) => {
+  try {
+    const list = details ? JSON.parse(details) : [];
+    if (!Array.isArray(list)) return 0;
+    return list.reduce((s: number, d: any) => s + (sameName(d?.name, 'Rider Fee') ? Number(d.amount) || 0 : 0), 0);
+  } catch { return 0; }
+};
+
+/** One row of a rider table: the rider plus their totals for the chosen dates. */
+interface RiderRow extends Stat { id: string; name: string; phone?: string; notes?: string; rider: Rider; }
+
+const RIDER_FIELDS: FieldDef<RiderRow>[] = [
+  { key: 'name', label: 'Name' },
+  { key: 'orders', label: 'Orders' },
+  { key: 'amount', label: 'Amount' },
+  { key: 'km', label: 'Distance' },
+  { key: 'charge', label: 'Rider Charge' },
+];
 
 export default function SettingsPage() {
   const { can } = usePermissions();
@@ -83,11 +104,21 @@ export default function SettingsPage() {
     const key = `${type}|${m[2].trim().toLowerCase()}`;
     const amount = Number(s.total) || 0;
     const km = Number(s.deliveryDistanceKm) || 0;
+    const charge = riderChargeOf(s.deductionDetails);
     const rs = riderStats.get(key) || emptyStat();
-    rs.orders += 1; rs.amount += amount; rs.km += km;
+    rs.orders += 1; rs.amount += amount; rs.km += km; rs.charge += charge;
     riderStats.set(key, rs);
-    catStats[type].orders += 1; catStats[type].amount += amount; catStats[type].km += km;
+    catStats[type].orders += 1; catStats[type].amount += amount; catStats[type].km += km; catStats[type].charge += charge;
   }
+
+  // Rows for the two rider tables (each table has its own search / sort).
+  const rowsFor = (type: RiderType): RiderRow[] =>
+    riders[type].map(r => {
+      const st = riderStats.get(`${type}|${r.name.trim().toLowerCase()}`) || emptyStat();
+      return { id: r.id, name: r.name, phone: r.phone, notes: r.notes, rider: r, ...st };
+    });
+  const tcThreePl = useTableControls(rowsFor('threePl'), RIDER_FIELDS);
+  const tcOwn = useTableControls(rowsFor('own'), RIDER_FIELDS);
 
   // A new outlet starts with Glovo, Rider Fee and Promo, copied from an existing outlet when it has them.
   const standardDeductions = (): Commission[] =>
@@ -194,8 +225,9 @@ export default function SettingsPage() {
     </div>
   );
 
-  const riderCard = (type: RiderType, Icon: any) => {
+  const riderCard = (type: RiderType, Icon: any, tc: ReturnType<typeof useTableControls<RiderRow>>) => {
     const cat = catStats[type];
+    const showActions = can('settings', 'edit') || can('settings', 'delete');
     return (
       <Card className="bg-card border-border">
         <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
@@ -204,33 +236,60 @@ export default function SettingsPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           {/* Category totals for the chosen dates */}
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {statBox('Orders', cat.orders.toLocaleString(), 'border-l-pink-500')}
             {statBox('Amount', fmtKes(cat.amount), 'border-l-amber-500')}
             {statBox('Distance', fmtKm(cat.km), 'border-l-sky-500')}
+            {statBox('Rider Charge', fmtKes(cat.charge), 'border-l-emerald-500')}
           </div>
 
-          <div className="space-y-2">
-            {riders[type].length === 0 ? (
-              <p className="text-sm text-muted-foreground py-6 text-center">No {RIDER_LABELS[type].toLowerCase()} added yet.</p>
-            ) : riders[type].map(r => {
-              const st = riderStats.get(`${type}|${r.name.trim().toLowerCase()}`) || emptyStat();
-              return (
-                <div key={r.id} className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-foreground break-words">{r.name}</p>
-                    {r.phone && <p className="text-xs text-muted-foreground flex items-center gap-1"><Phone className="w-3 h-3" /> {r.phone}</p>}
-                    {r.notes && <p className="text-xs text-muted-foreground break-words">{r.notes}</p>}
-                    <p className="text-[11px] text-primary mt-0.5">
-                      {st.orders} order{st.orders === 1 ? '' : 's'} · {fmtKes(st.amount)} · {fmtKm(st.km)}
-                    </p>
-                  </div>
-                  {can('settings', 'edit') && <Button variant="ghost" size="sm" onClick={() => openRider(type, r)}><Pencil className="w-3.5 h-3.5" /></Button>}
-                  {can('settings', 'delete') && <Button variant="ghost" size="sm" className="text-destructive" onClick={() => handleDeleteRider(type, r)}><Trash2 className="w-3.5 h-3.5" /></Button>}
-                </div>
-              );
-            })}
-          </div>
+          {riders[type].length === 0 ? (
+            <p className="text-sm text-muted-foreground py-6 text-center">No {RIDER_LABELS[type].toLowerCase()} added yet.</p>
+          ) : (
+            <>
+              {/* Search by Name, Orders, Amount, Distance or Rider Charge, and sort */}
+              <TableControls c={tc} />
+              <div className="overflow-auto max-h-[420px] rounded-lg border border-border">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 z-10 bg-card">
+                    <tr className="border-b border-border text-muted-foreground bg-card">
+                      <SortTh c={tc} k="name" className="text-left">Name</SortTh>
+                      <SortTh c={tc} k="orders" className="text-right">Orders</SortTh>
+                      <SortTh c={tc} k="amount" className="text-right">Amount</SortTh>
+                      <SortTh c={tc} k="km" className="text-right">Distance</SortTh>
+                      <SortTh c={tc} k="charge" className="text-right">Rider Charge</SortTh>
+                      {showActions && <th className="p-3 w-20" />}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tc.view.length === 0 ? (
+                      <tr><td colSpan={showActions ? 6 : 5} className="text-center py-6 text-muted-foreground">No matches</td></tr>
+                    ) : tc.view.map(r => (
+                      <tr key={r.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                        <td className="p-3 min-w-[110px]">
+                          <p className="text-sm font-medium text-foreground break-words whitespace-normal">{r.name}</p>
+                          {r.phone && <p className="text-[11px] text-muted-foreground flex items-center gap-1"><Phone className="w-3 h-3" /> {r.phone}</p>}
+                          {r.notes && <p className="text-[11px] text-muted-foreground break-words whitespace-normal">{r.notes}</p>}
+                        </td>
+                        <td className="p-3 text-right text-foreground">{r.orders.toLocaleString()}</td>
+                        <td className="p-3 text-right text-foreground whitespace-nowrap">{fmtKes(r.amount)}</td>
+                        <td className="p-3 text-right text-foreground whitespace-nowrap">{fmtKm(r.km)}</td>
+                        <td className="p-3 text-right font-semibold text-emerald-400 whitespace-nowrap">{fmtKes(r.charge)}</td>
+                        {showActions && (
+                          <td className="p-3">
+                            <div className="flex justify-end gap-0.5">
+                              {can('settings', 'edit') && <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openRider(type, r.rider)}><Pencil className="w-3.5 h-3.5" /></Button>}
+                              {can('settings', 'delete') && <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDeleteRider(type, r.rider)}><Trash2 className="w-3.5 h-3.5" /></Button>}
+                            </div>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
     );
@@ -378,15 +437,15 @@ export default function SettingsPage() {
           <p className="text-sm text-muted-foreground max-w-2xl">
             Riders added here are shared by every outlet. At POS, the cashier picks which 3PL or own rider is handling an order.
             The delivery fee per order is set for each outlet under Outlets, in Incomes &amp; Revenues.
-            Orders, amounts and distances below cover all outlets for the dates you pick.
+            Orders, amounts, distances and rider charges (the Rider Fee deduction) below cover all outlets for the dates you pick.
           </p>
 
           {/* Date picker: presets (Today, Yesterday, 7 days, 30 days) or a custom start and end date */}
           <DateRangeFilter value={range} onChange={setRange} />
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {riderCard('threePl', Truck)}
-            {riderCard('own', Bike)}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            {riderCard('threePl', Truck, tcThreePl)}
+            {riderCard('own', Bike, tcOwn)}
           </div>
 
           <Dialog open={!!riderDialog} onOpenChange={o => { if (!o) setRiderDialog(null); }}>
