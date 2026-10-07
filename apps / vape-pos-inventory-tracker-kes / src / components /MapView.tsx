@@ -24,6 +24,10 @@ interface Props {
   plainPins?: boolean;
   /** Small embedded maps (inside dialogs) show only the fullscreen button. */
   compact?: boolean;
+  /** When set, every pin (and the selected pin) uses this colour instead of its own. */
+  pinColor?: string;
+  /** Size of the pins, 1 = full size, 0.7 = 70%. */
+  pinScale?: number;
 }
 
 /**
@@ -33,6 +37,7 @@ interface Props {
 export default function MapView({
   pins = [], center, zoom = 13, className = 'h-[300px]', onClick, selectedPin,
   focus = null, fitToPins = false, plainPins = false, compact = false,
+  pinColor, pinScale = 1,
 }: Props) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
@@ -91,11 +96,12 @@ export default function MapView({
     markersRef.current.forEach(m => m.setMap(null));
     markersRef.current = [];
     pins.forEach((pin, i) => {
+      const color = pinColor || pin.color || '#ef4444';
       const marker = new google.maps.Marker({
         position: { lat: pin.lat, lng: pin.lng },
         map,
         title: pin.label,
-        icon: plainPins ? plainPin(pin.color || '#ef4444') : numberedPin(i + 1, pin.color || '#ef4444'),
+        icon: plainPins ? plainPin(color, pinScale) : numberedPin(i + 1, color, pinScale),
       });
       markersRef.current.push(marker);
     });
@@ -106,7 +112,7 @@ export default function MapView({
       if (pins.length === 1) map.setZoom(15);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(pins), isLoading, plainPins]);
+  }, [JSON.stringify(pins), isLoading, plainPins, pinColor, pinScale]);
 
   // Update selected pin marker and pan to it
   useEffect(() => {
@@ -120,12 +126,12 @@ export default function MapView({
       selectedMarkerRef.current = new google.maps.Marker({
         position: selectedPin,
         map,
-        icon: plainPin('#3b82f6'),
+        icon: plainPin(pinColor || '#3b82f6', pinScale),
       });
       map.panTo(selectedPin);
       if (map.getZoom()! < 14) map.setZoom(15);
     }
-  }, [selectedPin, isLoading]);
+  }, [selectedPin, isLoading, pinColor, pinScale]);
 
   // Jump to a spot (e.g. when an address tile is clicked)
   useEffect(() => {
