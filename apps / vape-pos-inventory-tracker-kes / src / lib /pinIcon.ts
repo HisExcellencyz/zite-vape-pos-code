@@ -2,6 +2,7 @@
 // with a darker shade of that same colour for the outline and centre dot.
 // The colour passed in always decides the pin colour (e.g. tag colours on routes,
 // type colours on addresses, blue for a picked location) — only the look changed.
+// An optional `scale` (1 = full size) shrinks or enlarges the pin.
 
 function shade(hex: string, amount: number): string {
   const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
@@ -12,16 +13,16 @@ function shade(hex: string, amount: number): string {
 
 const PIN_PATH = 'M16 1C7.7 1 1 7.6 1 15.8 1 27 16 41 16 41s15-14 15-25.2C31 7.6 24.3 1 16 1z';
 
-function toIcon(svg: string): google.maps.Icon {
+function toIcon(svg: string, scale = 1): google.maps.Icon {
   return {
     url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg),
-    scaledSize: new google.maps.Size(32, 42),
-    anchor: new google.maps.Point(16, 41),
+    scaledSize: new google.maps.Size(32 * scale, 42 * scale),
+    anchor: new google.maps.Point(16 * scale, 41 * scale),
   };
 }
 
 /** A teardrop map pin with a number inside, as a Google Maps marker icon. */
-export function numberedPin(n: number | string, color = '#ef4444'): google.maps.Icon {
+export function numberedPin(n: number | string, color = '#ef4444', scale = 1): google.maps.Icon {
   const outline = shade(color, 0.3);
   const centre = shade(color, 0.4);
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="42" viewBox="0 0 32 42">
@@ -30,11 +31,11 @@ export function numberedPin(n: number | string, color = '#ef4444'): google.maps.
 <circle cx="16" cy="15.8" r="9" fill="${centre}"/>
 <text x="16" y="20" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="bold" fill="#fff">${n}</text>
 </svg>`;
-  return toIcon(svg);
+  return toIcon(svg, scale);
 }
 
 /** A teardrop map pin with a dark centre dot (no number). */
-export function plainPin(color = '#ef4444'): google.maps.Icon {
+export function plainPin(color = '#ef4444', scale = 1): google.maps.Icon {
   const outline = shade(color, 0.3);
   const centre = shade(color, 0.5);
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="42" viewBox="0 0 32 42">
@@ -42,5 +43,5 @@ export function plainPin(color = '#ef4444'): google.maps.Icon {
 <path d="${PIN_PATH}" fill="${color}" stroke="${outline}" stroke-width="1.5"/>
 <circle cx="16" cy="15.8" r="5.5" fill="${centre}"/>
 </svg>`;
-  return toIcon(svg);
+  return toIcon(svg, scale);
 }
