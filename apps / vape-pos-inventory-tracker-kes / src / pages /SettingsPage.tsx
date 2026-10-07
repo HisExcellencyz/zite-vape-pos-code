@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { saveBranch } from 'zitejs/api';
+import { saveBranch, getSales } from 'zitejs/api';
 import { Link } from 'react-router-dom';
 import DashboardPage from './DashboardPage';
 import { Card, CardContent, CardHeader, CardTitle } from '@project/components/ui/card';
@@ -13,6 +13,7 @@ import { Store, Plus, Pencil, Trash2, Check, Shield, Truck, Bike, Phone } from '
 import { toast } from 'sonner';
 import { useBranch, Branch, autoOn } from '../hooks/useBranch';
 import { Rider, Riders, RiderType, RIDER_LABELS, DEFAULT_DELIVERY_FEE, loadRiders, persistRiders, newRiderId } from '../lib/delivery';
+import DateRangeFilter, { Range, inRange } from '../components/DateRangeFilter';
 
 const DEFAULT_LOGO = 'https://images.fillout.com/orgid-811092/flowpublicid-6hepsbbapu/widgetid-default/xmArbfbmsBwLWSE2d2Et7u/pasted-image-1788367385543-n4ulma8b.png';
 
@@ -29,6 +30,13 @@ const STANDARD_DEDUCTIONS: Commission[] = [
   { name: 'Promo', type: 'fixed', value: 70, enabled: false },
 ];
 const sameName = (a?: string, b?: string) => (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
+
+/** Orders, amount (KES) and distance (km) handled by a rider or a whole category of riders. */
+interface Stat { orders: number; amount: number; km: number; }
+const emptyStat = (): Stat => ({ orders: 0, amount: 0, km: 0 });
+const RIDER_NOTE = /Rider \((3PL|Own)\): ([^|]+)/;
+const fmtKes = (n: number) => `KES ${Math.round(n).toLocaleString()}`;
+const fmtKm = (n: number) => `${(Math.round(n * 10) / 10).toLocaleString()} km`;
 
 export default function SettingsPage() {
   const { can } = usePermissions();
@@ -55,9 +63,31 @@ export default function SettingsPage() {
   const [rNotes, setRNotes] = useState('');
   const [savingRider, setSavingRider] = useState(false);
 
+  // Delivery statistics (all outlets), filtered by the date range picker
+  const [sales, setSales] = useState<any[]>([]);
+  const [range, setRange] = useState<Range>({});
+
   useEffect(() => {
     loadRiders().then(setRiders).catch(() => {});
+    getSales({}).then(r => setSales(r.sales as any[])).catch(() => {});
   }, []);
+
+  // Per category and per rider (matched by name) totals from the rider noted on each sale.
+  const catStats: Record<RiderType, Stat> = { threePl: emptyStat(), own: emptyStat() };
+  const riderStats = new Map<string, Stat>();
+  for (const s of sales) {
+    if (s.status === 'Voided' || !inRange(range, s.saleDate)) continue;
+    const m = RIDER_NOTE.exec(s.notes || '');
+    if (!m) continue;
+    const type: RiderType = m[1] === '3PL' ? 'threePl' : 'own';
+    const key = `${type}|${m[2].trim().toLowerCase()}`;
+    const amount = Number(s.total) || 0;
+    const km = Number(s.deliveryDistanceKm) || 0;
+    const rs = riderStats.get(key) || emptyStat();
+    rs.orders += 1; rs.amount += amount; rs.km += km;
+    riderStats.set(key, rs);
+    catStats[type].orders += 1; catStats[type].amount += amount; catStats[type].km += km;
+  }
 
   // A new outlet starts with Glovo, Rider Fee and Promo, copied from an existing outlet when it has them.
   const standardDeductions = (): Commission[] =>
@@ -157,29 +187,54 @@ export default function SettingsPage() {
     await saveRiders({ ...riders, [type]: riders[type].filter(x => x.id !== r.id) }, 'Rider removed');
   };
 
-  const riderCard = (type: RiderType, Icon: any) => (
-    <Card className="bg-card border-border">
-      <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
-        <CardTitle className="text-base flex items-center gap-2"><Icon className="w-4 h-4 text-primary" /> {RIDER_LABELS[type]}</CardTitle>
-        {can('settings', 'create') && <Button size="sm" onClick={() => openRider(type)}><Plus className="w-4 h-4 mr-1" /> Add</Button>}
-      </CardHeader>
-      <CardContent className="space-y-2">
-        {riders[type].length === 0 ? (
-          <p className="text-sm text-muted-foreground py-6 text-center">No {RIDER_LABELS[type].toLowerCase()} added yet.</p>
-        ) : riders[type].map(r => (
-          <div key={r.id} className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2">
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-foreground break-words">{r.name}</p>
-              {r.phone && <p className="text-xs text-muted-foreground flex items-center gap-1"><Phone className="w-3 h-3" /> {r.phone}</p>}
-              {r.notes && <p className="text-xs text-muted-foreground break-words">{r.notes}</p>}
-            </div>
-            {can('settings', 'edit') && <Button variant="ghost" size="sm" onClick={() => openRider(type, r)}><Pencil className="w-3.5 h-3.5" /></Button>}
-            {can('settings', 'delete') && <Button variant="ghost" size="sm" className="text-destructive" onClick={() => handleDeleteRider(type, r)}><Trash2 className="w-3.5 h-3.5" /></Button>}
-          </div>
-        ))}
-      </CardContent>
-    </Card>
+  const statBox = (label: string, value: string, cls: string) => (
+    <div className={`rounded-lg border bg-muted/30 px-2 py-1.5 border-l-4 ${cls}`}>
+      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className="text-sm font-bold text-foreground break-words">{value}</p>
+    </div>
   );
+
+  const riderCard = (type: RiderType, Icon: any) => {
+    const cat = catStats[type];
+    return (
+      <Card className="bg-card border-border">
+        <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
+          <CardTitle className="text-base flex items-center gap-2"><Icon className="w-4 h-4 text-primary" /> {RIDER_LABELS[type]}</CardTitle>
+          {can('settings', 'create') && <Button size="sm" onClick={() => openRider(type)}><Plus className="w-4 h-4 mr-1" /> Add</Button>}
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {/* Category totals for the chosen dates */}
+          <div className="grid grid-cols-3 gap-2">
+            {statBox('Orders', cat.orders.toLocaleString(), 'border-l-pink-500')}
+            {statBox('Amount', fmtKes(cat.amount), 'border-l-amber-500')}
+            {statBox('Distance', fmtKm(cat.km), 'border-l-sky-500')}
+          </div>
+
+          <div className="space-y-2">
+            {riders[type].length === 0 ? (
+              <p className="text-sm text-muted-foreground py-6 text-center">No {RIDER_LABELS[type].toLowerCase()} added yet.</p>
+            ) : riders[type].map(r => {
+              const st = riderStats.get(`${type}|${r.name.trim().toLowerCase()}`) || emptyStat();
+              return (
+                <div key={r.id} className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-foreground break-words">{r.name}</p>
+                    {r.phone && <p className="text-xs text-muted-foreground flex items-center gap-1"><Phone className="w-3 h-3" /> {r.phone}</p>}
+                    {r.notes && <p className="text-xs text-muted-foreground break-words">{r.notes}</p>}
+                    <p className="text-[11px] text-primary mt-0.5">
+                      {st.orders} order{st.orders === 1 ? '' : 's'} · {fmtKes(st.amount)} · {fmtKm(st.km)}
+                    </p>
+                  </div>
+                  {can('settings', 'edit') && <Button variant="ghost" size="sm" onClick={() => openRider(type, r)}><Pencil className="w-3.5 h-3.5" /></Button>}
+                  {can('settings', 'delete') && <Button variant="ghost" size="sm" className="text-destructive" onClick={() => handleDeleteRider(type, r)}><Trash2 className="w-3.5 h-3.5" /></Button>}
+                </div>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
 
   const incomeChip = (b: Branch) => {
     const inc = (b.incomes ?? [])[0];
@@ -323,7 +378,12 @@ export default function SettingsPage() {
           <p className="text-sm text-muted-foreground max-w-2xl">
             Riders added here are shared by every outlet. At POS, the cashier picks which 3PL or own rider is handling an order.
             The delivery fee per order is set for each outlet under Outlets, in Incomes &amp; Revenues.
+            Orders, amounts and distances below cover all outlets for the dates you pick.
           </p>
+
+          {/* Date picker: presets (Today, Yesterday, 7 days, 30 days) or a custom start and end date */}
+          <DateRangeFilter value={range} onChange={setRange} />
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {riderCard('threePl', Truck)}
             {riderCard('own', Bike)}
