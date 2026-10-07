@@ -17,6 +17,10 @@ import DeliveriesPanel from '../components/DeliveriesPanel';
 import { parseCoordinates } from '../lib/geocode';
 import { ADDR_TYPES, AddrType, addrPinColor, normalizeAddrType } from '../lib/addressTypes';
 
+// Every map on this page uses red teardrop pins at 70% of the standard size.
+const PIN_COLOR = '#ef4444';
+const PIN_SCALE = 0.7;
+
 interface Address {
   id: string;
   addressName?: string;
@@ -225,6 +229,8 @@ export default function AddressesPage() {
                 pins={mapPins}
                 fitToPins
                 plainPins
+                pinColor={PIN_COLOR}
+                pinScale={PIN_SCALE}
                 focus={focus}
                 className="h-[320px] lg:h-[calc(100vh-112px)]"
               />
@@ -282,6 +288,8 @@ export default function AddressesPage() {
               onClick={handleMapClick}
               selectedPin={selectedPin}
               center={selectedPin || undefined}
+              pinColor={PIN_COLOR}
+              pinScale={PIN_SCALE}
             />
             <PinStatus
               text={selectedPin ? (fullAddress || coordinates) : null}
