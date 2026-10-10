@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   getPurchaseOrders, savePurchaseOrder, verifyPurchaseOrder,
-  generateLpoPdf, exportLpoCsv, getProducts, getSuppliers, deleteRecord, importLpos
+  generateLpoPdf, exportLpoCsv, getProducts, getSuppliers, deleteRecord, importLpos,
+  getCategories, manageSupplierSupplies
 } from 'zitejs/api';
 import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
@@ -21,6 +22,7 @@ import { DatePicker } from '@project/components/ui/date-picker';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
 import ImportDialog from '../components/ImportDialog';
 import ProductMultiSearch from '../components/ProductMultiSearch';
+import { buildCategoryTree, productCategoryId, CategoryLite } from '../components/CategoryRibbon';
 import { useBranch } from '../hooks/useBranch';
 import { usePermissions } from '../hooks/usePermissions';
 
@@ -47,8 +49,9 @@ interface PurchaseOrder {
   itemsJson?: string;
 }
 
-interface Product { id: string; productName?: string; sku?: string; costPrice?: number; stockQuantity?: number; }
+interface Product { id: string; productName?: string; sku?: string; costPrice?: number; stockQuantity?: number; category?: string | string[]; }
 interface Supplier { id: string; supplierName?: string; }
+interface Supplies { productIds: string[]; categoryIds: string[]; }
 
 const statusColors: Record<string, string> = {
   draft: 'bg-gray-500/10 text-gray-400 border-gray-500/20',
@@ -63,6 +66,7 @@ export default function PurchaseOrdersPage() {
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [categories, setCategories] = useState<CategoryLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -79,20 +83,51 @@ export default function PurchaseOrdersPage() {
   const [items, setItems] = useState<LPOItem[]>([]);
   const [saving, setSaving] = useState(false);
 
+  // What the chosen supplier supplies (ticked on the supplier's account > Supplies tab).
+  const [supplies, setSupplies] = useState<Supplies | null>(null);
+
   const [verifyItems, setVerifyItems] = useState<LPOItem[]>([]);
   const [verifying, setVerifying] = useState(false);
 
   const load = async () => {
     setLoading(true);
     try {
-      const [o, p, s] = await Promise.all([getPurchaseOrders({ branchId: currentBranch?.id }), getProducts({ branchId: currentBranch?.id }), getSuppliers({})]);
+      const [o, p, s, c] = await Promise.all([
+        getPurchaseOrders({ branchId: currentBranch?.id }),
+        getProducts({ branchId: currentBranch?.id }),
+        getSuppliers({}),
+        getCategories({}),
+      ]);
       setOrders(o.orders as PurchaseOrder[]);
       setProducts(p.products as Product[]);
       setSuppliers(s.suppliers as Supplier[]);
+      setCategories(c.categories as CategoryLite[]);
     } finally { setLoading(false); }
   };
 
   useEffect(() => { load(); }, [currentBranch?.id]);
+
+  // Fetch the supplier's products and categories whenever the supplier changes.
+  useEffect(() => {
+    if (!supplierId) { setSupplies(null); return; }
+    let off = false;
+    setSupplies(null);
+    manageSupplierSupplies({ action: 'get', supplierId })
+      .then(r => { if (!off) setSupplies({ productIds: r.productIds, categoryIds: r.categoryIds }); })
+      .catch(() => { if (!off) setSupplies({ productIds: [], categoryIds: [] }); });
+    return () => { off = true; };
+  }, [supplierId]);
+
+  // Products offered in the search dropdown: those the supplier supplies (directly, or through a ticked
+  // category and its subcategories). A supplier with nothing ticked yet offers the whole catalogue.
+  const supplierProducts = useMemo(() => {
+    if (!supplies || (supplies.productIds.length === 0 && supplies.categoryIds.length === 0)) return products;
+    const { kids } = buildCategoryTree(categories);
+    const cats = new Set<string>();
+    supplies.categoryIds.forEach(cid => { cats.add(cid); (kids.get(cid) || []).forEach(k => cats.add(k.id)); });
+    const direct = new Set(supplies.productIds);
+    return products.filter(p => direct.has(p.id) || cats.has(productCategoryId(p)));
+  }, [products, categories, supplies]);
 
   const fmt = (n?: number) => `KES ${(n || 0).toLocaleString()}`;
 
@@ -352,7 +387,7 @@ export default function PurchaseOrdersPage() {
         onDone={load}
       />
 
-      {/* New / edit LPO: wide enough to show about ten search results at once */}
+      {/* New / edit LPO: once a supplier is chosen, clicking into the search box lists that supplier's products */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
         <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{editId ? 'Edit' : 'New'} Purchase Order</DialogTitle></DialogHeader>
@@ -378,10 +413,14 @@ export default function PurchaseOrdersPage() {
             <div className="space-y-1.5">
               <Label>Products</Label>
               <ProductMultiSearch
-                items={products}
+                key={supplierId || 'none'}
+                items={supplierProducts}
                 stockOf={p => p.stockQuantity || 0}
                 addedIds={items.map(i => i.productId)}
                 onAdd={addProducts}
+                disabled={!supplierId}
+                showOnFocus
+                placeholder={supplierId ? 'Search products...' : 'Select a supplier first'}
               />
             </div>
 
@@ -419,8 +458,7 @@ export default function PurchaseOrdersPage() {
       <Dialog open={!!showVerify} onOpenChange={() => setShowVerify(null)}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Verify Delivery — {showVerify?.lpoNumber}</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">Check each product received and confirm quantities. Once all verified, a purchase will be auto-recorded.</p>
-          <div className="space-y-2 mt-4">
+          <div className="space-y-2 mt-2">
             {verifyItems.map((item, i) => (
               <div key={item.productId} className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
                 <Checkbox
