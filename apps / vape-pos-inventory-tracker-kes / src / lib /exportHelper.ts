@@ -1,4 +1,4 @@
-export type TemplateKey = 'products' | 'customers' | 'suppliers' | 'sales' | 'purchases' | 'lpos' | 'income' | 'expenses';
+export type TemplateKey = 'products' | 'customers' | 'suppliers' | 'sales' | 'purchases' | 'lpos' | 'income' | 'expenses' | 'storageStock';
 
 // Set by the permissions provider. Only the Owner and Admin get template columns that
 // change dates or create backdated entries.
@@ -18,6 +18,11 @@ const IMPORT_TEMPLATES: Record<TemplateKey, { headers: string[]; samples: string
   suppliers: {
     headers: ['Supplier Name', 'Phone', 'Email', 'Address'],
     samples: [],
+  },
+  // Stock held in each storage. One row per storage + product; the Quantity becomes that storage's stock level.
+  storageStock: {
+    headers: ['Storage', 'Product SKU', 'Quantity'],
+    samples: [], // no sample rows: they could overwrite real stock levels if the template were imported as is
   },
   // One row per product line. Rows sharing the same Sale Ref become ONE sale.
   // Owner/Admin only: Date (backdate) and Sale Number (change the date of an existing sale).
