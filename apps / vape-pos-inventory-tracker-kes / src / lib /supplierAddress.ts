@@ -4,7 +4,10 @@ import { zite } from 'zitejs/db';
  * Every supplier gets a matching Supplier-type location on the Addresses page.
  * The link address -> supplier is kept in the app settings record (customFields.addressSuppliers, the same
  * place the Addresses page already uses), plus customFields.supplierPrimaryAddress (supplier -> address)
- * so renaming/editing the supplier updates the same location instead of creating a new one.
+ * so editing the supplier updates the same location instead of creating a new one.
+ *
+ * The location's NAME is only set when it is first created. After that it can be renamed freely under Addresses,
+ * and saving the supplier again never overwrites that name.
  */
 
 async function loadCfg() {
@@ -34,14 +37,11 @@ export async function syncSupplierAddress(
     if (!ex) addrId = undefined;
   }
 
-  const data: Record<string, unknown> = {
-    addressName: supplier.supplierName || 'Supplier',
-    type: 'supplier',
-    fullAddress: supplier.address || null,
-  };
+  const data: Record<string, unknown> = { fullAddress: supplier.address || null };
   if (coordinates) data.coordinates = coordinates;
 
   if (addrId) {
+    // Name and type are left as they are, so a location renamed under Addresses keeps its own name.
     await zite.addresses.update({ id: addrId, record: data });
     // Make sure the link exists (older records may only have the primary entry).
     if (links[addrId] !== supplier.id) {
@@ -52,7 +52,9 @@ export async function syncSupplierAddress(
     return addrId;
   }
 
-  const created = await zite.addresses.create({ record: { ...data, active: true } });
+  const created = await zite.addresses.create({
+    record: { ...data, addressName: supplier.supplierName || 'Supplier', type: 'supplier', active: true },
+  });
   links[created.id] = supplier.id;
   primary[supplier.id] = created.id;
   cfg.addressSuppliers = links;
