@@ -15,6 +15,7 @@ import PurchaseOrdersPage from './pages/PurchaseOrdersPage';
 import ExpensesPage from './pages/ExpensesPage';
 import SettingsPage from './pages/SettingsPage';
 import CategoriesPage from './pages/CategoriesPage';
+import StoragesPage from './pages/StoragesPage';
 import UsersPage from './pages/UsersPage';
 import AddressesPage from './pages/AddressesPage';
 import { PermissionsProvider, usePermissions } from './hooks/usePermissions';
@@ -33,6 +34,7 @@ const ROUTES: { path: string; area: string; alt?: string; element: ReactElement 
   { path: '/customers', area: 'customers', element: <CustomersPage /> },
   { path: '/suppliers', area: 'suppliers', element: <SuppliersPage /> },
   { path: '/categories', area: 'categories', element: <CategoriesPage /> },
+  { path: '/storages', area: 'inventory', element: <StoragesPage /> },
   { path: '/addresses', area: 'addresses', element: <AddressesPage /> },
   { path: '/users', area: 'users', element: <UsersPage /> },
   { path: '/settings', area: 'settings', element: <SettingsPage /> },
