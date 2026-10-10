@@ -1,15 +1,15 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { getStorages, saveStorage, transferStock, getProducts } from 'zitejs/api';
+import { getStorages, saveStorage, transferStock, getProducts, adjustStorageStock } from 'zitejs/api';
 import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
 import { Badge } from '@project/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@project/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
-import { Warehouse, Plus, Pencil, Trash2, ArrowRightLeft, ArrowLeft, Bike, Search, Eye } from 'lucide-react';
+import { Warehouse, Plus, Pencil, Trash2, ArrowRightLeft, ArrowLeft, Bike, Search, Eye, SlidersHorizontal } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePermissions } from '../hooks/usePermissions';
 import { OFFICE_ID, StockMap, StorageLite, qtyIn } from '../lib/storageMath';
@@ -21,7 +21,8 @@ interface Line { productId: string; quantity: string; }
 const typeLabel = (s: StorageLite) => (s.type === 'office' ? 'Default' : s.type === 'rider' ? 'Own rider' : 'Custom');
 
 export default function StoragesPage() {
-  const { can } = usePermissions();
+  // canBackdate is true only for the Owner and Admins: the same people who may adjust stock levels.
+  const { can, canBackdate } = usePermissions();
   const [storages, setStorages] = useState<StorageLite[]>([]);
   const [stock, setStock] = useState<StockMap>({});
   const [products, setProducts] = useState<Product[]>([]);
@@ -42,6 +43,12 @@ export default function StoragesPage() {
   const [toId, setToId] = useState('');
   const [lines, setLines] = useState<Line[]>([]);
   const [transferring, setTransferring] = useState(false);
+
+  // Adjust stock levels (Owner and Admins only)
+  const [adjOpen, setAdjOpen] = useState(false);
+  const [adjId, setAdjId] = useState('');
+  const [adjLines, setAdjLines] = useState<Line[]>([]);
+  const [adjusting, setAdjusting] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -96,7 +103,7 @@ export default function StoragesPage() {
       await saveStorage(nameDialog?.id
         ? { action: 'rename', id: nameDialog.id, name: nameValue.trim() }
         : { action: 'create', name: nameValue.trim() });
-      toast.success(nameDialog?.id ? 'Storage renamed' : 'Storage created. It is also added under Addresses.');
+      toast.success(nameDialog?.id ? 'Storage renamed' : 'Storage created');
       setNameDialog(null);
       load();
     } catch (e: any) {
@@ -167,19 +174,65 @@ export default function StoragesPage() {
     }
   };
 
+  // ── Adjust stock levels (Owner and Admins) ──
+  const openAdjust = (storageId?: string) => {
+    setAdjId(storageId || OFFICE_ID);
+    setAdjLines([]);
+    setAdjOpen(true);
+  };
+
+  const changeAdjStorage = (id: string) => {
+    setAdjId(id);
+    setAdjLines([]);
+  };
+
+  // Every ticked product is added with its current quantity in this storage as the starting value.
+  const addAdjLines = (list: Product[]) => {
+    setAdjLines(prev => {
+      const next = [...prev];
+      for (const p of list) if (!next.some(l => l.productId === p.id)) next.push({ productId: p.id, quantity: String(qty(adjId, p)) });
+      return next;
+    });
+  };
+
+  const handleAdjust = async () => {
+    if (!adjId) return toast.error('Choose a storage');
+    const items: { productId: string; quantity: number }[] = [];
+    for (const l of adjLines) {
+      if (l.quantity.trim() === '') continue;
+      const q = Math.floor(Number(l.quantity));
+      if (!Number.isFinite(q) || q < 0) return toast.error('Quantities must be 0 or more');
+      const p = products.find(x => x.id === l.productId);
+      if (p && q === qty(adjId, p)) continue; // unchanged
+      items.push({ productId: l.productId, quantity: q });
+    }
+    if (items.length === 0) return toast.error('Change at least one quantity');
+    setAdjusting(true);
+    try {
+      const res = await adjustStorageStock({ storageId: adjId, items });
+      toast.success(`Stock adjusted for ${res.adjusted} product${res.adjusted === 1 ? '' : 's'}`);
+      setAdjOpen(false);
+      load();
+    } catch (e: any) {
+      toast.error(e.message || 'Adjustment failed');
+    } finally {
+      setAdjusting(false);
+    }
+  };
+
   const nameOf = (id: string) => storages.find(s => s.id === id)?.name || '';
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Storages</h1>
-          <p className="text-sm text-muted-foreground">
-            The Office is the default storage. Every Own Rider also has a storage of their own. Stock sold at POS comes out of the Office unless a rider's or a picked-up storage's stock is used.
-          </p>
-        </div>
+    <div className="p-6 space-y-5">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold text-foreground">Storages</h1>
         <div className="flex items-center gap-2 flex-wrap">
           <Button asChild variant="outline" size="sm"><Link to="/inventory"><ArrowLeft className="w-4 h-4 mr-1" /> Inventory</Link></Button>
+          {canBackdate && (
+            <Button variant="outline" size="sm" className="border-amber-400/70 hover:border-amber-400" onClick={() => openAdjust()}>
+              <SlidersHorizontal className="w-4 h-4 mr-1" /> Adjust Stock
+            </Button>
+          )}
           {can('inventory', 'edit') && (
             <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={() => openTransfer()}>
               <ArrowRightLeft className="w-4 h-4 mr-1" /> Transfer Stock
@@ -189,43 +242,47 @@ export default function StoragesPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+      {/* Compact tiles */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
         {loading ? (
-          [...Array(3)].map((_, i) => <Card key={i} className="bg-card border-border"><CardContent className="p-4"><div className="h-24 bg-muted rounded animate-pulse" /></CardContent></Card>)
+          [...Array(4)].map((_, i) => <Card key={i} className="bg-card border-border"><CardContent className="p-3"><div className="h-16 bg-muted rounded animate-pulse" /></CardContent></Card>)
         ) : storages.map(s => {
           const t = totals.get(s.id) || { units: 0, products: 0 };
           return (
             <Card key={s.id} className={`bg-card ${viewId === s.id ? 'border-primary' : 'border-border'}`}>
-              <CardContent className="p-4 space-y-3">
+              <CardContent className="p-3 space-y-2">
                 <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-start gap-2 min-w-0">
-                    {s.type === 'rider' ? <Bike className="w-5 h-5 text-sky-400 shrink-0" /> : <Warehouse className="w-5 h-5 text-amber-400 shrink-0" />}
-                    <p className="font-semibold text-foreground break-words whitespace-normal leading-snug">{s.name}</p>
+                  <div className="flex items-start gap-1.5 min-w-0">
+                    {s.type === 'rider' ? <Bike className="w-4 h-4 mt-0.5 text-sky-400 shrink-0" /> : <Warehouse className="w-4 h-4 mt-0.5 text-amber-400 shrink-0" />}
+                    <p className="text-sm font-semibold text-foreground break-words whitespace-normal leading-snug">{s.name}</p>
                   </div>
-                  <Badge variant="secondary" className="shrink-0 text-[10px]">{typeLabel(s)}</Badge>
+                  <Badge variant="secondary" className="shrink-0 text-[9px] px-1.5 py-0">{typeLabel(s)}</Badge>
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="rounded-md bg-primary/5 border border-primary/20 px-2 py-1.5">
-                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Units</p>
+                <div className="grid grid-cols-2 gap-1.5 text-xs">
+                  <div className="rounded-md bg-primary/5 border border-primary/20 px-1.5 py-1">
+                    <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Units</p>
                     <p className="font-semibold text-primary">{t.units.toLocaleString()}</p>
                   </div>
-                  <div className="rounded-md bg-pink-500/5 border border-pink-500/20 px-2 py-1.5">
-                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Products</p>
+                  <div className="rounded-md bg-pink-500/5 border border-pink-500/20 px-1.5 py-1">
+                    <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Products</p>
                     <p className="font-semibold text-pink-500">{t.products.toLocaleString()}</p>
                   </div>
                 </div>
-                <div className="border-t border-border pt-2 flex items-center gap-1 flex-wrap">
-                  <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => { setViewId(s.id); setViewSearch(''); }}><Eye className="w-3.5 h-3.5 mr-1" /> Stock</Button>
+                <div className="border-t border-border pt-1.5 flex items-center gap-1 flex-wrap">
+                  <Button variant="outline" size="sm" className="h-6 px-1.5 text-[11px]" onClick={() => { setViewId(s.id); setViewSearch(''); }}><Eye className="w-3 h-3 mr-1" /> Stock</Button>
                   {can('inventory', 'edit') && (
-                    <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => openTransfer(s.id)}><ArrowRightLeft className="w-3.5 h-3.5 mr-1" /> Transfer</Button>
+                    <Button variant="outline" size="sm" className="h-6 px-1.5 text-[11px]" onClick={() => openTransfer(s.id)}><ArrowRightLeft className="w-3 h-3 mr-1" /> Transfer</Button>
+                  )}
+                  {canBackdate && (
+                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-amber-400" title="Adjust stock levels" onClick={() => openAdjust(s.id)}><SlidersHorizontal className="w-3.5 h-3.5" /></Button>
                   )}
                   <div className="ml-auto flex">
                     {can('inventory', 'edit') && s.type !== 'rider' && (
-                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Rename" onClick={() => openName(s)}><Pencil className="w-3.5 h-3.5" /></Button>
+                      <Button variant="ghost" size="sm" className="h-6 w-6 p-0" title="Rename" onClick={() => openName(s)}><Pencil className="w-3 h-3" /></Button>
                     )}
                     {can('inventory', 'delete') && s.type === 'custom' && (
                       <AlertDialog>
-                        <AlertDialogTrigger asChild><Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button></AlertDialogTrigger>
+                        <AlertDialogTrigger asChild><Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-destructive"><Trash2 className="w-3 h-3" /></Button></AlertDialogTrigger>
                         <AlertDialogContent>
                           <AlertDialogHeader>
                             <AlertDialogTitle>Delete {s.name}?</AlertDialogTitle>
@@ -240,7 +297,6 @@ export default function StoragesPage() {
                     )}
                   </div>
                 </div>
-                {s.type === 'rider' && <p className="text-[10px] text-muted-foreground">Created automatically for this Own Rider (renamed or removed with the rider in Settings &gt; Delivery). Not shown under Addresses.</p>}
               </CardContent>
             </Card>
           );
@@ -289,11 +345,6 @@ export default function StoragesPage() {
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>{nameDialog?.id ? 'Rename Storage' : 'Add Storage'}</DialogTitle>
-            <DialogDescription className="text-xs">
-              {nameDialog?.id
-                ? "Only the storage is renamed. Its location under Addresses keeps its own name."
-                : 'A matching Storage-type location is added under Addresses automatically.'}
-            </DialogDescription>
           </DialogHeader>
           <div><Label>Name *</Label><Input value={nameValue} onChange={e => setNameValue(e.target.value)} placeholder="e.g. Westlands Shelf" /></div>
           <DialogFooter>
@@ -303,12 +354,11 @@ export default function StoragesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Transfer stock: wide enough to show about ten search results at once */}
+      {/* Transfer stock: clicking into the search box lists everything held in the origin storage */}
       <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
         <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><ArrowRightLeft className="w-5 h-5 text-pink-400" /> Transfer Stock</DialogTitle>
-            <DialogDescription className="text-xs">Moves stock from one storage to another. Total stock does not change.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
@@ -333,12 +383,13 @@ export default function StoragesPage() {
               <ProductMultiSearch
                 items={sourceProducts}
                 stockOf={p => (fromId ? qty(fromId, p) : 0)}
+                destStockOf={toId ? (p => qty(toId, p)) : undefined}
                 addedIds={lines.map(l => l.productId)}
                 onAdd={addLines}
                 disabled={!fromId}
+                showOnFocus
                 placeholder="Search products to move..."
               />
-              <p className="text-[11px] text-muted-foreground">"In stock" shows the quantity held in {nameOf(fromId) || 'the source storage'}.</p>
             </div>
 
             {lines.length > 0 && (
@@ -373,6 +424,68 @@ export default function StoragesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Adjust stock levels in bulk (Owner and Admins only; the server checks this too) */}
+      {canBackdate && (
+        <Dialog open={adjOpen} onOpenChange={setAdjOpen}>
+          <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2"><SlidersHorizontal className="w-5 h-5 text-amber-400" /> Adjust Stock Levels</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="max-w-xs">
+                <Label>Storage</Label>
+                <Select value={adjId} onValueChange={changeAdjStorage}>
+                  <SelectTrigger><SelectValue placeholder="Select storage" /></SelectTrigger>
+                  <SelectContent>{storages.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Products</Label>
+                <ProductMultiSearch
+                  items={products}
+                  stockOf={p => (adjId ? qty(adjId, p) : 0)}
+                  addedIds={adjLines.map(l => l.productId)}
+                  onAdd={addAdjLines}
+                  disabled={!adjId}
+                  showOnFocus
+                  placeholder="Search products to adjust..."
+                />
+              </div>
+
+              {adjLines.length > 0 && (
+                <div className="space-y-2">
+                  {adjLines.map((l, i) => {
+                    const p = products.find(x => x.id === l.productId);
+                    const current = p ? qty(adjId, p) : 0;
+                    return (
+                      <div key={l.productId} className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-foreground break-words whitespace-normal">{p?.productName}</p>
+                          <p className="text-xs text-muted-foreground">Now: {current}</p>
+                        </div>
+                        <Input
+                          type="number"
+                          min={0}
+                          value={l.quantity}
+                          onChange={e => setAdjLines(adjLines.map((x, j) => (j === i ? { ...x, quantity: e.target.value } : x)))}
+                          className="w-24 h-8 text-center"
+                        />
+                        <button type="button" onClick={() => setAdjLines(adjLines.filter((_, j) => j !== i))}><Trash2 className="w-3.5 h-3.5 text-destructive" /></button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setAdjOpen(false)}>Cancel</Button>
+              <Button onClick={handleAdjust} disabled={adjusting || adjLines.length === 0}>{adjusting ? 'Saving...' : 'Save Adjustments'}</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
