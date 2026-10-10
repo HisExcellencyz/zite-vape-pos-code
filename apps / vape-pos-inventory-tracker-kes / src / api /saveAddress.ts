@@ -5,15 +5,19 @@ import { normalizeAddrType } from '../lib/addressTypes';
 
 // Which supplier / storage a location belongs to is kept in the app settings record
 // (customFields.addressSuppliers / customFields.addressStorages), since the Addresses table has no such columns.
-async function setLinks(addressId: string, supplierId: string | null, storageId: string | null) {
+// `undefined` means "leave the existing link as it is" (so renaming a location never breaks its link);
+// `null` means "remove the link".
+async function setLinks(addressId: string, supplierId: string | null | undefined, storageId: string | null | undefined) {
   const settings = await zite.businessSettings.findOne({});
   let cfg: any = {};
   try { if (settings?.customFields) cfg = JSON.parse(settings.customFields); } catch {}
   const sup: Record<string, string> = cfg.addressSuppliers || {};
   const sto: Record<string, string> = cfg.addressStorages || {};
-  if ((sup[addressId] || null) === supplierId && (sto[addressId] || null) === storageId) return;
-  if (supplierId) sup[addressId] = supplierId; else delete sup[addressId];
-  if (storageId) sto[addressId] = storageId; else delete sto[addressId];
+  const newSup = supplierId === undefined ? (sup[addressId] || null) : supplierId;
+  const newSto = storageId === undefined ? (sto[addressId] || null) : storageId;
+  if ((sup[addressId] || null) === newSup && (sto[addressId] || null) === newSto) return;
+  if (newSup) sup[addressId] = newSup; else delete sup[addressId];
+  if (newSto) sto[addressId] = newSto; else delete sto[addressId];
   cfg.addressSuppliers = sup;
   cfg.addressStorages = sto;
   const customFields = JSON.stringify(cfg);
@@ -58,11 +62,12 @@ export default createEndpoint({
       address = await zite.addresses.create({ record: data });
     }
 
-    const supplierId = type === 'supplier' ? input.supplierId || null : null;
-    const storageId = type === 'storage' ? input.storageId || null : null;
+    // Supplier / Storage locations keep their link unless a different one is given; other types have no link.
+    const supplierId = type === 'supplier' ? (input.supplierId ?? undefined) : null;
+    const storageId = type === 'storage' ? (input.storageId ?? undefined) : null;
     const id = input.id || address?.id;
     if (id) await setLinks(id, supplierId, storageId);
 
-    return { success: true, address: { ...address, supplierId, storageId } };
+    return { success: true, address: { ...address, supplierId: supplierId ?? null, storageId: storageId ?? null } };
   },
 });
