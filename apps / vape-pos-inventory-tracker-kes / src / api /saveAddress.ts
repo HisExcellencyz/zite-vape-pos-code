@@ -3,29 +3,33 @@ import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
 import { normalizeAddrType } from '../lib/addressTypes';
 
-// Which supplier a Supplier-type location belongs to is kept in the app settings record
-// (customFields.addressSuppliers), since the Addresses table has no supplier column.
-async function setSupplierLink(addressId: string, supplierId: string | null) {
+// Which supplier / storage a location belongs to is kept in the app settings record
+// (customFields.addressSuppliers / customFields.addressStorages), since the Addresses table has no such columns.
+async function setLinks(addressId: string, supplierId: string | null, storageId: string | null) {
   const settings = await zite.businessSettings.findOne({});
   let cfg: any = {};
   try { if (settings?.customFields) cfg = JSON.parse(settings.customFields); } catch {}
-  const map: Record<string, string> = cfg.addressSuppliers || {};
-  if ((map[addressId] || null) === supplierId) return;
-  if (supplierId) map[addressId] = supplierId; else delete map[addressId];
-  cfg.addressSuppliers = map;
+  const sup: Record<string, string> = cfg.addressSuppliers || {};
+  const sto: Record<string, string> = cfg.addressStorages || {};
+  if ((sup[addressId] || null) === supplierId && (sto[addressId] || null) === storageId) return;
+  if (supplierId) sup[addressId] = supplierId; else delete sup[addressId];
+  if (storageId) sto[addressId] = storageId; else delete sto[addressId];
+  cfg.addressSuppliers = sup;
+  cfg.addressStorages = sto;
   const customFields = JSON.stringify(cfg);
   if (settings) await zite.businessSettings.update({ id: settings.id, record: { customFields } });
   else await zite.businessSettings.create({ record: { businessName: 'Uptown Vapes', customFields } });
 }
 
 export default createEndpoint({
-  description: 'Create or update a location (Supplier, Pick-up, Drop-off or Start/End)',
+  description: 'Create or update a location (Supplier, Storage, Pick-up, Drop-off or Start/End). The name is independent of the supplier / storage name.',
   authenticated: true,
   inputSchema: z.object({
     id: z.string().optional(),
     addressName: z.string().min(1),
     type: z.string(),
     supplierId: z.string().optional(),
+    storageId: z.string().optional(),
     fullAddress: z.string().optional(),
     plusCode: z.string().optional(),
     coordinates: z.string().optional(),
@@ -54,9 +58,11 @@ export default createEndpoint({
       address = await zite.addresses.create({ record: data });
     }
 
+    const supplierId = type === 'supplier' ? input.supplierId || null : null;
+    const storageId = type === 'storage' ? input.storageId || null : null;
     const id = input.id || address?.id;
-    if (id) await setSupplierLink(id, type === 'supplier' ? input.supplierId || null : null);
+    if (id) await setLinks(id, supplierId, storageId);
 
-    return { success: true, address: { ...address, supplierId: type === 'supplier' ? input.supplierId || null : null } };
+    return { success: true, address: { ...address, supplierId, storageId } };
   },
 });
