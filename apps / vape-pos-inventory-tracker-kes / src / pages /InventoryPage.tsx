@@ -9,7 +9,7 @@ import { Badge } from '@project/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
-import { Search, Plus, Download, Upload, Package, Pencil, Trash2, CheckSquare, ArrowUp, ArrowDown, FolderTree } from 'lucide-react';
+import { Search, Plus, Download, Upload, Package, Pencil, Trash2, CheckSquare, ArrowUp, ArrowDown, FolderTree, Warehouse } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { downloadCsv } from '../lib/exportHelper';
@@ -309,6 +309,7 @@ export default function InventoryPage() {
           {can('inventory', 'export') && <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExport}><Download className="w-4 h-4 mr-1" /> Export</Button>}
           {can('inventory', 'import') && <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10" onClick={() => setImportOpen(true)}><Upload className="w-4 h-4 mr-1" /> Import</Button>}
           {can('categories', 'view') && <Button asChild variant="outline" size="sm"><Link to="/categories"><FolderTree className="w-4 h-4 mr-1" /> Categories</Link></Button>}
+          {can('inventory', 'view') && <Button asChild variant="outline" size="sm"><Link to="/storages"><Warehouse className="w-4 h-4 mr-1" /> Storages</Link></Button>}
           {can('inventory', 'create') && <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" /> Add Product</Button>}
         </div>
       </div>
