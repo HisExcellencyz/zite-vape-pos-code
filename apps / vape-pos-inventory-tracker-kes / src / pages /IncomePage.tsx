@@ -7,7 +7,8 @@ import { Badge } from '@project/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@project/components/ui/tabs';
 import { Checkbox } from '@project/components/ui/checkbox';
-import { Download, Upload, Receipt, BadgePercent, TrendingUp, Truck, Coins, Pencil, Trash2 } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
+import { Download, Upload, Receipt, BadgePercent, TrendingUp, Truck, Coins, Pencil, Trash2, Eye } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { downloadCsv } from '../lib/exportHelper';
@@ -93,6 +94,8 @@ function revenuesBySale(income: Income[]) {
 
 const q = (v: unknown) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
 
+const hasNotes = (s?: { notes?: string | null }) => !!(s?.notes && String(s.notes).trim());
+
 export default function IncomePage() {
   const { currentBranch } = useBranch();
   const { can, canBackdate } = usePermissions();
@@ -109,6 +112,7 @@ export default function IncomePage() {
   const [bulkRevOpen, setBulkRevOpen] = useState(false);
   const [editT, setEditT] = useState<{ kind: EntryKind; entry: any } | null>(null);
   const [delT, setDelT] = useState<{ kind: EntryKind; entry: any } | null>(null);
+  const [notesT, setNotesT] = useState<Sale | null>(null);
   const [range, setRange] = useState<Range>({});
 
   const revMap = revenuesBySale(income);
@@ -172,12 +176,30 @@ export default function IncomePage() {
 
   const canEdit = can('income', 'edit');
   const canDelete = can('income', 'delete');
-  const rowActions = (kind: EntryKind, entry: any) => (canEdit || canDelete) ? (
-    <div className="flex justify-end gap-0.5">
-      {canEdit && <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Edit" onClick={() => setEditT({ kind, entry })}><Pencil className="w-3.5 h-3.5" /></Button>}
-      {canDelete && <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" title="Delete" onClick={() => setDelT({ kind, entry })}><Trash2 className="w-3.5 h-3.5" /></Button>}
-    </div>
-  ) : null;
+  const rowActions = (kind: EntryKind, entry: any) => {
+    // Sales always get the notes (eye) icon, placed right before the edit pencil. It is greyed out and inert when the sale has no notes.
+    const eye = kind === 'sale' ? (
+      <Button
+        variant="ghost"
+        size="sm"
+        className={`h-7 w-7 p-0 ${hasNotes(entry) ? 'text-sky-400' : 'opacity-30 cursor-default hover:bg-transparent'}`}
+        title={hasNotes(entry) ? 'View notes' : 'No notes'}
+        aria-disabled={!hasNotes(entry)}
+        onClick={() => { if (hasNotes(entry)) setNotesT(entry); }}
+      >
+        <Eye className="w-3.5 h-3.5" />
+      </Button>
+    ) : null;
+    if (!eye && !canEdit && !canDelete) return null;
+    return (
+      <div className="flex justify-end gap-0.5">
+        {eye}
+        {canEdit && <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Edit" onClick={() => setEditT({ kind, entry })}><Pencil className="w-3.5 h-3.5" /></Button>}
+        {canDelete && <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" title="Delete" onClick={() => setDelT({ kind, entry })}><Trash2 className="w-3.5 h-3.5" /></Button>}
+      </div>
+    );
+  };
+  // Other income / delivery fee tables only have an actions column when the user may edit or delete.
   const actionCols = canEdit || canDelete ? 1 : 0;
 
   const activeControls = (tab === 'sales' ? tcS : tab === 'delivery' ? tcF : tcO) as any;
@@ -329,19 +351,19 @@ export default function IncomePage() {
                         <SortTh c={tcS} k="deductions" className="text-right">Deductions</SortTh>
                         <SortTh c={tcS} k="rider" className="text-left">Rider</SortTh>
                         <SortTh c={tcS} k="status" className="text-center">Status</SortTh>
-                        {actionCols > 0 && <th className="p-3 w-20" />}
+                        <th className="p-3 w-24" />
                       </tr>
                     </thead>
                     <tbody>
                       {loading ? (
                         [...Array(5)].map((_, i) => (
                           <tr key={i} className="border-b border-border">
-                            {[...Array(10 + actionCols)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}
+                            {[...Array(11)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}
                           </tr>
                         ))
                       ) : rows.length === 0 ? (
                         <tr>
-                          <td colSpan={10 + actionCols} className="text-center py-12 text-muted-foreground">
+                          <td colSpan={11} className="text-center py-12 text-muted-foreground">
                             <Receipt className="w-10 h-10 mx-auto mb-2 opacity-40" />
                             No sales yet. Create your first sale in POS or import a file.
                           </td>
@@ -360,7 +382,7 @@ export default function IncomePage() {
                           <td className="p-3 text-center">
                             <Badge variant="secondary" className={statusColors[s.status || ''] || ''}>{s.status}</Badge>
                           </td>
-                          {actionCols > 0 && <td className="p-3">{rowActions('sale', s)}</td>}
+                          <td className="p-3">{rowActions('sale', s)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -411,7 +433,7 @@ export default function IncomePage() {
                       <span className="text-xs text-muted-foreground">Total</span>
                       <span className="text-lg font-bold text-primary break-words text-right">{fmt(s.grandTotal)}</span>
                     </div>
-                    {actionCols > 0 && <div className="border-t border-border pt-2">{rowActions('sale', s)}</div>}
+                    <div className="border-t border-border pt-2">{rowActions('sale', s)}</div>
                   </CardContent>
                 </Card>
               ))}
@@ -435,6 +457,21 @@ export default function IncomePage() {
       <DeleteEntryDialog open={!!delT} onOpenChange={o => { if (!o) setDelT(null); }} kind={delT?.kind || 'income'} entry={delT?.entry || null} onDone={load} />
 
       <BulkDeductionsDialog open={bulkOpen} onOpenChange={setBulkOpen} saleIds={selected} presets={currentBranch?.commissions || []} onDone={() => { setSelected([]); load(); }} />
+
+      {/* Notes recorded for a sale (opened with the eye icon) */}
+      <Dialog open={!!notesT} onOpenChange={o => { if (!o) setNotesT(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Sale #{notesT?.saleNumber} notes</DialogTitle></DialogHeader>
+          <div className="space-y-1.5">
+            {String(notesT?.notes || '').split(' | ').map(s => s.trim()).filter(Boolean).map((line, i) => (
+              <p key={i} className="rounded-md bg-muted/50 px-3 py-2 text-sm text-foreground break-words whitespace-normal">{line}</p>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNotesT(null)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ImportDialog
         open={importOpen}
