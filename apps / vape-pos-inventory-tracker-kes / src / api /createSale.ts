@@ -4,8 +4,22 @@ import { zite } from 'zitejs/db';
 import { assertCan } from '../lib/permissions';
 import { deductStock } from '../lib/storages';
 
+// Orders merged into one delivery are saved with the note "Merged delivery with Sale #n" (n = the active order).
+const MERGED = /^Merged delivery with Sale #(\d+)/;
+const isRiderFee = (name: string) => name.trim().toLowerCase() === 'rider fee';
+
+/** Rewrites the "Bundled with: Sale #a, Sale #b" part of a notes string, keeping every other note part. */
+const bundleNotes = (notes: string | null | undefined, others: number[]) => {
+  const parts = (notes || '')
+    .split(' | ')
+    .map(s => s.trim())
+    .filter(s => s && !s.startsWith('Bundled with:') && !s.startsWith('Merged delivery'));
+  if (others.length > 0) parts.push('Bundled with: ' + others.map(n => `Sale #${n}`).join(', '));
+  return parts.join(' | ') || null;
+};
+
 export default createEndpoint({
-  description: 'Create a POS sale with items. An optional delivery fee (and other incomes) is recorded as income; an optional rider is noted on the sale. Stock is deducted from the right storage (see deductStock).',
+  description: 'Create a POS sale with items. An optional delivery fee (and other incomes) is recorded as income; an optional rider is noted on the sale. Stock is deducted from the right storage (see deductStock). Merged orders carry no Rider Fee (only the active order does) and every order of a bundle lists the others in its notes.',
   authenticated: true,
   inputSchema: z.object({
     items: z.array(z.object({
@@ -43,6 +57,10 @@ export default createEndpoint({
     let subtotal = 0;
     let totalTax = 0;
 
+    const mergedMatch = MERGED.exec((input.notes || '').trim());
+    // Only the active order carries the Rider Fee: it is switched off on every merged order.
+    const deductionList = (input.deductions || []).filter(d => !(mergedMatch && isRiderFee(d.name)));
+
     const lineItems = input.items.map(item => {
       const lineTotal = item.unitPrice * item.quantity - (item.discount || 0);
       subtotal += lineTotal;
@@ -76,8 +94,8 @@ export default createEndpoint({
         deliveryCoordinates: input.deliveryCoordinates || null,
         stops: input.stops || null,
         deliveryDistanceKm: input.deliveryDistanceKm || null,
-        deductions: (input.deductions || []).reduce((s, d) => s + d.amount, 0),
-        deductionDetails: input.deductions?.length ? JSON.stringify(input.deductions) : null,
+        deductions: deductionList.reduce((s, d) => s + d.amount, 0),
+        deductionDetails: deductionList.length ? JSON.stringify(deductionList) : null,
       },
     });
 
@@ -136,6 +154,39 @@ export default createEndpoint({
           createdBy: context.user.id,
         },
       });
+    }
+
+    // Bundled orders: the active order, this order and every earlier merged order of the same checkout
+    // each get a "Bundled with: Sale #..." note listing all the others.
+    const mine = Number(sale.saleNumber);
+    if (mergedMatch && Number.isFinite(mine)) {
+      try {
+        const activeNo = Number(mergedMatch[1]);
+        const active = await zite.sql({
+          query: `SELECT id, "saleNumber", "notes" FROM "Sales" WHERE "saleNumber" = $1`,
+          params: [activeNo],
+        });
+        const siblings = await zite.sql({
+          query: `SELECT id, "saleNumber", "notes" FROM "Sales" WHERE "notes" LIKE $1`,
+          params: [`%Bundled with:%Sale #${activeNo}%`],
+        });
+        const linkRe = new RegExp(`Bundled with:[^|]*Sale #${activeNo}(?!\\d)`);
+        const members = new Map<number, { id: string; notes: string | null }>();
+        for (const r of active.rows) members.set(Number(r.saleNumber), { id: String(r.id), notes: r.notes ? String(r.notes) : null });
+        for (const r of siblings.rows) {
+          if (linkRe.test(String(r.notes || ''))) members.set(Number(r.saleNumber), { id: String(r.id), notes: r.notes ? String(r.notes) : null });
+        }
+        members.set(mine, { id: sale.id, notes });
+        const numbers = Array.from(members.keys()).sort((a, b) => a - b);
+        for (const [num, m] of members) {
+          await zite.sales.update({
+            id: m.id,
+            record: { notes: bundleNotes(m.notes, numbers.filter(n => n !== num)) },
+          });
+        }
+      } catch (e) {
+        console.error('Could not link bundled sales', e);
+      }
     }
 
     return { success: true, sale };
