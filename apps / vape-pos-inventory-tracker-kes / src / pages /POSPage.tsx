@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { getProducts, getCategories, getCustomers, getCustomerDetails, createSale, saveCustomer, getSales, manageHeldOrders, manageSupplierBills } from 'zitejs/api';
+import { getProducts, getCategories, getCustomers, getCustomerDetails, createSale, saveCustomer, getSales, manageHeldOrders, manageSupplierBills, getStorages } from 'zitejs/api';
+import { StorageLite, StockMap, storageBreakdown } from '../lib/storageMath';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
@@ -228,6 +229,14 @@ export default function POSPage() {
   const [rider, setRider] = useState<SelectedRider | null>(null);
   const [riders, setRiders] = useState<Riders>({ threePl: [], own: [] });
   useEffect(() => { loadRiders().then(setRiders).catch(() => {}); }, []);
+
+  // Storages (Office, custom storages, own riders) and the stock each one holds.
+  const [storages, setStorages] = useState<StorageLite[]>([]);
+  const [stockMap, setStockMap] = useState<StockMap>({});
+  const loadStorages = () => getStorages({}).then(r => { setStorages((r.storages || []) as StorageLite[]); setStockMap((r.stock || {}) as StockMap); }).catch(() => {});
+  useEffect(() => { loadStorages(); }, []);
+  const storageLine = (p: Product) =>
+    storageBreakdown(storages, stockMap, p.id, p.stockQuantity || 0).map(x => `${x.storage.name} ${x.qty}`).join(' · ');
 
   const [showDeliveryMap, setShowDeliveryMap] = useState(false);
   const [showMergeDialog, setShowMergeDialog] = useState(false);
@@ -589,7 +598,21 @@ export default function POSPage() {
         })
         .filter(b => b.items.length > 0);
 
+      // Items ticked at supplier pick-ups are not taken from any storage; items ticked at storage
+      // pick-ups come out of that storage. Everything else comes from the own rider's storage (if any), then the Office.
+      const pickedIds = (pt: any): string[] => (pickupSelections[pt.id] || []).filter(id => pickupItems.some(i => i.productId === id));
+      const ownPoints = routePoints.filter(pt => pt.tag === 'pickup' && !isMergedPoint(pt));
+      const supplierPicked = Array.from(new Set(ownPoints.filter(pt => pt.supplierId && !pt.storageId).flatMap(pickedIds)));
+      const storagePicks: Record<string, string[]> = {};
+      ownPoints.filter(pt => pt.storageId).forEach(pt => {
+        const sid = pt.storageId as string;
+        storagePicks[sid] = Array.from(new Set([...(storagePicks[sid] || []), ...pickedIds(pt)]));
+      });
+      const riderId = rider?.type === 'own' ? rider.id : undefined;
+      const stockArgs = { supplierPickedProductIds: supplierPicked, storagePicks, riderId };
+
       const activeRes = await createSale({
+        ...stockArgs,
         items: cart.map(c => ({ productId: c.product.id, quantity: c.quantity, unitPrice: c.unitPrice })),
         customerId: selectedCustomer?.id,
         paymentMethod,
@@ -629,6 +652,7 @@ export default function POSPage() {
           const custDrop = routePoints.length > 0 ? await resolveDrop(h.customer, 'x') : null;
           if (custDrop && !heldPoints.some(p => p.tag === 'dropoff' && p.lat === custDrop.lat && p.lng === custDrop.lng)) heldPoints.push(custDrop);
           await createSale({
+            ...stockArgs,
             items: h.items.map(i => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice })),
             customerId: h.customer?.id,
             paymentMethod: h.paymentMethod,
@@ -679,6 +703,7 @@ export default function POSPage() {
 
       resetOrder();
       loadSales();
+      loadStorages();
       loadHeld();
       const prods = await getProducts({ status: 'Active', branchId: currentBranch?.id });
       setProducts(prods.products as Product[]);
@@ -800,6 +825,7 @@ export default function POSPage() {
                     <p className="text-sm font-bold text-primary whitespace-normal break-words">{fmt(p.sellingPrice || 0)}</p>
                     <Badge variant="secondary" className="text-[10px] whitespace-nowrap">{p.stockQuantity || 0} left</Badge>
                   </div>
+                  {storageLine(p) && <p className="text-[9px] leading-tight text-muted-foreground break-words w-full mt-1">{storageLine(p)}</p>}
                 </button>
               ))}
               {filtered.length === 0 && (
@@ -836,7 +862,10 @@ export default function POSPage() {
                             <ProductImage src={p.images?.[0]?.url} alt={p.productName} className="w-10 h-10" />
                             <QtyBadge qty={qtyInCart(p.id)} small />
                           </div>
-                          <span className="break-words whitespace-normal min-w-0 [overflow-wrap:anywhere]">{p.productName}</span>
+                          <div className="min-w-0">
+                            <span className="break-words whitespace-normal min-w-0 [overflow-wrap:anywhere]">{p.productName}</span>
+                            {storageLine(p) && <p className="text-[9px] leading-tight font-normal text-muted-foreground break-words">{storageLine(p)}</p>}
+                          </div>
                         </div>
                       </td>
                       <td className="p-3 text-muted-foreground font-mono text-xs break-all">{p.sku}</td>
