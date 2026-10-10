@@ -134,15 +134,41 @@ const cartNameSize = (name?: string) => {
   return 'text-sm';
 };
 
-/** Quantity-in-cart badge shown at the bottom right of a product image. */
-function QtyBadge({ qty, small }: { qty: number; small?: boolean }) {
+/**
+ * Quantity controls for a product that is in the cart: (-) qty (+).
+ * When the quantity is 1 the (-) button becomes a delete icon that removes the product.
+ * `inline` renders it in the normal flow (list view); otherwise it sits at the bottom right of the tile image.
+ */
+function QtyControl({ qty, onMinus, onPlus, small, inline }: {
+  qty: number; onMinus: () => void; onPlus: () => void; small?: boolean; inline?: boolean;
+}) {
   if (qty <= 0) return null;
+  const btn = small ? 'w-5 h-5' : 'w-6 h-6';
+  const icon = small ? 'w-3 h-3' : 'w-3.5 h-3.5';
+  const stop = (fn: () => void) => (e: React.MouseEvent) => { e.stopPropagation(); fn(); };
   return (
-    <span
-      className={`absolute bottom-1 right-1 rounded-full bg-primary text-primary-foreground font-bold flex items-center justify-center shadow-md pointer-events-none ${small ? 'min-w-[16px] h-4 px-1 text-[9px]' : 'min-w-[24px] h-6 px-1.5 text-xs'}`}
+    <div
+      onClick={e => e.stopPropagation()}
+      className={`${inline ? '' : 'absolute bottom-1 right-1'} flex items-center gap-0.5 rounded-full bg-primary text-primary-foreground shadow-md p-0.5 w-fit`}
     >
-      {qty}
-    </span>
+      <button
+        type="button"
+        onClick={stop(onMinus)}
+        title={qty === 1 ? 'Remove from cart' : 'Decrease quantity'}
+        className={`${btn} rounded-full flex items-center justify-center ${qty === 1 ? 'bg-destructive text-destructive-foreground' : 'bg-white/25 hover:bg-white/40'}`}
+      >
+        {qty === 1 ? <Trash2 className={icon} /> : <Minus className={icon} />}
+      </button>
+      <span className={`${small ? 'min-w-[16px] text-[10px]' : 'min-w-[22px] text-xs'} text-center font-bold`}>{qty}</span>
+      <button
+        type="button"
+        onClick={stop(onPlus)}
+        title="Increase quantity"
+        className={`${btn} rounded-full bg-white/25 hover:bg-white/40 flex items-center justify-center`}
+      >
+        <Plus className={icon} />
+      </button>
+    </div>
   );
 }
 
@@ -311,12 +337,19 @@ export default function POSPage() {
   const qtyInCart = (productId: string) => cart.find(c => c.product.id === productId)?.quantity || 0;
 
   const addToCart = (product: Product) => {
-    const existing = cart.find(c => c.product.id === product.id);
-    if (existing) {
-      setCart(cart.map(c => c.product.id === product.id ? { ...c, quantity: c.quantity + 1 } : c));
-    } else {
-      setCart([...cart, { product, quantity: 1, unitPrice: product.sellingPrice || 0 }]);
-    }
+    setCart(prev => {
+      const existing = prev.find(c => c.product.id === product.id);
+      if (existing) return prev.map(c => c.product.id === product.id ? { ...c, quantity: c.quantity + 1 } : c);
+      return [...prev, { product, quantity: 1, unitPrice: product.sellingPrice || 0 }];
+    });
+  };
+
+  /** (-) on a product tile: one less, and removed from the cart when it was the last one. */
+  const decrementFromCart = (productId: string) => {
+    setCart(prev => prev.flatMap(c => {
+      if (c.product.id !== productId) return [c];
+      return c.quantity <= 1 ? [] : [{ ...c, quantity: c.quantity - 1 }];
+    }));
   };
 
   const updateQty = (productId: string, delta: number) => {
@@ -363,7 +396,7 @@ export default function POSPage() {
     setDedOverrides(prev => ({ ...prev, [d.name]: !(prev[d.name] ?? autoOn(d)) }));
 
   const resetOrder = () => {
-    // Clearing the cart also clears the quantity badges on the product tiles.
+    // Clearing the cart also clears the quantity controls on the product tiles.
     setCart([]);
     setSelectedCustomer(null);
     setDedOverrides({});
@@ -478,7 +511,7 @@ export default function POSPage() {
       const res = await manageHeldOrders({ action: 'hold', branchId: currentBranch?.id, order });
       setHeldOrders(res.orders as HeldOrder[]);
       resetOrder();
-      toast.success('Order put on hold. Find it under Pending.');
+      toast.success('Order put on hold');
     } catch (e: any) {
       toast.error(e.message || 'Could not hold the order');
     } finally {
@@ -810,14 +843,17 @@ export default function POSPage() {
           {catalogView === 'grid' ? (
             <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3 items-stretch">
               {filtered.map(p => (
-                <button
+                <div
                   key={p.id}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => addToCart(p)}
-                  className={`bg-card border rounded-xl p-4 text-left hover:border-primary/50 hover:bg-muted/30 transition-all group flex flex-col min-w-0 h-full ${qtyInCart(p.id) > 0 ? 'border-primary/60' : 'border-border'}`}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); addToCart(p); } }}
+                  className={`bg-card border rounded-xl p-4 text-left hover:border-primary/50 hover:bg-muted/30 transition-all group flex flex-col min-w-0 h-full cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring ${qtyInCart(p.id) > 0 ? 'border-primary/60' : 'border-border'}`}
                 >
                   <div className="relative w-full mb-3">
                     <ProductImage src={p.images?.[0]?.url} alt={p.productName} className="w-full" />
-                    <QtyBadge qty={qtyInCart(p.id)} />
+                    <QtyControl qty={qtyInCart(p.id)} onMinus={() => decrementFromCart(p.id)} onPlus={() => addToCart(p)} />
                   </div>
                   <p className="text-sm font-medium text-foreground w-full break-words whitespace-normal leading-snug [overflow-wrap:anywhere]">{p.productName}</p>
                   <p className="text-xs text-muted-foreground font-mono w-full break-all whitespace-normal mt-0.5">{p.sku}</p>
@@ -826,7 +862,7 @@ export default function POSPage() {
                     <Badge variant="secondary" className="text-[10px] whitespace-nowrap">{p.stockQuantity || 0} left</Badge>
                   </div>
                   {storageLine(p) && <p className="text-[9px] leading-tight text-muted-foreground break-words w-full mt-1">{storageLine(p)}</p>}
-                </button>
+                </div>
               ))}
               {filtered.length === 0 && (
                 <div className="col-span-full text-center py-12 text-muted-foreground">
@@ -858,9 +894,8 @@ export default function POSPage() {
                     <tr key={p.id} onClick={() => addToCart(p)} className="border-b border-border last:border-0 hover:bg-muted/30 cursor-pointer transition-colors">
                       <td className="p-3 font-medium text-foreground max-w-xs">
                         <div className="flex items-center gap-3">
-                          <div className="relative shrink-0">
+                          <div className="shrink-0">
                             <ProductImage src={p.images?.[0]?.url} alt={p.productName} className="w-10 h-10" />
-                            <QtyBadge qty={qtyInCart(p.id)} small />
                           </div>
                           <div className="min-w-0">
                             <span className="break-words whitespace-normal min-w-0 [overflow-wrap:anywhere]">{p.productName}</span>
@@ -870,7 +905,12 @@ export default function POSPage() {
                       </td>
                       <td className="p-3 text-muted-foreground font-mono text-xs break-all">{p.sku}</td>
                       <td className="p-3 text-right font-semibold text-primary whitespace-nowrap">{fmt(p.sellingPrice || 0)}</td>
-                      <td className="p-3 text-right"><Badge variant="secondary" className="text-[10px] whitespace-nowrap">{p.stockQuantity || 0} left</Badge></td>
+                      <td className="p-3 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <QtyControl inline small qty={qtyInCart(p.id)} onMinus={() => decrementFromCart(p.id)} onPlus={() => addToCart(p)} />
+                          <Badge variant="secondary" className="text-[10px] whitespace-nowrap">{p.stockQuantity || 0} left</Badge>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -945,7 +985,6 @@ export default function POSPage() {
               <div className="text-center py-12 text-muted-foreground">
                 <Clock className="w-10 h-10 mx-auto mb-2 opacity-30" />
                 <p className="text-sm">No pending orders</p>
-                <p className="text-xs mt-1">Use "Hold" on the cart to park an order here.</p>
               </div>
             ) : heldOrders.map(h => {
               const t = heldTotals(h);
@@ -966,7 +1005,7 @@ export default function POSPage() {
                     <span className="text-muted-foreground">Total{t.fee + t.extra > 0 ? ' (incl. fees)' : ''}</span>
                     <span className="font-bold text-primary">{fmt(t.payable)}</span>
                   </div>
-                  {merged && <p className="text-[10px] text-emerald-400">Merged into the current delivery — completes on Checkout</p>}
+                  {merged && <p className="text-[10px] text-emerald-400">Merged</p>}
                   <div className="flex gap-1.5">
                     <Button size="sm" className="h-7 flex-1 text-xs" onClick={() => resumeHeld(h)}><Play className="w-3 h-3 mr-1" /> Resume</Button>
                     <Button size="sm" variant="ghost" className="h-7 text-destructive" onClick={() => deleteHeld(h)}><Trash2 className="w-3.5 h-3.5" /></Button>
@@ -1100,7 +1139,7 @@ export default function POSPage() {
                 {/* Outlet deductions (Glovo, Rider Fee, Promo and any others) */}
                 {outletDeductions.length > 0 && (
                   <div className="space-y-1">
-                    <p className="text-[11px] font-medium text-muted-foreground">Deductions (tap to switch on / off)</p>
+                    <p className="text-[11px] font-medium text-muted-foreground">Deductions</p>
                     <div className="flex flex-wrap gap-1.5">
                       {outletDeductions.map(d => {
                         const on = selectedDeductions.includes(d.name);
@@ -1138,7 +1177,7 @@ export default function POSPage() {
 
                 {/* Riders: pick a 3PL or own rider (set up in Settings > Delivery) for this order */}
                 <div className="space-y-1">
-                  <p className="text-[11px] font-medium text-muted-foreground">Rider (tap a button to choose)</p>
+                  <p className="text-[11px] font-medium text-muted-foreground">Rider</p>
                   <div className="grid grid-cols-2 gap-1.5">
                     {(['threePl', 'own'] as RiderType[]).map(type => {
                       const active = rider?.type === type;
@@ -1162,7 +1201,7 @@ export default function POSPage() {
                             <DropdownMenuLabel className="text-xs">{RIDER_LABELS[type]}</DropdownMenuLabel>
                             <DropdownMenuSeparator />
                             {list.length === 0 ? (
-                              <p className="px-2 py-2 text-xs text-muted-foreground">No riders yet. Add them in Settings &gt; Delivery.</p>
+                              <p className="px-2 py-2 text-xs text-muted-foreground">No riders yet.</p>
                             ) : list.map(r => (
                               <DropdownMenuItem key={r.id} onSelect={() => setRider({ type, id: r.id, name: r.name })} className="gap-2 text-xs">
                                 {active && rider?.id === r.id ? <Check className="w-3.5 h-3.5" /> : <span className="w-3.5" />}
@@ -1186,7 +1225,7 @@ export default function POSPage() {
 
                 <div className="space-y-1.5 border-t border-border pt-2">
                   <div className="flex items-center justify-between">
-                    <p className="text-xs font-medium text-muted-foreground flex items-center gap-1"><MapPin className="w-3 h-3" /> Delivery (optional)</p>
+                    <p className="text-xs font-medium text-muted-foreground flex items-center gap-1"><MapPin className="w-3 h-3" /> Delivery</p>
                     <Button variant="outline" size="sm" className="h-7 text-xs" onClick={openRoutePlanner}>
                       <Route className="w-3 h-3 mr-1" /> {routePoints.length > 0 ? `${routePoints.length} stops` : 'Plan Route'}
                     </Button>
@@ -1211,7 +1250,7 @@ export default function POSPage() {
                 {mergeList.length > 0 && (
                   <div className="flex items-center gap-2 rounded-md border border-emerald-500/60 bg-emerald-500/5 px-2 py-1">
                     <Layers className="w-3 h-3 text-emerald-400 shrink-0" />
-                    <p className="flex-1 min-w-0 text-[11px] truncate" title="They are completed automatically with this checkout">
+                    <p className="flex-1 min-w-0 text-[11px] truncate">
                       <span className="font-medium text-emerald-400">{mergeList.length} merged</span>
                       <span className="text-muted-foreground"> · +{fmt(mergedPayable)}</span>
                     </p>
@@ -1290,7 +1329,7 @@ export default function POSPage() {
                 <Input value={newCustAddress} onChange={e => { setNewCustAddress(e.target.value); setNewCustCoords(''); }} placeholder="Address (optional)" className="flex-1" />
                 <Button type="button" variant="outline" size="icon" className="shrink-0" onClick={() => setShowCustLocationPicker(true)}><MapPin className="w-4 h-4" /></Button>
               </div>
-              {newCustCoords && <p className="text-[10px] font-mono text-muted-foreground mt-1">Pin saved: {newCustCoords} — added as a drop-off when you plan the route.</p>}
+              {newCustCoords && <p className="text-[10px] font-mono text-muted-foreground mt-1">Pin saved: {newCustCoords}</p>}
             </div>
           </div>
           <DialogFooter>
@@ -1348,9 +1387,6 @@ export default function POSPage() {
             <DialogTitle className="flex items-center gap-2"><Layers className="w-5 h-5 text-emerald-400" /> Merge pending orders</DialogTitle>
           </DialogHeader>
           <div className="space-y-2">
-            <p className="text-xs text-muted-foreground">
-              Tick pending orders to add their drop-offs (including each customer's saved location) to this route. They are completed automatically when you press Checkout.
-            </p>
             {heldOrders.length === 0 ? (
               <p className="text-xs text-muted-foreground py-4 text-center">No pending orders to merge.</p>
             ) : (
