@@ -20,8 +20,9 @@ const IMPORT_TEMPLATES: Record<TemplateKey, { headers: string[]; samples: string
     samples: [],
   },
   // Stock held in each storage. One row per storage + product; the Quantity becomes that storage's stock level.
+  // Same columns as the Storages export. Products are matched by SKU (Product Name is for reference).
   storageStock: {
-    headers: ['Storage', 'Product SKU', 'Quantity'],
+    headers: ['Storage', 'SKU', 'Product Name', 'Quantity'],
     samples: [], // no sample rows: they could overwrite real stock levels if the template were imported as is
   },
   // One row per product line. Rows sharing the same Sale Ref become ONE sale.
