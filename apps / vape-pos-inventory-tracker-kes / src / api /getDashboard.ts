@@ -3,7 +3,7 @@ import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
 
 export default createEndpoint({
-  description: 'Dashboard statistics with period and outlet (branch) filtering',
+  description: 'Dashboard statistics with period and outlet (branch) filtering. The chosen dates apply to every figure: sales, purchases, expenses, income, top lists, delivery distances, rider metrics and stock value (as it stood at the end of the period).',
   authenticated: true,
   inputSchema: z.object({
     startDate: z.string().optional(),
@@ -65,8 +65,9 @@ export default createEndpoint({
     }
     // Restrict to a single outlet when one is selected. Appending this to
     // dateFilter/params (rather than only the first query) means it also
-    // applies automatically to topProducts, topCustomers and revenueByDay
-    // below, since they reuse the same dateFilter string and params array.
+    // applies automatically to topProducts, topCustomers, revenueByDay,
+    // rider metrics and delivery distances below, since they reuse the same
+    // dateFilter string and params array.
     if (input.branchId) {
       dateFilter += ` AND EXISTS (SELECT 1 FROM "BranchesSales" bs WHERE bs."salesId" = s.id AND bs."branchesId" = $${idx})`;
       params.push(input.branchId);
@@ -173,18 +174,36 @@ export default createEndpoint({
       params: incParams,
     });
 
-    // Stock value (optionally scoped to products assigned to this outlet)
+    // Stock value at cost (optionally scoped to products assigned to this outlet).
+    // With an end date, today's stock is rolled back through the sales and purchases made after that date,
+    // so the tile shows what the stock was worth at the end of the chosen period.
     const stockParams: string[] = [];
     let stockBranchFilter = '';
     if (input.branchId) {
-      stockBranchFilter = ` AND EXISTS (SELECT 1 FROM "BranchesProducts" bpr WHERE bpr."productsId" = "Products".id AND bpr."branchesId" = $1)`;
       stockParams.push(input.branchId);
+      stockBranchFilter = ` AND EXISTS (SELECT 1 FROM "BranchesProducts" bpr WHERE bpr."productsId" = p.id AND bpr."branchesId" = $${stockParams.length})`;
+    }
+    let soldAfter = '0';
+    let boughtAfter = '0';
+    if (input.endDate) {
+      stockParams.push(input.endDate);
+      const k = stockParams.length;
+      soldAfter = `COALESCE((SELECT SUM(si."quantity") FROM "ProductsSaleItems" l
+        JOIN "SaleItems" si ON si.id = l."saleItemsId"
+        JOIN "SaleItemsSales" ls ON ls."saleItemsId" = si.id
+        JOIN "Sales" sx ON sx.id = ls."salesId"
+        WHERE l."productsId" = p.id AND sx."status" <> 'Voided' AND sx."saleDate" > $${k}), 0)`;
+      boughtAfter = `COALESCE((SELECT SUM(pi."quantity") FROM "ProductsPurchaseItems" l
+        JOIN "PurchaseItems" pi ON pi.id = l."purchaseItemsId"
+        JOIN "PurchaseItemsPurchases" lp ON lp."purchaseItemsId" = pi.id
+        JOIN "Purchases" pu ON pu.id = lp."purchasesId"
+        WHERE l."productsId" = p.id AND pu."purchaseDate" > $${k}), 0)`;
     }
     const stockResult = await zite.sql({
       query: `
-        SELECT COALESCE(SUM("costPrice" * "stockQuantity"), 0) AS "stockValue"
-        FROM "Products"
-        WHERE "status" = 'Active'${stockBranchFilter}
+        SELECT COALESCE(SUM(COALESCE(p."costPrice", 0) * GREATEST(COALESCE(p."stockQuantity", 0) + ${soldAfter} - ${boughtAfter}, 0)), 0) AS "stockValue"
+        FROM "Products" p
+        WHERE COALESCE(p."status", 'Active') = 'Active'${stockBranchFilter}
       `,
       params: stockParams,
     });
@@ -225,7 +244,7 @@ export default createEndpoint({
       params,
     });
 
-    // Revenue by day (last 30 days default)
+    // Revenue by day (last 30 days when no start date is chosen)
     const revByDay = await zite.sql({
       query: `
         SELECT to_char(s."saleDate" AT TIME ZONE 'Africa/Nairobi', 'YYYY-MM-DD') AS date,
@@ -309,23 +328,18 @@ export default createEndpoint({
     const totalExpenses = Number(expensesResult.rows[0]?.totalExpenses ?? 0);
     const totalOtherIncome = Number(incomeResult.rows[0]?.totalOtherIncome ?? 0);
 
-    // Delivery distance stats
-    const deliveryParams: string[] = [];
-    let deliveryBranchFilter = '';
-    if (input.branchId) {
-      deliveryBranchFilter = ` AND EXISTS (SELECT 1 FROM "BranchesSales" bds WHERE bds."salesId" = "Sales".id AND bds."branchesId" = $1)`;
-      deliveryParams.push(input.branchId);
-    }
+    // Delivery distance stats: now limited to the chosen dates (and outlet) like every other tile.
     const deliveryResult = await zite.sql({
       query: `
         SELECT COUNT(*) AS cnt,
-               COALESCE(AVG("deliveryDistanceKm"), 0) AS avg_dist,
-               COALESCE(MAX("deliveryDistanceKm"), 0) AS max_dist,
-               COALESCE(MIN("deliveryDistanceKm"), 0) AS min_dist
-        FROM "Sales"
-        WHERE "deliveryDistanceKm" IS NOT NULL AND "deliveryDistanceKm" > 0${deliveryBranchFilter}
+               COALESCE(AVG(s."deliveryDistanceKm"), 0) AS avg_dist,
+               COALESCE(MAX(s."deliveryDistanceKm"), 0) AS max_dist,
+               COALESCE(MIN(s."deliveryDistanceKm"), 0) AS min_dist
+        FROM "Sales" s
+        WHERE s."deliveryDistanceKm" IS NOT NULL AND s."deliveryDistanceKm" > 0
+          AND s."status" <> 'Voided'${dateFilter}
       `,
-      params: deliveryParams,
+      params,
     });
 
     return {
