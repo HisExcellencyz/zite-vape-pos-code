@@ -277,10 +277,10 @@ export default function StoragesPage() {
     }
   };
 
-  // ── Export / import (columns: Storage, SKU, Name, Quantity) ──
+  // ── Export / import (columns: Storage, SKU, Product Name, Quantity: the same format for both) ──
   const handleExport = (only?: StorageLite | null) => {
     const list = only ? [only] : storages;
-    const out: string[] = [['Storage', 'SKU', 'Name', 'Quantity'].join(',')];
+    const out: string[] = [['Storage', 'SKU', 'Product Name', 'Quantity'].join(',')];
     for (const s of list) {
       for (const p of [...products].sort((a, b) => (a.productName || '').localeCompare(b.productName || ''))) {
         const n = qty(s.id, p);
@@ -452,7 +452,7 @@ export default function StoragesPage() {
                         <th className="p-3 w-8"><input type="checkbox" checked={allPicked} onChange={toggleAllPicked} className="rounded" /></th>
                       )}
                       <th className="text-left p-3 font-medium">SKU</th>
-                      <th className="text-left p-3 font-medium">Name</th>
+                      <th className="text-left p-3 font-medium">Product Name</th>
                       <th className="text-right p-3 font-medium">Quantity</th>
                     </tr>
                   </thead>
@@ -674,7 +674,7 @@ export default function StoragesPage() {
         title="Import Storage Stock"
         template="storageStock"
         chunkSize={100}
-        description={<>CSV columns: <span className="font-medium text-foreground">Storage, SKU, Name, Quantity</span>.</>}
+        description={<>CSV columns: <span className="font-medium text-foreground">Storage, SKU, Product Name, Quantity</span> (the same as the export).</>}
         onImport={runImport}
         onDone={load}
       />
