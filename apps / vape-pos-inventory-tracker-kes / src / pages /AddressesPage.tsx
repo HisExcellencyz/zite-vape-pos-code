@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { getAddresses, saveAddress, deleteRecord, getSuppliers, syncSupplierAddresses } from 'zitejs/api';
+import { getAddresses, saveAddress, deleteRecord, getSuppliers, syncSupplierAddresses, getStorages } from 'zitejs/api';
 import { usePermissions } from '../hooks/usePermissions';
 import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
@@ -27,6 +27,8 @@ interface Address {
   type?: string;
   supplierId?: string | null;
   supplierName?: string;
+  storageId?: string | null;
+  storageName?: string;
   fullAddress?: string;
   plusCode?: string;
   coordinates?: string;
@@ -35,6 +37,7 @@ interface Address {
 }
 
 interface SupplierLite { id: string; supplierName?: string; }
+interface StorageOpt { id: string; name: string; type: string; }
 
 export default function AddressesPage() {
   const { can } = usePermissions();
@@ -42,6 +45,7 @@ export default function AddressesPage() {
   const [tab, setTab] = useState('branches');
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [suppliers, setSuppliers] = useState<SupplierLite[]>([]);
+  const [storages, setStorages] = useState<StorageOpt[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -53,6 +57,7 @@ export default function AddressesPage() {
   const [name, setName] = useState('');
   const [type, setType] = useState<AddrType>('pickup');
   const [supplierId, setSupplierId] = useState('');
+  const [storageId, setStorageId] = useState('');
   const [fullAddress, setFullAddress] = useState('');
   const [plusCode, setPlusCode] = useState('');
   const [coordinates, setCoordinates] = useState('');
@@ -62,19 +67,27 @@ export default function AddressesPage() {
   const load = async () => {
     setLoading(true);
     try {
-      // Addresses and suppliers are shared by every outlet, so nothing is filtered by outlet here.
-      // Every supplier has a Supplier-type location: back-fill older suppliers once per visit.
-      if (!synced.current) { synced.current = true; await syncSupplierAddresses({}).catch(() => {}); }
-      const [res, sup] = await Promise.all([getAddresses({}), getSuppliers({})]);
+      // Addresses, suppliers and storages are shared by every outlet, so nothing is filtered by outlet here.
+      // Every supplier and every Office / custom storage has a Storage/Supplier-type location: back-fill once per visit.
+      if (!synced.current) {
+        synced.current = true;
+        await syncSupplierAddresses({}).catch(() => {});
+        await getStorages({}).catch(() => {}); // creates the Storage locations of any storage that lacks one
+      }
+      const [res, sup, sto] = await Promise.all([getAddresses({}), getSuppliers({}), getStorages({}).catch(() => null)]);
       setAddresses(res.addresses as Address[]);
       setSuppliers(sup.suppliers as SupplierLite[]);
+      setStorages(((sto as any)?.storages || []) as StorageOpt[]);
     } finally { setLoading(false); }
   };
 
   useEffect(() => { load(); }, []);
 
+  // Rider storages are never shown as locations (riders are always on the move).
+  const storageChoices = storages.filter(s => s.type !== 'rider');
+
   const openNew = () => {
-    setEditId(undefined); setName(''); setType('pickup'); setSupplierId('');
+    setEditId(undefined); setName(''); setType('pickup'); setSupplierId(''); setStorageId('');
     setFullAddress(''); setPlusCode(''); setCoordinates('');
     setNotes(''); setSelectedPin(null); setShowForm(true);
   };
@@ -83,6 +96,7 @@ export default function AddressesPage() {
     setEditId(a.id); setName(a.addressName || '');
     setType(normalizeAddrType(a.type));
     setSupplierId(a.supplierId || '');
+    setStorageId(a.storageId || '');
     setFullAddress(a.fullAddress || '');
     setPlusCode(a.plusCode || '');
     setCoordinates(a.coordinates || '');
@@ -113,6 +127,7 @@ export default function AddressesPage() {
   const handleSave = async () => {
     if (!name.trim()) return toast.error('Name is required');
     if (type === 'supplier' && !supplierId) return toast.error('Choose which supplier this location belongs to');
+    if (type === 'storage' && !storageId) return toast.error('Choose which storage this location belongs to');
     setSaving(true);
     try {
       await saveAddress({
@@ -120,6 +135,7 @@ export default function AddressesPage() {
         addressName: name,
         type,
         supplierId: type === 'supplier' ? supplierId : undefined,
+        storageId: type === 'storage' ? storageId : undefined,
         fullAddress: fullAddress || undefined,
         plusCode: plusCode || undefined,
         coordinates: coordinates || undefined,
@@ -199,7 +215,7 @@ export default function AddressesPage() {
                 <Card className="bg-card border-border">
                   <CardContent className="p-6 text-center text-muted-foreground">
                     <MapPin className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                    <p className="text-sm">No locations yet. Add your commonly used supplier, pick-up, drop-off and start/end points.</p>
+                    <p className="text-sm">No locations yet. Add your commonly used supplier, storage, pick-up, drop-off and start/end points.</p>
                   </CardContent>
                 </Card>
               ) : addresses.map(a => (
@@ -251,6 +267,11 @@ export default function AddressesPage() {
             <div>
               <Label>Name *</Label>
               <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Westlands Pick-up Point" />
+              {(type === 'supplier' || type === 'storage') && (
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  This name is independent of the {type === 'supplier' ? 'supplier' : 'storage'} name: renaming it here does not rename the {type === 'supplier' ? 'supplier' : 'storage'}.
+                </p>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -269,6 +290,17 @@ export default function AddressesPage() {
                     <SelectTrigger><SelectValue placeholder="Select supplier" /></SelectTrigger>
                     <SelectContent>
                       {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.supplierName}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              {type === 'storage' && (
+                <div>
+                  <Label>Storage *</Label>
+                  <Select value={storageId} onValueChange={setStorageId}>
+                    <SelectTrigger><SelectValue placeholder="Select storage" /></SelectTrigger>
+                    <SelectContent>
+                      {storageChoices.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
