@@ -13,6 +13,7 @@ import { Warehouse, Plus, Pencil, Trash2, ArrowRightLeft, ArrowLeft, Bike, Searc
 import { toast } from 'sonner';
 import { usePermissions } from '../hooks/usePermissions';
 import { OFFICE_ID, StockMap, StorageLite, qtyIn } from '../lib/storageMath';
+import ProductMultiSearch from '../components/ProductMultiSearch';
 
 interface Product { id: string; productName?: string; sku?: string; stockQuantity?: number; status?: string; }
 interface Line { productId: string; quantity: string; }
@@ -40,7 +41,6 @@ export default function StoragesPage() {
   const [fromId, setFromId] = useState('');
   const [toId, setToId] = useState('');
   const [lines, setLines] = useState<Line[]>([]);
-  const [prodSearch, setProdSearch] = useState('');
   const [transferring, setTransferring] = useState(false);
 
   const load = async () => {
@@ -122,7 +122,6 @@ export default function StoragesPage() {
     setFromId(from || OFFICE_ID);
     setToId('');
     setLines([]);
-    setProdSearch('');
     setTransferOpen(true);
   };
 
@@ -132,19 +131,17 @@ export default function StoragesPage() {
     if (toId === id) setToId('');
   };
 
-  const addLine = (p: Product) => {
-    setLines(prev => (prev.some(l => l.productId === p.id) ? prev : [...prev, { productId: p.id, quantity: '1' }]));
-    setProdSearch('');
+  // Adds every ticked product at once (products already in the transfer are skipped).
+  const addLines = (list: Product[]) => {
+    setLines(prev => {
+      const next = [...prev];
+      for (const p of list) if (!next.some(l => l.productId === p.id)) next.push({ productId: p.id, quantity: '1' });
+      return next;
+    });
   };
 
-  const sourceProducts = products
-    .map(p => ({ p, n: fromId ? qty(fromId, p) : 0 }))
-    .filter(x => x.n > 0);
-  const matches = prodSearch.trim()
-    ? sourceProducts.filter(x =>
-        (x.p.productName || '').toLowerCase().includes(prodSearch.toLowerCase()) ||
-        (x.p.sku || '').toLowerCase().includes(prodSearch.toLowerCase()))
-    : [];
+  // Only products the source storage actually holds can be transferred.
+  const sourceProducts = products.filter(p => (fromId ? qty(fromId, p) > 0 : false));
 
   const handleTransfer = async () => {
     if (!fromId || !toId) return toast.error('Choose both storages');
@@ -306,9 +303,9 @@ export default function StoragesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Transfer stock */}
+      {/* Transfer stock: wide enough to show about ten search results at once */}
       <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
-        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><ArrowRightLeft className="w-5 h-5 text-pink-400" /> Transfer Stock</DialogTitle>
             <DialogDescription className="text-xs">Moves stock from one storage to another. Total stock does not change.</DialogDescription>
@@ -331,24 +328,17 @@ export default function StoragesPage() {
               </div>
             </div>
 
-            <div>
+            <div className="space-y-1.5">
               <Label>Products in {nameOf(fromId) || 'the source storage'}</Label>
-              <div className="relative mt-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input value={prodSearch} onChange={e => setProdSearch(e.target.value)} placeholder="Search products to move..." className="pl-9" disabled={!fromId} />
-              </div>
-              {prodSearch.trim() && (
-                <div className="mt-1 max-h-36 overflow-y-auto rounded-lg border border-border">
-                  {matches.length === 0 ? (
-                    <p className="p-3 text-xs text-muted-foreground text-center">No matching stock in this storage</p>
-                  ) : matches.slice(0, 12).map(({ p, n }) => (
-                    <button key={p.id} type="button" onClick={() => addLine(p)} className="w-full text-left p-2 hover:bg-muted text-sm flex justify-between gap-2">
-                      <span className="break-words whitespace-normal min-w-0">{p.productName} <span className="text-muted-foreground text-xs">({p.sku})</span></span>
-                      <span className="text-muted-foreground shrink-0">{n} available</span>
-                    </button>
-                  ))}
-                </div>
-              )}
+              <ProductMultiSearch
+                items={sourceProducts}
+                stockOf={p => (fromId ? qty(fromId, p) : 0)}
+                addedIds={lines.map(l => l.productId)}
+                onAdd={addLines}
+                disabled={!fromId}
+                placeholder="Search products to move..."
+              />
+              <p className="text-[11px] text-muted-foreground">"In stock" shows the quantity held in {nameOf(fromId) || 'the source storage'}.</p>
             </div>
 
             {lines.length > 0 && (
