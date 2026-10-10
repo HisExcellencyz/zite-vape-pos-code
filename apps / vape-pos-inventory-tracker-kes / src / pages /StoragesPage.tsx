@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { getStorages, saveStorage, transferStock, getProducts, adjustStorageStock, importStorageStock } from 'zitejs/api';
 import { Card, CardContent } from '@project/components/ui/card';
@@ -8,13 +8,14 @@ import { Label } from '@project/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
-import { Plus, Pencil, Trash2, ArrowRightLeft, ArrowLeft, Search, Eye, PackagePlus, CheckSquare, Download, Upload } from 'lucide-react';
+import { Plus, Pencil, Trash2, ArrowRightLeft, ArrowLeft, Search, Eye, PackagePlus, CheckSquare, Download, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePermissions } from '../hooks/usePermissions';
 import { OFFICE_ID, StockMap, StorageLite, qtyIn } from '../lib/storageMath';
 import { downloadCsv } from '../lib/exportHelper';
 import ProductMultiSearch from '../components/ProductMultiSearch';
 import ImportDialog from '../components/ImportDialog';
+import ViewToggle, { useViewMode } from '../components/ViewToggle';
 
 interface Product { id: string; productName?: string; sku?: string; stockQuantity?: number; status?: string; }
 interface Line { productId: string; quantity: string; }
@@ -26,6 +27,7 @@ const csvQ = (v: unknown) => { const s = String(v ?? ''); return /[",\n]/.test(s
 export default function StoragesPage() {
   // canBackdate is true only for the Owner and Admins: the same people who may change stock levels.
   const { can, canBackdate } = usePermissions();
+  const [viewMode, setViewMode] = useViewMode('storages', 'grid');
   const [storages, setStorages] = useState<StorageLite[]>([]);
   const [stock, setStock] = useState<StockMap>({});
   const [products, setProducts] = useState<Product[]>([]);
@@ -40,6 +42,7 @@ export default function StoragesPage() {
   const [viewId, setViewId] = useState<string | null>(null);
   const [viewSearch, setViewSearch] = useState('');
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  const panelRef = useRef<HTMLDivElement>(null);
 
   // Transfer
   const [transferOpen, setTransferOpen] = useState(false);
@@ -107,7 +110,10 @@ export default function StoragesPage() {
         .sort((a, b) => (a.p.productName || '').localeCompare(b.p.productName || ''))
     : [];
 
-  const openView = (id: string) => { setViewId(id); setViewSearch(''); setPicked(new Set()); };
+  const openView = (id: string) => {
+    setViewId(id); setViewSearch(''); setPicked(new Set());
+    setTimeout(() => panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+  };
   const togglePick = (id: string) => setPicked(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const allPicked = viewRows.length > 0 && viewRows.every(r => picked.has(r.p.id));
   const toggleAllPicked = () => setPicked(allPicked ? new Set() : new Set(viewRows.map(r => r.p.id)));
@@ -271,17 +277,17 @@ export default function StoragesPage() {
     }
   };
 
-  // ── Export / import ──
-  const handleExport = () => {
-    const list = viewing ? [viewing] : storages;
-    const out: string[] = [['Storage', 'Product SKU', 'Product Name', 'Quantity'].join(',')];
+  // ── Export / import (columns: Storage, SKU, Name, Quantity) ──
+  const handleExport = (only?: StorageLite | null) => {
+    const list = only ? [only] : storages;
+    const out: string[] = [['Storage', 'SKU', 'Name', 'Quantity'].join(',')];
     for (const s of list) {
       for (const p of [...products].sort((a, b) => (a.productName || '').localeCompare(b.productName || ''))) {
         const n = qty(s.id, p);
         if (n > 0) out.push([s.name, p.sku, p.productName, n].map(csvQ).join(','));
       }
     }
-    downloadCsv(out.join('\n') + '\n', viewing ? `stock_${viewing.name.replace(/\s+/g, '_')}.csv` : 'storage_stock_export.csv');
+    downloadCsv(out.join('\n') + '\n', only ? `stock_${only.name.replace(/\s+/g, '_')}.csv` : 'storage_stock_export.csv');
     toast.success('Exported');
   };
 
@@ -292,17 +298,46 @@ export default function StoragesPage() {
 
   const nameOf = (id: string) => storages.find(s => s.id === id)?.name || '';
 
+  // Action icons of one storage (same in grid and list view)
+  const storageActions = (s: StorageLite) => (
+    <div className="flex items-center gap-0.5">
+      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="View stock" onClick={() => openView(s.id)}><Eye className="w-3.5 h-3.5" /></Button>
+      {can('inventory', 'edit') && (
+        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Transfer from here" onClick={() => openTransfer(s.id)}><ArrowRightLeft className="w-3.5 h-3.5" /></Button>
+      )}
+      {canBackdate && (
+        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-amber-400" title="Manage stock" onClick={() => openView(s.id)}><PackagePlus className="w-3.5 h-3.5" /></Button>
+      )}
+      <div className="ml-auto flex">
+        {can('inventory', 'edit') && s.type !== 'rider' && (
+          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Rename" onClick={() => openName(s)}><Pencil className="w-3.5 h-3.5" /></Button>
+        )}
+        {can('inventory', 'delete') && s.type === 'custom' && (
+          <AlertDialog>
+            <AlertDialogTrigger asChild><Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button></AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete {s.name}?</AlertDialogTitle>
+                <AlertDialogDescription>Its stock goes back to the Office and its location under Addresses is removed.</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={() => handleDelete(s)} className="bg-destructive">Delete</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <div className="p-6 space-y-5">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-foreground">Storages</h1>
         <div className="flex items-center gap-2 flex-wrap">
           <Button asChild variant="outline" size="sm"><Link to="/inventory"><ArrowLeft className="w-4 h-4 mr-1" /> Inventory</Link></Button>
-          {canBackdate && picked.size > 0 && (
-            <Button variant="outline" size="sm" onClick={() => { setBulkAction('add'); setBulkQty(''); setBulkOpen(true); }}>
-              <CheckSquare className="w-4 h-4 mr-1" /> Bulk Actions ({picked.size})
-            </Button>
-          )}
+          <ViewToggle value={viewMode} onChange={setViewMode} />
           {can('inventory', 'edit') && (
             <Button variant="outline" size="sm" onClick={() => openTransfer()}>
               <ArrowRightLeft className="w-4 h-4 mr-1" /> Transfer Stock
@@ -310,7 +345,7 @@ export default function StoragesPage() {
           )}
           {can('inventory', 'create') && <Button variant="outline" size="sm" onClick={() => openName()}><Plus className="w-4 h-4 mr-1" /> Add Storage</Button>}
           {can('inventory', 'export') && (
-            <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExport}>
+            <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={() => handleExport()}>
               <Download className="w-4 h-4 mr-1" /> Export
             </Button>
           )}
@@ -323,103 +358,124 @@ export default function StoragesPage() {
         </div>
       </div>
 
-      {/* Compact tiles */}
-      <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2">
-        {loading ? (
-          [...Array(6)].map((_, i) => <Card key={i} className="bg-card border-border"><CardContent className="p-2"><div className="h-12 bg-muted rounded animate-pulse" /></CardContent></Card>)
-        ) : storages.map(s => {
-          const t = totals.get(s.id) || { units: 0, products: 0 };
-          return (
-            <Card key={s.id} className={`bg-card ${viewId === s.id ? 'border-primary' : 'border-border'}`}>
-              <CardContent className="p-2 space-y-1.5">
-                <p className="text-xs font-semibold text-foreground break-words whitespace-normal leading-snug">{s.name}</p>
-                <div className="grid grid-cols-2 gap-1 text-[11px]">
-                  <div className="rounded bg-primary/5 border border-primary/20 px-1 py-0.5">
-                    <p className="text-[8px] uppercase tracking-wider text-muted-foreground">Units</p>
-                    <p className="font-semibold text-primary leading-tight">{t.units.toLocaleString()}</p>
+      {/* Storage tiles: same grid, card padding and layout as the tiles on Expenses > Deductions */}
+      {viewMode === 'grid' ? (
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+          {loading ? (
+            [...Array(4)].map((_, i) => <Card key={i} className="bg-card border-border"><CardContent className="p-4"><div className="h-24 bg-muted rounded animate-pulse" /></CardContent></Card>)
+          ) : storages.map(s => {
+            const t = totals.get(s.id) || { units: 0, products: 0 };
+            return (
+              <Card key={s.id} className={`bg-card ${viewId === s.id ? 'border-primary' : 'border-border'}`}>
+                <CardContent className="p-4 space-y-3">
+                  <p className="font-semibold text-foreground break-words whitespace-normal leading-snug">{s.name}</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="rounded-md bg-primary/5 border border-primary/20 px-2 py-1.5">
+                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Units</p>
+                      <p className="font-semibold text-primary break-words">{t.units.toLocaleString()}</p>
+                    </div>
+                    <div className="rounded-md bg-pink-500/5 border border-pink-500/20 px-2 py-1.5">
+                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Products</p>
+                      <p className="font-semibold text-pink-500 break-words">{t.products.toLocaleString()}</p>
+                    </div>
                   </div>
-                  <div className="rounded bg-pink-500/5 border border-pink-500/20 px-1 py-0.5">
-                    <p className="text-[8px] uppercase tracking-wider text-muted-foreground">Products</p>
-                    <p className="font-semibold text-pink-500 leading-tight">{t.products.toLocaleString()}</p>
+                  <div className="border-t border-border pt-2">{storageActions(s)}</div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      ) : (
+        <Card className="bg-card border-border"><CardContent className="p-0"><div className="overflow-auto max-h-[65vh]">
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 z-10 bg-card"><tr className="border-b border-border text-muted-foreground bg-card">
+              <th className="text-left p-3 font-medium">Storage</th>
+              <th className="text-right p-3 font-medium">Units</th>
+              <th className="text-right p-3 font-medium">Products</th>
+              <th className="p-3 w-44" />
+            </tr></thead>
+            <tbody>
+              {loading ? (
+                [...Array(4)].map((_, i) => <tr key={i} className="border-b border-border">{[...Array(4)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}</tr>)
+              ) : storages.map(s => {
+                const t = totals.get(s.id) || { units: 0, products: 0 };
+                return (
+                  <tr key={s.id} className={`border-b border-border hover:bg-muted/30 ${viewId === s.id ? 'bg-primary/5' : ''}`}>
+                    <td className="p-3 font-medium text-foreground break-words whitespace-normal">{s.name}</td>
+                    <td className="p-3 text-right font-semibold text-primary">{t.units.toLocaleString()}</td>
+                    <td className="p-3 text-right font-semibold text-pink-500">{t.products.toLocaleString()}</td>
+                    <td className="p-3">{storageActions(s)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div></CardContent></Card>
+      )}
+
+      {/* Stock held in the chosen storage, with its own Bulk Actions / Add / Import / Export buttons */}
+      <div ref={panelRef}>
+        {viewing && (
+          <Card className="bg-card border-border">
+            <CardContent className="p-4 space-y-3">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <p className="font-semibold text-foreground">Stock in {viewing.name}</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                    <Input value={viewSearch} onChange={e => setViewSearch(e.target.value)} placeholder="Search products..." className="pl-8 h-8 text-xs w-56" />
                   </div>
-                </div>
-                <div className="border-t border-border pt-1 flex items-center gap-0.5">
-                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0" title="View stock" onClick={() => openView(s.id)}><Eye className="w-3.5 h-3.5" /></Button>
-                  {can('inventory', 'edit') && (
-                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" title="Transfer from here" onClick={() => openTransfer(s.id)}><ArrowRightLeft className="w-3.5 h-3.5" /></Button>
+                  {canBackdate && picked.size > 0 && (
+                    <Button variant="outline" size="sm" onClick={() => { setBulkAction('add'); setBulkQty(''); setBulkOpen(true); }}>
+                      <CheckSquare className="w-4 h-4 mr-1" /> Bulk Actions ({picked.size})
+                    </Button>
+                  )}
+                  {can('inventory', 'export') && (
+                    <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={() => handleExport(viewing)}>
+                      <Download className="w-4 h-4 mr-1" /> Export
+                    </Button>
                   )}
                   {canBackdate && (
-                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-amber-400" title="Add stock" onClick={() => openAdjust(s.id)}><PackagePlus className="w-3.5 h-3.5" /></Button>
+                    <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10" onClick={() => setImportOpen(true)}>
+                      <Upload className="w-4 h-4 mr-1" /> Import
+                    </Button>
                   )}
-                  <div className="ml-auto flex">
-                    {can('inventory', 'edit') && s.type !== 'rider' && (
-                      <Button variant="ghost" size="sm" className="h-6 w-6 p-0" title="Rename" onClick={() => openName(s)}><Pencil className="w-3 h-3" /></Button>
-                    )}
-                    {can('inventory', 'delete') && s.type === 'custom' && (
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild><Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-destructive"><Trash2 className="w-3 h-3" /></Button></AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Delete {s.name}?</AlertDialogTitle>
-                            <AlertDialogDescription>Its stock goes back to the Office and its location under Addresses is removed.</AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => handleDelete(s)} className="bg-destructive">Delete</AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    )}
-                  </div>
+                  {canBackdate && <Button size="sm" onClick={() => openAdjust(viewing.id)}><PackagePlus className="w-4 h-4 mr-1" /> Add</Button>}
+                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0" title="Close" onClick={() => setViewId(null)}><X className="w-4 h-4" /></Button>
                 </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
-
-      {/* Stock held in the chosen storage */}
-      {viewing && (
-        <Card className="bg-card border-border">
-          <CardContent className="p-4 space-y-3">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <p className="font-semibold text-foreground">Stock in {viewing.name}</p>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                <Input value={viewSearch} onChange={e => setViewSearch(e.target.value)} placeholder="Search products..." className="pl-8 h-8 text-xs w-64" />
               </div>
-            </div>
-            <div className="overflow-auto max-h-[50vh] rounded-lg border border-border">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-card">
-                  <tr className="border-b border-border text-muted-foreground">
-                    {canBackdate && (
-                      <th className="p-3 w-8"><input type="checkbox" checked={allPicked} onChange={toggleAllPicked} className="rounded" /></th>
-                    )}
-                    <th className="text-left p-3 font-medium">Product</th>
-                    <th className="text-left p-3 font-medium">SKU</th>
-                    <th className="text-right p-3 font-medium">Quantity</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {viewRows.length === 0 ? (
-                    <tr><td colSpan={canBackdate ? 4 : 3} className="text-center py-8 text-muted-foreground">No stock in this storage</td></tr>
-                  ) : viewRows.map(({ p, n }) => (
-                    <tr key={p.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+              <div className="overflow-auto max-h-[50vh] rounded-lg border border-border">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-card">
+                    <tr className="border-b border-border text-muted-foreground">
                       {canBackdate && (
-                        <td className="p-3"><input type="checkbox" checked={picked.has(p.id)} onChange={() => togglePick(p.id)} className="rounded" /></td>
+                        <th className="p-3 w-8"><input type="checkbox" checked={allPicked} onChange={toggleAllPicked} className="rounded" /></th>
                       )}
-                      <td className="p-3 text-foreground break-words whitespace-normal">{p.productName}</td>
-                      <td className="p-3 text-muted-foreground font-mono text-xs break-all">{p.sku}</td>
-                      <td className="p-3 text-right font-semibold text-emerald-400">{n}</td>
+                      <th className="text-left p-3 font-medium">SKU</th>
+                      <th className="text-left p-3 font-medium">Name</th>
+                      <th className="text-right p-3 font-medium">Quantity</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+                  </thead>
+                  <tbody>
+                    {viewRows.length === 0 ? (
+                      <tr><td colSpan={canBackdate ? 4 : 3} className="text-center py-8 text-muted-foreground">No stock in this storage</td></tr>
+                    ) : viewRows.map(({ p, n }) => (
+                      <tr key={p.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                        {canBackdate && (
+                          <td className="p-3"><input type="checkbox" checked={picked.has(p.id)} onChange={() => togglePick(p.id)} className="rounded" /></td>
+                        )}
+                        <td className="p-3 text-muted-foreground font-mono text-xs break-all">{p.sku}</td>
+                        <td className="p-3 text-foreground break-words whitespace-normal">{p.productName}</td>
+                        <td className="p-3 text-right font-semibold text-emerald-400">{n}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
 
       {/* Create / rename */}
       <Dialog open={!!nameDialog} onOpenChange={o => { if (!o) setNameDialog(null); }}>
@@ -618,7 +674,7 @@ export default function StoragesPage() {
         title="Import Storage Stock"
         template="storageStock"
         chunkSize={100}
-        description={<>CSV columns: <span className="font-medium text-foreground">Storage, Product SKU, Quantity</span>. Each row sets the stock level of that product in that storage.</>}
+        description={<>CSV columns: <span className="font-medium text-foreground">Storage, SKU, Name, Quantity</span>.</>}
         onImport={runImport}
         onDone={load}
       />
