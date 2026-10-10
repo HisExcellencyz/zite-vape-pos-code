@@ -16,6 +16,7 @@ import { downloadCsv } from '../lib/exportHelper';
 import LocationPickerDialog from '../components/LocationPickerDialog';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
 import ImportDialog from '../components/ImportDialog';
+import SupplierSuppliesEditor from '../components/SupplierSuppliesEditor';
 import { usePermissions } from '../hooks/usePermissions';
 
 interface Supplier {
@@ -66,7 +67,7 @@ export default function SuppliersPage() {
   const tc = useTableControls(suppliers, FIELDS);
   const [viewMode, setViewMode] = useViewMode('suppliers', 'grid');
 
-  // Supplier account dialog (transactions, bills, locations)
+  // Supplier account dialog (transactions, bills, locations, supplies)
   const [acct, setAcct] = useState<Supplier | null>(null);
   const [acctTab, setAcctTab] = useState('transactions');
   const [txs, setTxs] = useState<any[]>([]);
@@ -289,7 +290,7 @@ export default function SuppliersPage() {
 
   const renderActions = (s: Supplier) => (
     <div className="flex justify-end gap-1">
-      <Button variant="ghost" size="sm" title="Account: deposits, bills & locations" onClick={() => openAccount(s)}><Wallet className="w-3.5 h-3.5" /></Button>
+      <Button variant="ghost" size="sm" title="Account: deposits, bills, locations & supplies" onClick={() => openAccount(s)}><Wallet className="w-3.5 h-3.5" /></Button>
       {can('suppliers', 'edit') && <Button variant="ghost" size="sm" onClick={() => openEdit(s)}><Pencil className="w-3.5 h-3.5" /></Button>}
       {can('suppliers', 'delete') && <AlertDialog>
         <AlertDialogTrigger asChild><Button variant="ghost" size="sm" className="text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button></AlertDialogTrigger>
@@ -488,7 +489,7 @@ export default function SuppliersPage() {
         onSelect={(address) => { setFormAddress(address); }}
       />
 
-      {/* Supplier account: transactions, bills, locations */}
+      {/* Supplier account: transactions, bills, locations, supplies */}
       <Dialog open={!!acct} onOpenChange={o => { if (!o) setAcct(null); }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle className="break-words pr-6">{acct?.supplierName}</DialogTitle></DialogHeader>
@@ -515,6 +516,7 @@ export default function SuppliersPage() {
                   <TabsTrigger value="transactions">Transactions ({txs.length})</TabsTrigger>
                   <TabsTrigger value="bills">Bills ({bills.length})</TabsTrigger>
                   <TabsTrigger value="locations">Locations ({locs.length})</TabsTrigger>
+                  <TabsTrigger value="supplies">Supplies</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="transactions" className="mt-3 space-y-1.5">
@@ -588,6 +590,10 @@ export default function SuppliersPage() {
                       </div>
                     ))}
                 </TabsContent>
+
+                <TabsContent value="supplies" className="mt-3">
+                  <SupplierSuppliesEditor supplierId={acct.id} canEdit={can('suppliers', 'edit')} />
+                </TabsContent>
               </Tabs>
             </div>
           )}
@@ -614,7 +620,6 @@ export default function SuppliersPage() {
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle>Add Bill — {acct?.supplierName}</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <p className="text-xs text-muted-foreground">An amount you owe this supplier, e.g. stock taken on credit.</p>
             <div className="grid grid-cols-2 gap-3">
               <div><Label>Amount (KES) *</Label><Input type="number" value={billAmount} onChange={e => setBillAmount(e.target.value)} placeholder="0.00" /></div>
               <div><Label>Date</Label><DatePicker value={billDate} onChange={setBillDate} /></div>
