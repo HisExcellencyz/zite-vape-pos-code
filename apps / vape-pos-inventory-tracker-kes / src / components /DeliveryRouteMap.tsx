@@ -25,9 +25,12 @@ export interface RoutePoint {
   /** Set when the point came from a Supplier-type saved location. */
   supplierId?: string;
   supplierName?: string;
+  /** Set when the point came from a Storage-type saved location. */
+  storageId?: string;
+  storageName?: string;
 }
 
-/** An item in the active order (and merged orders) that can be picked up from a supplier. */
+/** An item in the active order (and merged orders) that can be picked up from a supplier or a storage. */
 export interface PickupItem {
   productId: string;
   name: string;
@@ -202,9 +205,17 @@ function bestDropOrder(D: number[][], k: number, hasAnchor: boolean, hasTerminal
   return order;
 }
 
-interface SavedAddr { id: string; addressName?: string; type?: string; coordinates?: string; fullAddress?: string; supplierId?: string | null; supplierName?: string; }
+interface SavedAddr {
+  id: string; addressName?: string; type?: string; coordinates?: string; fullAddress?: string;
+  supplierId?: string | null; supplierName?: string;
+  storageId?: string | null; storageName?: string;
+}
 
-interface PointExtra { supplierId?: string; supplierName?: string; tag?: 'pickup' | 'dropoff'; }
+interface PointExtra {
+  supplierId?: string; supplierName?: string;
+  storageId?: string; storageName?: string;
+  tag?: 'pickup' | 'dropoff';
+}
 
 export default function DeliveryRouteMap({
   points, onPointsChange, totalDistance, onDistanceChange,
@@ -263,6 +274,7 @@ export default function DeliveryRouteMap({
       label: label || `${lat.toFixed(5)},${lng.toFixed(5)}`,
       lat, lng,
       ...(extra?.supplierId ? { supplierId: extra.supplierId, supplierName: extra.supplierName } : {}),
+      ...(extra?.storageId ? { storageId: extra.storageId, storageName: extra.storageName } : {}),
     };
     let next: RoutePoint[];
     if (t === 'start') {
@@ -433,10 +445,13 @@ export default function DeliveryRouteMap({
   const handleSavedAddress = async (addrId: string) => {
     const addr = savedAddresses.find(a => a.id === addrId);
     if (!addr) return;
-    const isSupplier = normalizeAddrType(addr.type) === 'supplier' && !!addr.supplierId;
+    const kind = normalizeAddrType(addr.type);
+    const isSupplier = kind === 'supplier' && !!addr.supplierId;
+    const isStorage = kind === 'storage' && !!addr.storageId;
     const extra: PointExtra = {
       tag: defaultRouteTag(addr.type),
       ...(isSupplier ? { supplierId: addr.supplierId!, supplierName: addr.supplierName } : {}),
+      ...(isStorage ? { storageId: addr.storageId!, storageName: addr.storageName } : {}),
     };
     const label = addr.addressName || addr.fullAddress || addr.coordinates;
     if (addr.coordinates) {
@@ -467,7 +482,7 @@ export default function DeliveryRouteMap({
   const filteredSaved = savedAddresses.filter(a => {
     const q = savedQuery.trim().toLowerCase();
     if (!q) return true;
-    return [a.addressName, a.fullAddress, a.supplierName, addrTypeLabel(a.type)].some(v => (v || '').toLowerCase().includes(q));
+    return [a.addressName, a.fullAddress, a.supplierName, a.storageName, addrTypeLabel(a.type)].some(v => (v || '').toLowerCase().includes(q));
   });
 
   const updateTag = (id: string, tag: string) => {
@@ -559,7 +574,7 @@ export default function DeliveryRouteMap({
     }
   };
 
-  // ── Picked-up items (supplier pick-up points only) ──
+  // ── Picked-up items (supplier and storage pick-up points) ──
   const selectedFor = (id: string) =>
     (pickupSelections[id] || []).filter(pid => pickupItems.some(i => i.productId === pid));
   const dialogSel = pickupFor ? selectedFor(pickupFor.id) : [];
@@ -569,6 +584,7 @@ export default function DeliveryRouteMap({
   const allPicked = pickupItems.length > 0 && dialogSel.length === pickupItems.length;
   const toggleItem = (pid: string) =>
     setDialogSel(dialogSel.includes(pid) ? dialogSel.filter(x => x !== pid) : [...dialogSel, pid]);
+  const pickupIsStorage = !!pickupFor?.storageId;
 
   // Final drop-off = moment the route was calculated + live-traffic driving time.
   const arrivalMs = tripInfo ? tripInfo.calcAt + tripInfo.seconds * 1000 : 0;
@@ -672,8 +688,11 @@ export default function DeliveryRouteMap({
                 </div>
               );
             }
+            // "Pick items" is offered at every supplier pick-up and at every Storage-type pick-up.
             const isSupplierPickup = pt.tag === 'pickup' && !!pt.supplierId;
-            const picked = isSupplierPickup ? selectedFor(pt.id).length : 0;
+            const isStoragePickup = pt.tag === 'pickup' && !!pt.storageId;
+            const canPickItems = isSupplierPickup || isStoragePickup;
+            const picked = canPickItems ? selectedFor(pt.id).length : 0;
             const isDrop = pt.tag === 'dropoff';
             const dropIdx = isDrop ? dropoffs.findIndex(d => d.id === pt.id) : -1;
             return (
@@ -713,11 +732,11 @@ export default function DeliveryRouteMap({
                     </button>
                   </div>
                 )}
-                {isSupplierPickup && (
+                {canPickItems && (
                   <button
                     type="button"
                     onClick={() => setPickupFor(pt)}
-                    title={`Select items picked up from ${pt.supplierName || 'this supplier'}`}
+                    title={`Select items picked up from ${pt.supplierName || pt.storageName || 'this location'}`}
                     className="shrink-0 flex items-center gap-1 h-6 px-2 rounded-md bg-pink-500 text-white text-[10px] font-semibold shadow-sm hover:bg-pink-600 transition-colors"
                   >
                     <PackageCheck className="w-3.5 h-3.5" />
@@ -810,7 +829,7 @@ export default function DeliveryRouteMap({
                 >
                   <p className="font-medium text-foreground break-words">{a.addressName}</p>
                   <p className="text-[10px] text-muted-foreground break-words">
-                    {addrTypeLabel(a.type)}{a.supplierName ? ` · ${a.supplierName}` : ''}{a.fullAddress ? ` · ${a.fullAddress}` : ''}
+                    {addrTypeLabel(a.type)}{a.supplierName ? ` · ${a.supplierName}` : ''}{a.storageName ? ` · ${a.storageName}` : ''}{a.fullAddress ? ` · ${a.fullAddress}` : ''}
                   </p>
                 </button>
               ))}
@@ -822,15 +841,17 @@ export default function DeliveryRouteMap({
         </DialogContent>
       </Dialog>
 
-      {/* Items picked up at a supplier */}
+      {/* Items picked up at a supplier or a storage */}
       <Dialog open={!!pickupFor} onOpenChange={o => { if (!o) setPickupFor(null); }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle className="break-words pr-6">Items picked up — {pickupFor?.supplierName || pickupFor?.label}</DialogTitle>
+            <DialogTitle className="break-words pr-6">Items picked up — {pickupFor?.supplierName || pickupFor?.storageName || pickupFor?.label}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              Optional. Tick the items collected from this supplier. A bill for their cost price is added to the supplier's pending bills when you check out.
+              {pickupIsStorage
+                ? 'Optional. Tick the items collected from this storage. They are taken out of this storage when you check out (anything it does not hold comes out of the Office), and are not taken from a rider\'s storage.'
+                : 'Optional. Tick the items collected from this supplier. A bill for their cost price is added to the supplier\'s pending bills when you check out, and they are not taken out of any storage.'}
             </p>
             {pickupItems.length === 0 ? (
               <p className="text-sm text-muted-foreground py-4 text-center">No items in the cart yet. Add items to the POS cart first.</p>
@@ -849,9 +870,11 @@ export default function DeliveryRouteMap({
                     </label>
                   ))}
                 </div>
-                <p className="text-[11px] text-muted-foreground text-right">
-                  Bill: KES {pickupItems.filter(i => dialogSel.includes(i.productId)).reduce((s, i) => s + i.unitCost * i.quantity, 0).toLocaleString()}
-                </p>
+                {!pickupIsStorage && (
+                  <p className="text-[11px] text-muted-foreground text-right">
+                    Bill: KES {pickupItems.filter(i => dialogSel.includes(i.productId)).reduce((s, i) => s + i.unitCost * i.quantity, 0).toLocaleString()}
+                  </p>
+                )}
               </div>
             )}
           </div>
