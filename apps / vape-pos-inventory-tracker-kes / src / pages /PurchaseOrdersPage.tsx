@@ -20,6 +20,7 @@ import { downloadCsv } from '../lib/exportHelper';
 import { DatePicker } from '@project/components/ui/date-picker';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
 import ImportDialog from '../components/ImportDialog';
+import ProductMultiSearch from '../components/ProductMultiSearch';
 import { useBranch } from '../hooks/useBranch';
 import { usePermissions } from '../hooks/usePermissions';
 
@@ -46,7 +47,7 @@ interface PurchaseOrder {
   itemsJson?: string;
 }
 
-interface Product { id: string; productName?: string; sku?: string; costPrice?: number; }
+interface Product { id: string; productName?: string; sku?: string; costPrice?: number; stockQuantity?: number; }
 interface Supplier { id: string; supplierName?: string; }
 
 const statusColors: Record<string, string> = {
@@ -76,7 +77,6 @@ export default function PurchaseOrdersPage() {
   const [expectedDate, setExpectedDate] = useState<Date | undefined>(undefined);
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState<LPOItem[]>([]);
-  const [productSearch, setProductSearch] = useState('');
   const [saving, setSaving] = useState(false);
 
   const [verifyItems, setVerifyItems] = useState<LPOItem[]>([]);
@@ -111,19 +111,16 @@ export default function PurchaseOrdersPage() {
     setShowForm(true);
   };
 
-  const filteredProducts = products.filter(p =>
-    (p.productName || '').toLowerCase().includes(productSearch.toLowerCase()) ||
-    (p.sku || '').toLowerCase().includes(productSearch.toLowerCase())
-  );
-
-  const addProduct = (p: Product) => {
-    const existing = items.find(i => i.productId === p.id);
-    if (existing) {
-      setItems(items.map(i => i.productId === p.id ? { ...i, quantity: i.quantity + 1 } : i));
-    } else {
-      setItems([...items, { productId: p.id, productName: p.productName || '', sku: p.sku, quantity: 1, unitPrice: p.costPrice || 0 }]);
-    }
-    setProductSearch('');
+  // Adds every ticked product at once (products already on the LPO are skipped).
+  const addProducts = (list: Product[]) => {
+    setItems(prev => {
+      const next = [...prev];
+      for (const p of list) {
+        if (next.some(i => i.productId === p.id)) continue;
+        next.push({ productId: p.id, productName: p.productName || '', sku: p.sku, quantity: 1, unitPrice: p.costPrice || 0 });
+      }
+      return next;
+    });
   };
 
   const itemsTotal = items.reduce((s, i) => s + i.unitPrice * i.quantity, 0);
@@ -355,8 +352,9 @@ export default function PurchaseOrdersPage() {
         onDone={load}
       />
 
+      {/* New / edit LPO: wide enough to show about ten search results at once */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{editId ? 'Edit' : 'New'} Purchase Order</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
@@ -377,22 +375,14 @@ export default function PurchaseOrdersPage() {
               <DatePicker value={expectedDate} onChange={setExpectedDate} />
             </div>
 
-            <div>
+            <div className="space-y-1.5">
               <Label>Products</Label>
-              <div className="relative mb-2">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input placeholder="Search products..." value={productSearch} onChange={e => setProductSearch(e.target.value)} className="pl-9" />
-              </div>
-              {productSearch && (
-                <div className="max-h-32 overflow-y-auto border border-border rounded-lg">
-                  {filteredProducts.slice(0, 10).map(p => (
-                    <button key={p.id} onClick={() => addProduct(p)} className="w-full text-left p-2 hover:bg-muted text-sm flex justify-between gap-2">
-                      <span className="break-words whitespace-normal min-w-0">{p.productName} <span className="text-muted-foreground text-xs">({p.sku})</span></span>
-                      <span className="text-muted-foreground shrink-0">{fmt(p.costPrice)}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
+              <ProductMultiSearch
+                items={products}
+                stockOf={p => p.stockQuantity || 0}
+                addedIds={items.map(i => i.productId)}
+                onAdd={addProducts}
+              />
             </div>
 
             {items.length > 0 && (
