@@ -17,12 +17,14 @@ const AXIS = { fontSize: 10, fill: 'hsl(var(--muted-foreground))' };
 const GRID = 'hsl(var(--border))';
 const TIP = { background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', color: 'hsl(var(--foreground))' };
 
-// Every tile has a FIXED content height (in pixels), whatever it shows (graph or table, few rows or many).
+// Every tile has a FIXED total size: a fixed-height header (single-line title) plus a fixed-height body (in pixels),
+// whatever it shows (graph or table, few rows or many, short or long title).
 // Tiles that share a row use the same number, so they are always exactly the same size:
 //   Revenue Trend = Expenses by Category, Top Products = Top Customers, Delivery Distances = Rider Metrics.
 const ROW0_H = 250; // Revenue Trend / Expenses by Category
 const ROW1_H = 300; // Top Selling Products / Top Customers
 const ROW2_H = 240; // Delivery Distances / Rider Metrics
+const HEADER_H = 56; // header of every tile
 
 type View = 'chart' | 'table';
 const KPI_BG: Record<string, string> = { sky: 'bg-sky-500/15', emerald: 'bg-emerald-500/15', red: 'bg-red-500/15', pink: 'bg-pink-500/15', amber: 'bg-amber-500/15' };
@@ -33,10 +35,18 @@ function Tile({ title, icon: Icon, children, className, height, view, onView }: 
   view: View; onView: (v: View) => void;
 }) {
   return (
-    <Card className={cn('bg-card border-border flex flex-col h-full', className)}>
-      <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
-        <CardTitle className="text-sm font-medium flex items-center gap-2"><Icon className="w-4 h-4 text-primary" /> {title}</CardTitle>
-        <div className="flex rounded-md border border-border p-0.5">
+    // min-w-0 + overflow-hidden: a wide table inside one tile can never stretch that tile (or push its neighbour) wider.
+    // The total height is fixed (header + body + padding), so paired tiles are identical in both width and height.
+    <Card
+      className={cn('bg-card border-border flex flex-col min-w-0 overflow-hidden shrink-0', className)}
+      style={{ height: HEADER_H + height + 24 }}
+    >
+      <CardHeader className="flex-row items-center justify-between space-y-0 p-0 px-6 shrink-0 gap-2" style={{ height: HEADER_H }}>
+        <CardTitle className="text-sm font-medium flex items-center gap-2 min-w-0" title={title}>
+          <Icon className="w-4 h-4 text-primary shrink-0" />
+          <span className="truncate">{title}</span>
+        </CardTitle>
+        <div className="flex rounded-md border border-border p-0.5 shrink-0">
           {(['chart', 'table'] as View[]).map(v => (
             <button key={v} onClick={() => onView(v)} title={v === 'chart' ? 'Graph view' : 'Table view'}
               className={cn('p-1 rounded', view === v ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
@@ -45,9 +55,9 @@ function Tile({ title, icon: Icon, children, className, height, view, onView }: 
           ))}
         </div>
       </CardHeader>
-      <CardContent className="flex-1 min-h-0">
+      <CardContent className="p-0 px-6 pb-6 min-h-0 min-w-0">
         {/* Fixed-height body: graph and table both fill it exactly, the table scrolls inside it */}
-        <div className="min-h-0 overflow-hidden" style={{ height }}>{children}</div>
+        <div className="min-h-0 min-w-0 overflow-hidden" style={{ height }}>{children}</div>
       </CardContent>
     </Card>
   );
@@ -69,15 +79,15 @@ function MiniTable({ head, rows }: { head: string[]; rows: (string | number)[][]
     });
   const click = (i: number) => setSort(s => s?.col === i ? (s.dir === 1 ? { col: i, dir: -1 } : null) : { col: i, dir: 1 });
   return (
-    <div className="flex flex-col h-full gap-2">
-      <div className="flex gap-2 shrink-0">
-        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter..." className="flex-1 h-7 rounded-md border border-border bg-background px-2 text-xs" />
-        <select value={field} onChange={e => setField(Number(e.target.value))} className="h-7 rounded-md border border-border bg-background px-1 text-xs">
+    <div className="flex flex-col h-full min-w-0 gap-2">
+      <div className="flex gap-2 shrink-0 min-w-0">
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter..." className="flex-1 min-w-0 h-7 rounded-md border border-border bg-background px-2 text-xs" />
+        <select value={field} onChange={e => setField(Number(e.target.value))} className="h-7 max-w-[40%] rounded-md border border-border bg-background px-1 text-xs">
           <option value={-1}>All fields</option>
           {head.map((h, i) => <option key={h} value={i}>{h}</option>)}
         </select>
       </div>
-      <div className="flex-1 min-h-0 overflow-auto">
+      <div className="flex-1 min-h-0 min-w-0 overflow-auto">
         <table className="w-full text-xs">
           <thead className="sticky top-0 bg-card">
             <tr className="border-b border-border text-muted-foreground">
@@ -196,9 +206,9 @@ export default function DashboardPage({ scope = 'outlet' }: { scope?: 'outlet' |
       </div>
 
       {data && d && (
-        // One grid with six direct children (two per row). Each tile's body has a fixed pixel height shared by the
-        // pair in its row, so the pairs are identical in size in both graph and table view.
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
+        // Two equal columns (minmax(0,1fr)) with six tiles. Each tile has a fixed width (its column) and a fixed
+        // height shared by the pair in its row, so the pairs are identical in size in both graph and table view.
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
           <Tile title="Revenue Trend" icon={LineIcon} height={ROW0_H} view={views.get('rev')} onView={views.set('rev')}>
             {data.revenueByDay.length === 0 ? <Empty text="No sales data yet" /> : views.get('rev') === 'chart' ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -226,7 +236,7 @@ export default function DashboardPage({ scope = 'outlet' }: { scope?: 'outlet' |
             ) : <MiniTable head={['Category', 'Amount']} rows={data.expensesByCategory.map(r => [r.category, fmt(r.amount)])} />}
           </Tile>
 
-          {/* Row 1: Top Selling Products = Top Customers */}
+          {/* Row 1: Top Selling Products = Top Customers (same size, always) */}
           <Tile title="Top Selling Products" icon={Package} height={ROW1_H} view={views.get('prod')} onView={views.set('prod')}>
             {data.topProducts.length === 0 ? <Empty text="No sales data yet" /> : views.get('prod') === 'chart' ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -255,7 +265,7 @@ export default function DashboardPage({ scope = 'outlet' }: { scope?: 'outlet' |
             ) : <MiniTable head={['Customer', 'Phone', 'Orders', 'Spent']} rows={data.topCustomers.map(c => [c.customerName, c.phone, c.orderCount, fmt(c.totalSpent)])} />}
           </Tile>
 
-          {/* Row 2: Delivery Distances = Rider Metrics */}
+          {/* Row 2: Delivery Distances = Rider Metrics (same size, always) */}
           <Tile title="Delivery Distances" icon={MapPin} height={ROW2_H} view={views.get('del', 'table')} onView={views.set('del')}>
             {d.totalDeliveries === 0 ? <Empty text="No delivery data yet. Add distances in POS." /> : views.get('del', 'table') === 'chart' ? (
               <ResponsiveContainer width="100%" height="100%">
