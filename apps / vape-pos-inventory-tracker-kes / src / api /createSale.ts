@@ -2,9 +2,10 @@ import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
 import { assertCan } from '../lib/permissions';
+import { deductStock } from '../lib/storages';
 
 export default createEndpoint({
-  description: 'Create a POS sale with items. An optional delivery fee (and other incomes) is recorded as income; an optional rider is noted on the sale.',
+  description: 'Create a POS sale with items. An optional delivery fee (and other incomes) is recorded as income; an optional rider is noted on the sale. Stock is deducted from the right storage (see deductStock).',
   authenticated: true,
   inputSchema: z.object({
     items: z.array(z.object({
@@ -29,6 +30,12 @@ export default createEndpoint({
     extraIncomes: z.array(z.object({ name: z.string(), amount: z.number().min(0) })).optional(),
     riderType: z.enum(['threePl', 'own']).optional(),
     riderName: z.string().optional(),
+    /** Id of the Own Rider handling the order (his storage is used when he has the products). */
+    riderId: z.string().optional(),
+    /** Products ticked as picked up from a supplier: they never entered stock, so no storage is deducted. */
+    supplierPickedProductIds: z.array(z.string()).optional(),
+    /** Products ticked as picked up at a Storage location: { [storageId]: productIds }. They are deducted from that storage. */
+    storagePicks: z.record(z.array(z.string())).optional(),
   }),
   outputSchema: z.object({ success: z.boolean(), sale: z.any() }),
   execute: async ({ input, context }) => {
@@ -89,17 +96,16 @@ export default createEndpoint({
       await zite.saleItems.bulkCreate({ records: saleItemRecords });
     }
 
-    // Deduct stock
-    for (const item of input.items) {
-      const product = await zite.products.findOne({ id: item.productId });
-      if (product) {
-        const newQty = Math.max(0, (product.stockQuantity || 0) - item.quantity);
-        await zite.products.update({
-          id: item.productId,
-          record: { stockQuantity: newQty },
-        });
-      }
-    }
+    // Deduct stock: Office by default, the assigned Own Rider's storage when he has the products,
+    // a Storage pick-up's storage for items ticked there, and nothing for items picked up from suppliers.
+    await deductStock(
+      input.items.map(i => ({ productId: i.productId, quantity: i.quantity })),
+      {
+        supplierPicked: input.supplierPickedProductIds,
+        storagePicks: input.storagePicks,
+        riderId: input.riderType === 'own' ? input.riderId : undefined,
+      },
+    );
 
     // Delivery fee: always income. Stored as an Other Income entry (description starts with
     // "Delivery fee") so the dashboard and profit figures pick it up automatically.
