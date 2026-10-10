@@ -17,16 +17,19 @@ const AXIS = { fontSize: 10, fill: 'hsl(var(--muted-foreground))' };
 const GRID = 'hsl(var(--border))';
 const TIP = { background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', color: 'hsl(var(--foreground))' };
 
-// Fixed content heights so tiles that share a row are exactly the same size.
-const ROW1_H = 280; // Top Selling Products / Top Customers
-const ROW2_H = 220; // Delivery Distances / Rider Metrics
+// Every tile has a FIXED content height (in pixels), whatever it shows (graph or table, few rows or many).
+// Tiles that share a row use the same number, so they are always exactly the same size:
+//   Revenue Trend = Expenses by Category, Top Products = Top Customers, Delivery Distances = Rider Metrics.
+const ROW0_H = 250; // Revenue Trend / Expenses by Category
+const ROW1_H = 300; // Top Selling Products / Top Customers
+const ROW2_H = 240; // Delivery Distances / Rider Metrics
 
 type View = 'chart' | 'table';
 const KPI_BG: Record<string, string> = { sky: 'bg-sky-500/15', emerald: 'bg-emerald-500/15', red: 'bg-red-500/15', pink: 'bg-pink-500/15', amber: 'bg-amber-500/15' };
 const KPI_BORDER: Record<string, string> = { sky: 'border-l-sky-500', emerald: 'border-l-emerald-500', red: 'border-l-red-500', pink: 'border-l-pink-500', amber: 'border-l-amber-500' };
 
-function Tile({ title, icon: Icon, children, className, contentClassName, view, onView }: {
-  title: string; icon: React.ElementType; children: ReactNode; className?: string; contentClassName?: string;
+function Tile({ title, icon: Icon, children, className, height, view, onView }: {
+  title: string; icon: React.ElementType; children: ReactNode; className?: string; height: number;
   view: View; onView: (v: View) => void;
 }) {
   return (
@@ -42,12 +45,15 @@ function Tile({ title, icon: Icon, children, className, contentClassName, view, 
           ))}
         </div>
       </CardHeader>
-      <CardContent className={cn('flex-1 min-h-0', contentClassName)}>{children}</CardContent>
+      <CardContent className="flex-1 min-h-0">
+        {/* Fixed-height body: graph and table both fill it exactly, the table scrolls inside it */}
+        <div className="min-h-0 overflow-hidden" style={{ height }}>{children}</div>
+      </CardContent>
     </Card>
   );
 }
 
-function MiniTable({ head, rows, maxH = 300 }: { head: string[]; rows: (string | number)[][]; maxH?: number }) {
+function MiniTable({ head, rows }: { head: string[]; rows: (string | number)[][] }) {
   const [q, setQ] = useState('');
   const [field, setField] = useState(-1);
   const [sort, setSort] = useState<{ col: number; dir: 1 | -1 } | null>(null);
@@ -63,15 +69,15 @@ function MiniTable({ head, rows, maxH = 300 }: { head: string[]; rows: (string |
     });
   const click = (i: number) => setSort(s => s?.col === i ? (s.dir === 1 ? { col: i, dir: -1 } : null) : { col: i, dir: 1 });
   return (
-    <div className="space-y-2">
-      <div className="flex gap-2">
+    <div className="flex flex-col h-full gap-2">
+      <div className="flex gap-2 shrink-0">
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter..." className="flex-1 h-7 rounded-md border border-border bg-background px-2 text-xs" />
         <select value={field} onChange={e => setField(Number(e.target.value))} className="h-7 rounded-md border border-border bg-background px-1 text-xs">
           <option value={-1}>All fields</option>
           {head.map((h, i) => <option key={h} value={i}>{h}</option>)}
         </select>
       </div>
-      <div className="overflow-auto" style={{ maxHeight: maxH }}>
+      <div className="flex-1 min-h-0 overflow-auto">
         <table className="w-full text-xs">
           <thead className="sticky top-0 bg-card">
             <tr className="border-b border-border text-muted-foreground">
@@ -96,7 +102,11 @@ function MiniTable({ head, rows, maxH = 300 }: { head: string[]; rows: (string |
   );
 }
 
-const Empty = ({ text }: { text: string }) => <p className="text-sm text-muted-foreground text-center py-10">{text}</p>;
+const Empty = ({ text }: { text: string }) => (
+  <div className="h-full flex items-center justify-center">
+    <p className="text-sm text-muted-foreground text-center">{text}</p>
+  </div>
+);
 
 function useViews() {
   const [views, setViews] = useState<Record<string, View>>(() => {
@@ -186,12 +196,12 @@ export default function DashboardPage({ scope = 'outlet' }: { scope?: 'outlet' |
       </div>
 
       {data && d && (
-        // One grid with six direct children (two per row). Grid rows stretch, so the two tiles in each row
-        // are always exactly the same height: Top Products = Top Customers, Delivery Distances = Rider Metrics.
+        // One grid with six direct children (two per row). Each tile's body has a fixed pixel height shared by the
+        // pair in its row, so the pairs are identical in size in both graph and table view.
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
-          <Tile title="Revenue Trend" icon={LineIcon} view={views.get('rev')} onView={views.set('rev')}>
+          <Tile title="Revenue Trend" icon={LineIcon} height={ROW0_H} view={views.get('rev')} onView={views.set('rev')}>
             {data.revenueByDay.length === 0 ? <Empty text="No sales data yet" /> : views.get('rev') === 'chart' ? (
-              <ResponsiveContainer width="100%" height={250}>
+              <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={data.revenueByDay}>
                   <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
                   <XAxis dataKey="date" tick={AXIS} tickFormatter={x => x.slice(5)} />
@@ -203,9 +213,9 @@ export default function DashboardPage({ scope = 'outlet' }: { scope?: 'outlet' |
             ) : <MiniTable head={['Date', 'Revenue']} rows={data.revenueByDay.map(r => [r.date, fmt(r.revenue)])} />}
           </Tile>
 
-          <Tile title="Expenses by Category" icon={PieIcon} view={views.get('exp')} onView={views.set('exp')}>
+          <Tile title="Expenses by Category" icon={PieIcon} height={ROW0_H} view={views.get('exp')} onView={views.set('exp')}>
             {data.expensesByCategory.length === 0 ? <Empty text="No expense data yet" /> : views.get('exp') === 'chart' ? (
-              <ResponsiveContainer width="100%" height={250}>
+              <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie data={data.expensesByCategory} dataKey="amount" nameKey="category" cx="50%" cy="50%" outerRadius={80} label={({ category, percent }) => `${category} ${(percent * 100).toFixed(0)}%`}>
                     {data.expensesByCategory.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
@@ -216,10 +226,10 @@ export default function DashboardPage({ scope = 'outlet' }: { scope?: 'outlet' |
             ) : <MiniTable head={['Category', 'Amount']} rows={data.expensesByCategory.map(r => [r.category, fmt(r.amount)])} />}
           </Tile>
 
-          {/* Row 1 */}
-          <Tile title="Top Selling Products" icon={Package} view={views.get('prod')} onView={views.set('prod')}>
+          {/* Row 1: Top Selling Products = Top Customers */}
+          <Tile title="Top Selling Products" icon={Package} height={ROW1_H} view={views.get('prod')} onView={views.set('prod')}>
             {data.topProducts.length === 0 ? <Empty text="No sales data yet" /> : views.get('prod') === 'chart' ? (
-              <ResponsiveContainer width="100%" height={ROW1_H}>
+              <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={data.topProducts} layout="vertical">
                   <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
                   <XAxis type="number" tick={AXIS} />
@@ -228,12 +238,12 @@ export default function DashboardPage({ scope = 'outlet' }: { scope?: 'outlet' |
                   <Bar dataKey="totalSold" name="Units sold" fill="hsl(var(--chart-3))" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
-            ) : <MiniTable maxH={ROW1_H - 40} head={['Product', 'Sold', 'Revenue']} rows={data.topProducts.map(p => [p.productName, p.totalSold, fmt(p.revenue)])} />}
+            ) : <MiniTable head={['Product', 'Sold', 'Revenue']} rows={data.topProducts.map(p => [p.productName, p.totalSold, fmt(p.revenue)])} />}
           </Tile>
 
-          <Tile title={scope === 'business' ? 'Top Customers (all outlets)' : 'Top Customers (this outlet)'} icon={Users} view={views.get('cust', 'table')} onView={views.set('cust')}>
+          <Tile title={scope === 'business' ? 'Top Customers (all outlets)' : 'Top Customers (this outlet)'} icon={Users} height={ROW1_H} view={views.get('cust', 'table')} onView={views.set('cust')}>
             {data.topCustomers.length === 0 ? <Empty text="No customer data yet" /> : views.get('cust', 'table') === 'chart' ? (
-              <ResponsiveContainer width="100%" height={ROW1_H}>
+              <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={data.topCustomers.slice(0, 10)} layout="vertical">
                   <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
                   <XAxis type="number" tick={AXIS} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
@@ -242,13 +252,13 @@ export default function DashboardPage({ scope = 'outlet' }: { scope?: 'outlet' |
                   <Bar dataKey="totalSpent" fill="hsl(var(--chart-1))" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
-            ) : <MiniTable maxH={ROW1_H - 40} head={['Customer', 'Phone', 'Orders', 'Spent']} rows={data.topCustomers.map(c => [c.customerName, c.phone, c.orderCount, fmt(c.totalSpent)])} />}
+            ) : <MiniTable head={['Customer', 'Phone', 'Orders', 'Spent']} rows={data.topCustomers.map(c => [c.customerName, c.phone, c.orderCount, fmt(c.totalSpent)])} />}
           </Tile>
 
-          {/* Row 2 */}
-          <Tile title="Delivery Distances" icon={MapPin} view={views.get('del', 'table')} onView={views.set('del')}>
+          {/* Row 2: Delivery Distances = Rider Metrics */}
+          <Tile title="Delivery Distances" icon={MapPin} height={ROW2_H} view={views.get('del', 'table')} onView={views.set('del')}>
             {d.totalDeliveries === 0 ? <Empty text="No delivery data yet. Add distances in POS." /> : views.get('del', 'table') === 'chart' ? (
-              <ResponsiveContainer width="100%" height={ROW2_H}>
+              <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={[{ n: 'Shortest', km: d.shortestKm }, { n: 'Average', km: d.avgDistanceKm }, { n: 'Longest', km: d.longestKm }]}>
                   <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
                   <XAxis dataKey="n" tick={AXIS} />
@@ -257,12 +267,12 @@ export default function DashboardPage({ scope = 'outlet' }: { scope?: 'outlet' |
                   <Bar dataKey="km" fill="hsl(var(--chart-4))" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
-            ) : <MiniTable maxH={ROW2_H - 40} head={['Metric', 'Value']} rows={[['Total deliveries', d.totalDeliveries], ['Average distance (km)', d.avgDistanceKm], ['Longest (km)', d.longestKm], ['Shortest (km)', d.shortestKm]]} />}
+            ) : <MiniTable head={['Metric', 'Value']} rows={[['Total deliveries', d.totalDeliveries], ['Average distance (km)', d.avgDistanceKm], ['Longest (km)', d.longestKm], ['Shortest (km)', d.shortestKm]]} />}
           </Tile>
 
-          <Tile title="Rider Metrics" icon={Bike} view={views.get('rider', 'table')} onView={views.set('rider')}>
+          <Tile title="Rider Metrics" icon={Bike} height={ROW2_H} view={views.get('rider', 'table')} onView={views.set('rider')}>
             {data.riderStats.length === 0 ? <Empty text="No rider data yet. Choose a rider at POS when checking out." /> : views.get('rider', 'table') === 'chart' ? (
-              <ResponsiveContainer width="100%" height={ROW2_H}>
+              <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={data.riderStats.slice(0, 10)} layout="vertical">
                   <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
                   <XAxis type="number" tick={AXIS} allowDecimals={false} />
@@ -273,7 +283,6 @@ export default function DashboardPage({ scope = 'outlet' }: { scope?: 'outlet' |
               </ResponsiveContainer>
             ) : (
               <MiniTable
-                maxH={ROW2_H - 40}
                 head={['Rider', 'Type', 'Orders', 'Amount', 'Distance (km)', 'Rider Charge']}
                 rows={data.riderStats.map(r => [r.name, r.type, r.orders, fmt(r.amount), r.km, fmt(r.riderCharge)])}
               />
