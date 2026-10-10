@@ -138,12 +138,11 @@ export default function ProductMultiSearch<T extends PickItem>({
 
       {listVisible && (
         <div className="rounded-lg border border-border bg-card">
-          <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-border text-xs text-muted-foreground">
+          <div className="flex items-center px-3 py-2 border-b border-border text-xs text-muted-foreground">
             <label className="flex items-center gap-2 cursor-pointer select-none">
               <Checkbox checked={allTicked} disabled={selectable.length === 0} onCheckedChange={v => toggleAll(!!v)} />
               Select all ({selectable.length})
             </label>
-            <span className="text-right">Stock now · Sold in the selected dates{range.start || range.end ? '' : ' (all time)'}</span>
           </div>
           {/* About ten products are visible at once; scroll for more */}
           <div className="max-h-[28rem] overflow-y-auto">
