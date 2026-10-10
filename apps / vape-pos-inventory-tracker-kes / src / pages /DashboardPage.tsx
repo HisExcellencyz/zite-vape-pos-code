@@ -19,28 +19,43 @@ const TIP = { background: 'hsl(var(--popover))', border: '1px solid hsl(var(--bo
 
 // Every tile has a FIXED total size: a fixed-height header (single-line title) plus a fixed-height body (in pixels),
 // whatever it shows (graph or table, few rows or many, short or long title).
-// Tiles that share a row use the same number, so they are always exactly the same size:
+// Each pair of tiles sits in its own row (see TileRow) whose height is set once, so both tiles of a pair are
+// always exactly the same width and height:
 //   Revenue Trend = Expenses by Category, Top Products = Top Customers, Delivery Distances = Rider Metrics.
 const ROW0_H = 250; // Revenue Trend / Expenses by Category
 const ROW1_H = 300; // Top Selling Products / Top Customers
 const ROW2_H = 240; // Delivery Distances / Rider Metrics
 const HEADER_H = 56; // header of every tile
+const PAD_B = 24; // bottom padding of every tile
+const BORDER = 2; // the card's 1px top + bottom border
+const rowHeight = (body: number) => HEADER_H + body + PAD_B + BORDER;
 
 type View = 'chart' | 'table';
 const KPI_BG: Record<string, string> = { sky: 'bg-sky-500/15', emerald: 'bg-emerald-500/15', red: 'bg-red-500/15', pink: 'bg-pink-500/15', amber: 'bg-amber-500/15' };
 const KPI_BORDER: Record<string, string> = { sky: 'border-l-sky-500', emerald: 'border-l-emerald-500', red: 'border-l-red-500', pink: 'border-l-pink-500', amber: 'border-l-amber-500' };
 
-function Tile({ title, icon: Icon, children, className, height, view, onView }: {
-  title: string; icon: React.ElementType; children: ReactNode; className?: string; height: number;
+/** One row holding two tiles. The row's height is fixed, and both columns are exactly equal width. */
+function TileRow({ body, children }: { body: number; children: ReactNode }) {
+  return (
+    <div
+      className="grid gap-6 grid-cols-[minmax(0,1fr)] lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-stretch"
+    >
+      {/* On a phone the two tiles stack; each still keeps the same fixed height. */}
+      {Array.isArray(children)
+        ? children.map((c, i) => <div key={i} className="min-w-0 w-full" style={{ height: rowHeight(body) }}>{c}</div>)
+        : <div className="min-w-0 w-full" style={{ height: rowHeight(body) }}>{children}</div>}
+    </div>
+  );
+}
+
+function Tile({ title, icon: Icon, children, height, view, onView }: {
+  title: string; icon: React.ElementType; children: ReactNode; height: number;
   view: View; onView: (v: View) => void;
 }) {
   return (
-    // min-w-0 + overflow-hidden: a wide table inside one tile can never stretch that tile (or push its neighbour) wider.
-    // The total height is fixed (header + body + padding), so paired tiles are identical in both width and height.
-    <Card
-      className={cn('bg-card border-border flex flex-col min-w-0 overflow-hidden shrink-0', className)}
-      style={{ height: HEADER_H + height + 24 }}
-    >
+    // h-full / w-full fill the fixed-size cell given by TileRow; min-w-0 + overflow-hidden mean a wide table inside
+    // one tile can never stretch that tile (or push its neighbour) wider.
+    <Card className="bg-card border-border flex flex-col min-w-0 w-full h-full overflow-hidden box-border">
       <CardHeader className="flex-row items-center justify-between space-y-0 p-0 px-6 shrink-0 gap-2" style={{ height: HEADER_H }}>
         <CardTitle className="text-sm font-medium flex items-center gap-2 min-w-0" title={title}>
           <Icon className="w-4 h-4 text-primary shrink-0" />
@@ -55,7 +70,7 @@ function Tile({ title, icon: Icon, children, className, height, view, onView }: 
           ))}
         </div>
       </CardHeader>
-      <CardContent className="p-0 px-6 pb-6 min-h-0 min-w-0">
+      <CardContent className="p-0 px-6 min-h-0 min-w-0" style={{ paddingBottom: PAD_B }}>
         {/* Fixed-height body: graph and table both fill it exactly, the table scrolls inside it */}
         <div className="min-h-0 min-w-0 overflow-hidden" style={{ height }}>{children}</div>
       </CardContent>
@@ -206,98 +221,103 @@ export default function DashboardPage({ scope = 'outlet' }: { scope?: 'outlet' |
       </div>
 
       {data && d && (
-        // Two equal columns (minmax(0,1fr)) with six tiles. Each tile has a fixed width (its column) and a fixed
-        // height shared by the pair in its row, so the pairs are identical in size in both graph and table view.
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-          <Tile title="Revenue Trend" icon={LineIcon} height={ROW0_H} view={views.get('rev')} onView={views.set('rev')}>
-            {data.revenueByDay.length === 0 ? <Empty text="No sales data yet" /> : views.get('rev') === 'chart' ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={data.revenueByDay}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
-                  <XAxis dataKey="date" tick={AXIS} tickFormatter={x => x.slice(5)} />
-                  <YAxis tick={AXIS} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
-                  <Tooltip contentStyle={TIP} formatter={(v: number) => [fmt(v), 'Revenue']} />
-                  <Line type="monotone" dataKey="revenue" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            ) : <MiniTable head={['Date', 'Revenue']} rows={data.revenueByDay.map(r => [r.date, fmt(r.revenue)])} />}
-          </Tile>
+        <div className="space-y-6">
+          {/* Row 0: Revenue Trend = Expenses by Category */}
+          <TileRow body={ROW0_H}>
+            <Tile title="Revenue Trend" icon={LineIcon} height={ROW0_H} view={views.get('rev')} onView={views.set('rev')}>
+              {data.revenueByDay.length === 0 ? <Empty text="No sales data yet" /> : views.get('rev') === 'chart' ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={data.revenueByDay}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
+                    <XAxis dataKey="date" tick={AXIS} tickFormatter={x => x.slice(5)} />
+                    <YAxis tick={AXIS} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
+                    <Tooltip contentStyle={TIP} formatter={(v: number) => [fmt(v), 'Revenue']} />
+                    <Line type="monotone" dataKey="revenue" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : <MiniTable head={['Date', 'Revenue']} rows={data.revenueByDay.map(r => [r.date, fmt(r.revenue)])} />}
+            </Tile>
 
-          <Tile title="Expenses by Category" icon={PieIcon} height={ROW0_H} view={views.get('exp')} onView={views.set('exp')}>
-            {data.expensesByCategory.length === 0 ? <Empty text="No expense data yet" /> : views.get('exp') === 'chart' ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={data.expensesByCategory} dataKey="amount" nameKey="category" cx="50%" cy="50%" outerRadius={80} label={({ category, percent }) => `${category} ${(percent * 100).toFixed(0)}%`}>
-                    {data.expensesByCategory.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                  </Pie>
-                  <Tooltip contentStyle={TIP} formatter={(v: number) => [fmt(v), 'Amount']} />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : <MiniTable head={['Category', 'Amount']} rows={data.expensesByCategory.map(r => [r.category, fmt(r.amount)])} />}
-          </Tile>
+            <Tile title="Expenses by Category" icon={PieIcon} height={ROW0_H} view={views.get('exp')} onView={views.set('exp')}>
+              {data.expensesByCategory.length === 0 ? <Empty text="No expense data yet" /> : views.get('exp') === 'chart' ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={data.expensesByCategory} dataKey="amount" nameKey="category" cx="50%" cy="50%" outerRadius={80} label={({ category, percent }) => `${category} ${(percent * 100).toFixed(0)}%`}>
+                      {data.expensesByCategory.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                    </Pie>
+                    <Tooltip contentStyle={TIP} formatter={(v: number) => [fmt(v), 'Amount']} />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : <MiniTable head={['Category', 'Amount']} rows={data.expensesByCategory.map(r => [r.category, fmt(r.amount)])} />}
+            </Tile>
+          </TileRow>
 
           {/* Row 1: Top Selling Products = Top Customers (same size, always) */}
-          <Tile title="Top Selling Products" icon={Package} height={ROW1_H} view={views.get('prod')} onView={views.set('prod')}>
-            {data.topProducts.length === 0 ? <Empty text="No sales data yet" /> : views.get('prod') === 'chart' ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={data.topProducts} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
-                  <XAxis type="number" tick={AXIS} />
-                  <YAxis type="category" dataKey="productName" width={100} tick={AXIS} />
-                  <Tooltip contentStyle={TIP} />
-                  <Bar dataKey="totalSold" name="Units sold" fill="hsl(var(--chart-3))" radius={[0, 4, 4, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : <MiniTable head={['Product', 'Sold', 'Revenue']} rows={data.topProducts.map(p => [p.productName, p.totalSold, fmt(p.revenue)])} />}
-          </Tile>
+          <TileRow body={ROW1_H}>
+            <Tile title="Top Selling Products" icon={Package} height={ROW1_H} view={views.get('prod')} onView={views.set('prod')}>
+              {data.topProducts.length === 0 ? <Empty text="No sales data yet" /> : views.get('prod') === 'chart' ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={data.topProducts} layout="vertical">
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
+                    <XAxis type="number" tick={AXIS} />
+                    <YAxis type="category" dataKey="productName" width={100} tick={AXIS} />
+                    <Tooltip contentStyle={TIP} />
+                    <Bar dataKey="totalSold" name="Units sold" fill="hsl(var(--chart-3))" radius={[0, 4, 4, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : <MiniTable head={['Product', 'Sold', 'Revenue']} rows={data.topProducts.map(p => [p.productName, p.totalSold, fmt(p.revenue)])} />}
+            </Tile>
 
-          <Tile title={scope === 'business' ? 'Top Customers (all outlets)' : 'Top Customers (this outlet)'} icon={Users} height={ROW1_H} view={views.get('cust', 'table')} onView={views.set('cust')}>
-            {data.topCustomers.length === 0 ? <Empty text="No customer data yet" /> : views.get('cust', 'table') === 'chart' ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={data.topCustomers.slice(0, 10)} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
-                  <XAxis type="number" tick={AXIS} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
-                  <YAxis type="category" dataKey="customerName" width={100} tick={AXIS} />
-                  <Tooltip contentStyle={TIP} formatter={(v: number) => [fmt(v), 'Spent']} />
-                  <Bar dataKey="totalSpent" fill="hsl(var(--chart-1))" radius={[0, 4, 4, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : <MiniTable head={['Customer', 'Phone', 'Orders', 'Spent']} rows={data.topCustomers.map(c => [c.customerName, c.phone, c.orderCount, fmt(c.totalSpent)])} />}
-          </Tile>
+            <Tile title="Top Customers" icon={Users} height={ROW1_H} view={views.get('cust', 'table')} onView={views.set('cust')}>
+              {data.topCustomers.length === 0 ? <Empty text="No customer data yet" /> : views.get('cust', 'table') === 'chart' ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={data.topCustomers.slice(0, 10)} layout="vertical">
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
+                    <XAxis type="number" tick={AXIS} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
+                    <YAxis type="category" dataKey="customerName" width={100} tick={AXIS} />
+                    <Tooltip contentStyle={TIP} formatter={(v: number) => [fmt(v), 'Spent']} />
+                    <Bar dataKey="totalSpent" fill="hsl(var(--chart-1))" radius={[0, 4, 4, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : <MiniTable head={['Customer', 'Phone', 'Orders', 'Spent']} rows={data.topCustomers.map(c => [c.customerName, c.phone, c.orderCount, fmt(c.totalSpent)])} />}
+            </Tile>
+          </TileRow>
 
           {/* Row 2: Delivery Distances = Rider Metrics (same size, always) */}
-          <Tile title="Delivery Distances" icon={MapPin} height={ROW2_H} view={views.get('del', 'table')} onView={views.set('del')}>
-            {d.totalDeliveries === 0 ? <Empty text="No delivery data yet. Add distances in POS." /> : views.get('del', 'table') === 'chart' ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={[{ n: 'Shortest', km: d.shortestKm }, { n: 'Average', km: d.avgDistanceKm }, { n: 'Longest', km: d.longestKm }]}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
-                  <XAxis dataKey="n" tick={AXIS} />
-                  <YAxis tick={AXIS} />
-                  <Tooltip contentStyle={TIP} formatter={(v: number) => [`${v} km`, 'Distance']} />
-                  <Bar dataKey="km" fill="hsl(var(--chart-4))" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : <MiniTable head={['Metric', 'Value']} rows={[['Total deliveries', d.totalDeliveries], ['Average distance (km)', d.avgDistanceKm], ['Longest (km)', d.longestKm], ['Shortest (km)', d.shortestKm]]} />}
-          </Tile>
+          <TileRow body={ROW2_H}>
+            <Tile title="Delivery Distances" icon={MapPin} height={ROW2_H} view={views.get('del', 'table')} onView={views.set('del')}>
+              {d.totalDeliveries === 0 ? <Empty text="No delivery data yet. Add distances in POS." /> : views.get('del', 'table') === 'chart' ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={[{ n: 'Shortest', km: d.shortestKm }, { n: 'Average', km: d.avgDistanceKm }, { n: 'Longest', km: d.longestKm }]}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
+                    <XAxis dataKey="n" tick={AXIS} />
+                    <YAxis tick={AXIS} />
+                    <Tooltip contentStyle={TIP} formatter={(v: number) => [`${v} km`, 'Distance']} />
+                    <Bar dataKey="km" fill="hsl(var(--chart-4))" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : <MiniTable head={['Metric', 'Value']} rows={[['Total deliveries', d.totalDeliveries], ['Average distance (km)', d.avgDistanceKm], ['Longest (km)', d.longestKm], ['Shortest (km)', d.shortestKm]]} />}
+            </Tile>
 
-          <Tile title="Rider Metrics" icon={Bike} height={ROW2_H} view={views.get('rider', 'table')} onView={views.set('rider')}>
-            {data.riderStats.length === 0 ? <Empty text="No rider data yet. Choose a rider at POS when checking out." /> : views.get('rider', 'table') === 'chart' ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={data.riderStats.slice(0, 10)} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
-                  <XAxis type="number" tick={AXIS} allowDecimals={false} />
-                  <YAxis type="category" dataKey="name" width={100} tick={AXIS} />
-                  <Tooltip contentStyle={TIP} />
-                  <Bar dataKey="orders" name="Orders" fill="hsl(var(--chart-3))" radius={[0, 4, 4, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <MiniTable
-                head={['Rider', 'Type', 'Orders', 'Amount', 'Distance (km)', 'Rider Charge']}
-                rows={data.riderStats.map(r => [r.name, r.type, r.orders, fmt(r.amount), r.km, fmt(r.riderCharge)])}
-              />
-            )}
-          </Tile>
+            <Tile title="Rider Metrics" icon={Bike} height={ROW2_H} view={views.get('rider', 'table')} onView={views.set('rider')}>
+              {data.riderStats.length === 0 ? <Empty text="No rider data yet. Choose a rider at POS when checking out." /> : views.get('rider', 'table') === 'chart' ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={data.riderStats.slice(0, 10)} layout="vertical">
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
+                    <XAxis type="number" tick={AXIS} allowDecimals={false} />
+                    <YAxis type="category" dataKey="name" width={100} tick={AXIS} />
+                    <Tooltip contentStyle={TIP} />
+                    <Bar dataKey="orders" name="Orders" fill="hsl(var(--chart-3))" radius={[0, 4, 4, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <MiniTable
+                  head={['Rider', 'Type', 'Orders', 'Amount', 'Distance (km)', 'Rider Charge']}
+                  rows={data.riderStats.map(r => [r.name, r.type, r.orders, fmt(r.amount), r.km, fmt(r.riderCharge)])}
+                />
+              )}
+            </Tile>
+          </TileRow>
         </div>
       )}
     </div>
