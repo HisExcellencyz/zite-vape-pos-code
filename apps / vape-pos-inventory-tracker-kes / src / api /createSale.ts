@@ -6,6 +6,8 @@ import { deductStock } from '../lib/storages';
 
 // Orders merged into one delivery are saved with the note "Merged delivery with Sale #n" (n = the active order).
 const MERGED = /^Merged delivery with Sale #(\d+)/;
+// Any merged order (even if the active order's number was not known) never carries the Rider Fee.
+const MERGED_ANY = /^Merged delivery/;
 const isRiderFee = (name: string) => name.trim().toLowerCase() === 'rider fee';
 
 /** Rewrites the "Bundled with: Sale #a, Sale #b" part of a notes string, keeping every other note part. */
@@ -57,9 +59,11 @@ export default createEndpoint({
     let subtotal = 0;
     let totalTax = 0;
 
-    const mergedMatch = MERGED.exec((input.notes || '').trim());
+    const noteText = (input.notes || '').trim();
+    const mergedMatch = MERGED.exec(noteText);
+    const isMerged = MERGED_ANY.test(noteText);
     // Only the active order carries the Rider Fee: it is switched off on every merged order.
-    const deductionList = (input.deductions || []).filter(d => !(mergedMatch && isRiderFee(d.name)));
+    const deductionList = (input.deductions || []).filter(d => !(isMerged && isRiderFee(d.name)));
 
     const lineItems = input.items.map(item => {
       const lineTotal = item.unitPrice * item.quantity - (item.discount || 0);
@@ -76,7 +80,7 @@ export default createEndpoint({
       : '';
     const notes = [input.notes, riderText].filter(Boolean).join(' | ') || null;
 
-    const sale = await zite.sales.create({
+    let sale: any = await zite.sales.create({
       record: {
         saleDate,
         customer: input.customerId || null,
@@ -98,6 +102,15 @@ export default createEndpoint({
         deductionDetails: deductionList.length ? JSON.stringify(deductionList) : null,
       },
     });
+
+    // The sale number is an autonumber: make sure we have it (the create call may not return it),
+    // because the POS uses it to link merged orders to the active one.
+    if (sale.saleNumber == null) {
+      try {
+        const again = await zite.sales.findOne({ id: sale.id });
+        if (again) sale = again;
+      } catch {}
+    }
 
     // Create sale items
     const saleItemRecords = lineItems.map(item => ({
