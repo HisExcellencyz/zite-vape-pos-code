@@ -9,6 +9,7 @@ interface Props {
   value: Commission[];
   onChange: (c: Commission[]) => void;
   title?: string;
+  /** Optional helper text. Nothing is shown when it is empty. */
   description?: string;
   namePlaceholder?: string;
 }
@@ -22,7 +23,7 @@ export default function CommissionEditor({
   value,
   onChange,
   title = 'Commissions & Deductions',
-  description = 'Switched-on items are applied automatically to every POS order, and can be switched off for a single order. Names show on the POS cart.',
+  description = '',
   namePlaceholder = 'e.g. Glovo',
 }: Props) {
   const update = (i: number, patch: Partial<Commission>) => onChange(value.map((c, j) => (j === i ? { ...c, ...patch } : c)));
@@ -34,7 +35,7 @@ export default function CommissionEditor({
           <Plus className="w-3 h-3 mr-1" /> Add
         </Button>
       </div>
-      <p className="text-xs text-muted-foreground">{description}</p>
+      {description && <p className="text-xs text-muted-foreground">{description}</p>}
       {value.map((c, i) => (
         <div key={i} className="flex gap-2 items-center">
           <Switch
