@@ -1,27 +1,30 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { getStorages, saveStorage, transferStock, getProducts, adjustStorageStock } from 'zitejs/api';
+import { getStorages, saveStorage, transferStock, getProducts, adjustStorageStock, importStorageStock } from 'zitejs/api';
 import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
-import { Badge } from '@project/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
-import { Warehouse, Plus, Pencil, Trash2, ArrowRightLeft, ArrowLeft, Bike, Search, Eye, SlidersHorizontal } from 'lucide-react';
+import { Plus, Pencil, Trash2, ArrowRightLeft, ArrowLeft, Search, Eye, PackagePlus, CheckSquare, Download, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePermissions } from '../hooks/usePermissions';
 import { OFFICE_ID, StockMap, StorageLite, qtyIn } from '../lib/storageMath';
+import { downloadCsv } from '../lib/exportHelper';
 import ProductMultiSearch from '../components/ProductMultiSearch';
+import ImportDialog from '../components/ImportDialog';
 
 interface Product { id: string; productName?: string; sku?: string; stockQuantity?: number; status?: string; }
 interface Line { productId: string; quantity: string; }
+type AdjMode = 'add' | 'set';
+type BulkAction = 'add' | 'remove' | 'set' | 'clear';
 
-const typeLabel = (s: StorageLite) => (s.type === 'office' ? 'Default' : s.type === 'rider' ? 'Own rider' : 'Custom');
+const csvQ = (v: unknown) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
 
 export default function StoragesPage() {
-  // canBackdate is true only for the Owner and Admins: the same people who may adjust stock levels.
+  // canBackdate is true only for the Owner and Admins: the same people who may change stock levels.
   const { can, canBackdate } = usePermissions();
   const [storages, setStorages] = useState<StorageLite[]>([]);
   const [stock, setStock] = useState<StockMap>({});
@@ -36,6 +39,7 @@ export default function StoragesPage() {
   // View stock of one storage
   const [viewId, setViewId] = useState<string | null>(null);
   const [viewSearch, setViewSearch] = useState('');
+  const [picked, setPicked] = useState<Set<string>>(new Set());
 
   // Transfer
   const [transferOpen, setTransferOpen] = useState(false);
@@ -44,11 +48,21 @@ export default function StoragesPage() {
   const [lines, setLines] = useState<Line[]>([]);
   const [transferring, setTransferring] = useState(false);
 
-  // Adjust stock levels (Owner and Admins only)
+  // Add stock / set stock levels (Owner and Admins only)
   const [adjOpen, setAdjOpen] = useState(false);
   const [adjId, setAdjId] = useState('');
+  const [adjMode, setAdjMode] = useState<AdjMode>('add');
   const [adjLines, setAdjLines] = useState<Line[]>([]);
   const [adjusting, setAdjusting] = useState(false);
+
+  // Bulk actions on the rows ticked in the stock table (Owner and Admins only)
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkAction, setBulkAction] = useState<BulkAction>('add');
+  const [bulkQty, setBulkQty] = useState('');
+  const [bulking, setBulking] = useState(false);
+
+  // Import
+  const [importOpen, setImportOpen] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -92,6 +106,11 @@ export default function StoragesPage() {
         })
         .sort((a, b) => (a.p.productName || '').localeCompare(b.p.productName || ''))
     : [];
+
+  const openView = (id: string) => { setViewId(id); setViewSearch(''); setPicked(new Set()); };
+  const togglePick = (id: string) => setPicked(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const allPicked = viewRows.length > 0 && viewRows.every(r => picked.has(r.p.id));
+  const toggleAllPicked = () => setPicked(allPicked ? new Set() : new Set(viewRows.map(r => r.p.id)));
 
   // ── Create / rename / delete ──
   const openName = (s?: StorageLite) => { setNameDialog({ id: s?.id }); setNameValue(s?.name || ''); };
@@ -174,23 +193,24 @@ export default function StoragesPage() {
     }
   };
 
-  // ── Adjust stock levels (Owner and Admins) ──
+  // ── Add stock / set stock levels (Owner and Admins) ──
   const openAdjust = (storageId?: string) => {
-    setAdjId(storageId || OFFICE_ID);
+    setAdjId(storageId || viewId || OFFICE_ID);
+    setAdjMode('add');
     setAdjLines([]);
     setAdjOpen(true);
   };
 
-  const changeAdjStorage = (id: string) => {
-    setAdjId(id);
-    setAdjLines([]);
-  };
+  const changeAdjStorage = (id: string) => { setAdjId(id); setAdjLines([]); };
+  const changeAdjMode = (m: AdjMode) => { setAdjMode(m); setAdjLines([]); };
 
-  // Every ticked product is added with its current quantity in this storage as the starting value.
+  // "Add" lines start at 1 (the amount to add); "Set" lines start at the current quantity in this storage.
   const addAdjLines = (list: Product[]) => {
     setAdjLines(prev => {
       const next = [...prev];
-      for (const p of list) if (!next.some(l => l.productId === p.id)) next.push({ productId: p.id, quantity: String(qty(adjId, p)) });
+      for (const p of list) {
+        if (!next.some(l => l.productId === p.id)) next.push({ productId: p.id, quantity: adjMode === 'add' ? '1' : String(qty(adjId, p)) });
+      }
       return next;
     });
   };
@@ -203,21 +223,71 @@ export default function StoragesPage() {
       const q = Math.floor(Number(l.quantity));
       if (!Number.isFinite(q) || q < 0) return toast.error('Quantities must be 0 or more');
       const p = products.find(x => x.id === l.productId);
-      if (p && q === qty(adjId, p)) continue; // unchanged
-      items.push({ productId: l.productId, quantity: q });
+      const current = p ? qty(adjId, p) : 0;
+      const target = adjMode === 'add' ? current + q : q;
+      if (target === current) continue; // unchanged
+      items.push({ productId: l.productId, quantity: target });
     }
     if (items.length === 0) return toast.error('Change at least one quantity');
     setAdjusting(true);
     try {
       const res = await adjustStorageStock({ storageId: adjId, items });
-      toast.success(`Stock adjusted for ${res.adjusted} product${res.adjusted === 1 ? '' : 's'}`);
+      toast.success(`Stock updated for ${res.adjusted} product${res.adjusted === 1 ? '' : 's'}`);
       setAdjOpen(false);
       load();
     } catch (e: any) {
-      toast.error(e.message || 'Adjustment failed');
+      toast.error(e.message || 'Update failed');
     } finally {
       setAdjusting(false);
     }
+  };
+
+  // ── Bulk actions on ticked rows ──
+  const handleBulk = async () => {
+    if (!viewing || picked.size === 0) return;
+    const n = Math.floor(Number(bulkQty));
+    if (bulkAction !== 'clear' && (!Number.isFinite(n) || n < 0 || bulkQty.trim() === '')) return toast.error('Enter a quantity of 0 or more');
+    const items: { productId: string; quantity: number }[] = [];
+    for (const id of picked) {
+      const p = products.find(x => x.id === id);
+      if (!p) continue;
+      const cur = qty(viewing.id, p);
+      const target = bulkAction === 'add' ? cur + n : bulkAction === 'remove' ? Math.max(0, cur - n) : bulkAction === 'set' ? n : 0;
+      if (target !== cur) items.push({ productId: id, quantity: target });
+    }
+    if (items.length === 0) return toast.error('Nothing would change');
+    setBulking(true);
+    try {
+      const res = await adjustStorageStock({ storageId: viewing.id, items });
+      toast.success(`Updated ${res.adjusted} product${res.adjusted === 1 ? '' : 's'}`);
+      setBulkOpen(false);
+      setBulkQty('');
+      setPicked(new Set());
+      load();
+    } catch (e: any) {
+      toast.error(e.message || 'Bulk update failed');
+    } finally {
+      setBulking(false);
+    }
+  };
+
+  // ── Export / import ──
+  const handleExport = () => {
+    const list = viewing ? [viewing] : storages;
+    const out: string[] = [['Storage', 'Product SKU', 'Product Name', 'Quantity'].join(',')];
+    for (const s of list) {
+      for (const p of [...products].sort((a, b) => (a.productName || '').localeCompare(b.productName || ''))) {
+        const n = qty(s.id, p);
+        if (n > 0) out.push([s.name, p.sku, p.productName, n].map(csvQ).join(','));
+      }
+    }
+    downloadCsv(out.join('\n') + '\n', viewing ? `stock_${viewing.name.replace(/\s+/g, '_')}.csv` : 'storage_stock_export.csv');
+    toast.success('Exported');
+  };
+
+  const runImport = async (rows: Record<string, string>[]) => {
+    const res = await importStorageStock({ rows });
+    return { imported: res.imported, updated: res.updated, skipped: res.skipped, errors: res.errors };
   };
 
   const nameOf = (id: string) => storages.find(s => s.id === id)?.name || '';
@@ -228,53 +298,58 @@ export default function StoragesPage() {
         <h1 className="text-2xl font-bold text-foreground">Storages</h1>
         <div className="flex items-center gap-2 flex-wrap">
           <Button asChild variant="outline" size="sm"><Link to="/inventory"><ArrowLeft className="w-4 h-4 mr-1" /> Inventory</Link></Button>
-          {canBackdate && (
-            <Button variant="outline" size="sm" className="border-amber-400/70 hover:border-amber-400" onClick={() => openAdjust()}>
-              <SlidersHorizontal className="w-4 h-4 mr-1" /> Adjust Stock
+          {canBackdate && picked.size > 0 && (
+            <Button variant="outline" size="sm" onClick={() => { setBulkAction('add'); setBulkQty(''); setBulkOpen(true); }}>
+              <CheckSquare className="w-4 h-4 mr-1" /> Bulk Actions ({picked.size})
             </Button>
           )}
           {can('inventory', 'edit') && (
-            <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={() => openTransfer()}>
+            <Button variant="outline" size="sm" onClick={() => openTransfer()}>
               <ArrowRightLeft className="w-4 h-4 mr-1" /> Transfer Stock
             </Button>
           )}
-          {can('inventory', 'create') && <Button size="sm" onClick={() => openName()}><Plus className="w-4 h-4 mr-1" /> Add Storage</Button>}
+          {can('inventory', 'create') && <Button variant="outline" size="sm" onClick={() => openName()}><Plus className="w-4 h-4 mr-1" /> Add Storage</Button>}
+          {can('inventory', 'export') && (
+            <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExport}>
+              <Download className="w-4 h-4 mr-1" /> Export
+            </Button>
+          )}
+          {canBackdate && (
+            <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10" onClick={() => setImportOpen(true)}>
+              <Upload className="w-4 h-4 mr-1" /> Import
+            </Button>
+          )}
+          {canBackdate && <Button size="sm" onClick={() => openAdjust()}><PackagePlus className="w-4 h-4 mr-1" /> Add Stock</Button>}
         </div>
       </div>
 
       {/* Compact tiles */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
+      <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2">
         {loading ? (
-          [...Array(4)].map((_, i) => <Card key={i} className="bg-card border-border"><CardContent className="p-3"><div className="h-16 bg-muted rounded animate-pulse" /></CardContent></Card>)
+          [...Array(6)].map((_, i) => <Card key={i} className="bg-card border-border"><CardContent className="p-2"><div className="h-12 bg-muted rounded animate-pulse" /></CardContent></Card>)
         ) : storages.map(s => {
           const t = totals.get(s.id) || { units: 0, products: 0 };
           return (
             <Card key={s.id} className={`bg-card ${viewId === s.id ? 'border-primary' : 'border-border'}`}>
-              <CardContent className="p-3 space-y-2">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-start gap-1.5 min-w-0">
-                    {s.type === 'rider' ? <Bike className="w-4 h-4 mt-0.5 text-sky-400 shrink-0" /> : <Warehouse className="w-4 h-4 mt-0.5 text-amber-400 shrink-0" />}
-                    <p className="text-sm font-semibold text-foreground break-words whitespace-normal leading-snug">{s.name}</p>
+              <CardContent className="p-2 space-y-1.5">
+                <p className="text-xs font-semibold text-foreground break-words whitespace-normal leading-snug">{s.name}</p>
+                <div className="grid grid-cols-2 gap-1 text-[11px]">
+                  <div className="rounded bg-primary/5 border border-primary/20 px-1 py-0.5">
+                    <p className="text-[8px] uppercase tracking-wider text-muted-foreground">Units</p>
+                    <p className="font-semibold text-primary leading-tight">{t.units.toLocaleString()}</p>
                   </div>
-                  <Badge variant="secondary" className="shrink-0 text-[9px] px-1.5 py-0">{typeLabel(s)}</Badge>
-                </div>
-                <div className="grid grid-cols-2 gap-1.5 text-xs">
-                  <div className="rounded-md bg-primary/5 border border-primary/20 px-1.5 py-1">
-                    <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Units</p>
-                    <p className="font-semibold text-primary">{t.units.toLocaleString()}</p>
-                  </div>
-                  <div className="rounded-md bg-pink-500/5 border border-pink-500/20 px-1.5 py-1">
-                    <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Products</p>
-                    <p className="font-semibold text-pink-500">{t.products.toLocaleString()}</p>
+                  <div className="rounded bg-pink-500/5 border border-pink-500/20 px-1 py-0.5">
+                    <p className="text-[8px] uppercase tracking-wider text-muted-foreground">Products</p>
+                    <p className="font-semibold text-pink-500 leading-tight">{t.products.toLocaleString()}</p>
                   </div>
                 </div>
-                <div className="border-t border-border pt-1.5 flex items-center gap-1 flex-wrap">
-                  <Button variant="outline" size="sm" className="h-6 px-1.5 text-[11px]" onClick={() => { setViewId(s.id); setViewSearch(''); }}><Eye className="w-3 h-3 mr-1" /> Stock</Button>
+                <div className="border-t border-border pt-1 flex items-center gap-0.5">
+                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0" title="View stock" onClick={() => openView(s.id)}><Eye className="w-3.5 h-3.5" /></Button>
                   {can('inventory', 'edit') && (
-                    <Button variant="outline" size="sm" className="h-6 px-1.5 text-[11px]" onClick={() => openTransfer(s.id)}><ArrowRightLeft className="w-3 h-3 mr-1" /> Transfer</Button>
+                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" title="Transfer from here" onClick={() => openTransfer(s.id)}><ArrowRightLeft className="w-3.5 h-3.5" /></Button>
                   )}
                   {canBackdate && (
-                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-amber-400" title="Adjust stock levels" onClick={() => openAdjust(s.id)}><SlidersHorizontal className="w-3.5 h-3.5" /></Button>
+                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-amber-400" title="Add stock" onClick={() => openAdjust(s.id)}><PackagePlus className="w-3.5 h-3.5" /></Button>
                   )}
                   <div className="ml-auto flex">
                     {can('inventory', 'edit') && s.type !== 'rider' && (
@@ -318,6 +393,9 @@ export default function StoragesPage() {
               <table className="w-full text-sm">
                 <thead className="sticky top-0 bg-card">
                   <tr className="border-b border-border text-muted-foreground">
+                    {canBackdate && (
+                      <th className="p-3 w-8"><input type="checkbox" checked={allPicked} onChange={toggleAllPicked} className="rounded" /></th>
+                    )}
                     <th className="text-left p-3 font-medium">Product</th>
                     <th className="text-left p-3 font-medium">SKU</th>
                     <th className="text-right p-3 font-medium">Quantity</th>
@@ -325,9 +403,12 @@ export default function StoragesPage() {
                 </thead>
                 <tbody>
                   {viewRows.length === 0 ? (
-                    <tr><td colSpan={3} className="text-center py-8 text-muted-foreground">No stock in this storage</td></tr>
+                    <tr><td colSpan={canBackdate ? 4 : 3} className="text-center py-8 text-muted-foreground">No stock in this storage</td></tr>
                   ) : viewRows.map(({ p, n }) => (
                     <tr key={p.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                      {canBackdate && (
+                        <td className="p-3"><input type="checkbox" checked={picked.has(p.id)} onChange={() => togglePick(p.id)} className="rounded" /></td>
+                      )}
                       <td className="p-3 text-foreground break-words whitespace-normal">{p.productName}</td>
                       <td className="p-3 text-muted-foreground font-mono text-xs break-all">{p.sku}</td>
                       <td className="p-3 text-right font-semibold text-emerald-400">{n}</td>
@@ -381,6 +462,7 @@ export default function StoragesPage() {
             <div className="space-y-1.5">
               <Label>Products in {nameOf(fromId) || 'the source storage'}</Label>
               <ProductMultiSearch
+                key={`${fromId}|${toId}`}
                 items={sourceProducts}
                 stockOf={p => (fromId ? qty(fromId, p) : 0)}
                 destStockOf={toId ? (p => qty(toId, p)) : undefined}
@@ -425,32 +507,45 @@ export default function StoragesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Adjust stock levels in bulk (Owner and Admins only; the server checks this too) */}
+      {/* Add stock / set stock levels (Owner and Admins only; the server checks this too) */}
       {canBackdate && (
         <Dialog open={adjOpen} onOpenChange={setAdjOpen}>
           <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2"><SlidersHorizontal className="w-5 h-5 text-amber-400" /> Adjust Stock Levels</DialogTitle>
+              <DialogTitle className="flex items-center gap-2"><PackagePlus className="w-5 h-5 text-amber-400" /> Add Stock</DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
-              <div className="max-w-xs">
-                <Label>Storage</Label>
-                <Select value={adjId} onValueChange={changeAdjStorage}>
-                  <SelectTrigger><SelectValue placeholder="Select storage" /></SelectTrigger>
-                  <SelectContent>{storages.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
-                </Select>
+              <div className="grid grid-cols-2 gap-3 max-w-xl">
+                <div>
+                  <Label>Storage</Label>
+                  <Select value={adjId} onValueChange={changeAdjStorage}>
+                    <SelectTrigger><SelectValue placeholder="Select storage" /></SelectTrigger>
+                    <SelectContent>{storages.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Quantity entered is</Label>
+                  <Select value={adjMode} onValueChange={v => changeAdjMode(v as AdjMode)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="add">Added to current stock</SelectItem>
+                      <SelectItem value="set">The new stock level</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
               <div className="space-y-1.5">
                 <Label>Products</Label>
                 <ProductMultiSearch
+                  key={`${adjId}|${adjMode}`}
                   items={products}
                   stockOf={p => (adjId ? qty(adjId, p) : 0)}
                   addedIds={adjLines.map(l => l.productId)}
                   onAdd={addAdjLines}
                   disabled={!adjId}
                   showOnFocus
-                  placeholder="Search products to adjust..."
+                  placeholder="Search products..."
                 />
               </div>
 
@@ -481,11 +576,52 @@ export default function StoragesPage() {
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setAdjOpen(false)}>Cancel</Button>
-              <Button onClick={handleAdjust} disabled={adjusting || adjLines.length === 0}>{adjusting ? 'Saving...' : 'Save Adjustments'}</Button>
+              <Button onClick={handleAdjust} disabled={adjusting || adjLines.length === 0}>{adjusting ? 'Saving...' : 'Save'}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Bulk actions on the ticked rows of the stock table */}
+      {canBackdate && (
+        <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader><DialogTitle>Bulk Actions ({picked.size} products in {viewing?.name})</DialogTitle></DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label>Action</Label>
+                <Select value={bulkAction} onValueChange={v => setBulkAction(v as BulkAction)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="add">Add quantity</SelectItem>
+                    <SelectItem value="remove">Remove quantity</SelectItem>
+                    <SelectItem value="set">Set quantity</SelectItem>
+                    <SelectItem value="clear">Clear stock (set to 0)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {bulkAction !== 'clear' && (
+                <div><Label>Quantity</Label><Input type="number" min={0} value={bulkQty} onChange={e => setBulkQty(e.target.value)} /></div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setBulkOpen(false)}>Cancel</Button>
+              <Button onClick={handleBulk} disabled={bulking}>{bulking ? 'Applying...' : 'Apply'}</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      <ImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        title="Import Storage Stock"
+        template="storageStock"
+        chunkSize={100}
+        description={<>CSV columns: <span className="font-medium text-foreground">Storage, Product SKU, Quantity</span>. Each row sets the stock level of that product in that storage.</>}
+        onImport={runImport}
+        onDone={load}
+      />
     </div>
   );
 }
