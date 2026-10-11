@@ -358,28 +358,28 @@ export default function StoragesPage() {
         </div>
       </div>
 
-      {/* Storage tiles: same grid, card padding and layout as the tiles on Expenses > Deductions */}
+      {/* Storage tiles: same grid, card padding and minimum height as the tiles on Expenses > Deductions */}
       {viewMode === 'grid' ? (
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3 items-stretch">
           {loading ? (
-            [...Array(4)].map((_, i) => <Card key={i} className="bg-card border-border"><CardContent className="p-4"><div className="h-24 bg-muted rounded animate-pulse" /></CardContent></Card>)
+            [...Array(4)].map((_, i) => <Card key={i} className="bg-card border-border min-h-[12rem]"><CardContent className="p-4"><div className="h-32 bg-muted rounded animate-pulse" /></CardContent></Card>)
           ) : storages.map(s => {
             const t = totals.get(s.id) || { units: 0, products: 0 };
             return (
-              <Card key={s.id} className={`bg-card ${viewId === s.id ? 'border-primary' : 'border-border'}`}>
-                <CardContent className="p-4 space-y-3">
+              <Card key={s.id} className={`bg-card flex flex-col min-h-[12rem] ${viewId === s.id ? 'border-primary' : 'border-border'}`}>
+                <CardContent className="p-4 space-y-3 flex flex-col flex-1">
                   <p className="font-semibold text-foreground break-words whitespace-normal leading-snug">{s.name}</p>
                   <div className="grid grid-cols-2 gap-2">
-                    <div className="rounded-md bg-primary/5 border border-primary/20 px-2 py-1.5">
+                    <div className="rounded-md bg-primary/5 border border-primary/20 px-2 py-2.5">
                       <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Units</p>
-                      <p className="font-semibold text-primary break-words">{t.units.toLocaleString()}</p>
+                      <p className="text-lg font-bold text-primary break-words">{t.units.toLocaleString()}</p>
                     </div>
-                    <div className="rounded-md bg-pink-500/5 border border-pink-500/20 px-2 py-1.5">
+                    <div className="rounded-md bg-pink-500/5 border border-pink-500/20 px-2 py-2.5">
                       <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Products</p>
-                      <p className="font-semibold text-pink-500 break-words">{t.products.toLocaleString()}</p>
+                      <p className="text-lg font-bold text-pink-500 break-words">{t.products.toLocaleString()}</p>
                     </div>
                   </div>
-                  <div className="border-t border-border pt-2">{storageActions(s)}</div>
+                  <div className="border-t border-border pt-2 mt-auto">{storageActions(s)}</div>
                 </CardContent>
               </Card>
             );
