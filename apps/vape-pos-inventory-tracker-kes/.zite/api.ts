@@ -47,6 +47,7 @@ import type { default as _ImportSalesEp } from '../src/api/importSales';
 import type { default as _ImportStorageStockEp } from '../src/api/importStorageStock';
 import type { default as _InviteUserEp } from '../src/api/inviteUser';
 import type { default as _ManageHeldOrdersEp } from '../src/api/manageHeldOrders';
+import type { default as _ManagePettyCashEp } from '../src/api/managePettyCash';
 import type { default as _ManageSupplierBillsEp } from '../src/api/manageSupplierBills';
 import type { default as _ManageSupplierSuppliesEp } from '../src/api/manageSupplierSupplies';
 import type { default as _MonthlyArchivalEp } from '../src/api/monthlyArchival';
@@ -295,6 +296,11 @@ export type ManageHeldOrdersInputType = NonNullable<_ManageHeldOrdersCfg['inputS
 export type ManageHeldOrdersOutputType = Awaited<ReturnType<_ManageHeldOrdersCfg['execute']>>;
 export const manageHeldOrders = createCaller<ManageHeldOrdersInputType, ManageHeldOrdersOutputType>('manageHeldOrders');
 
+type _ManagePettyCashCfg = typeof _ManagePettyCashEp;
+export type ManagePettyCashInputType = NonNullable<_ManagePettyCashCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_ManagePettyCashCfg['execute']>[0]['input'];
+export type ManagePettyCashOutputType = Awaited<ReturnType<_ManagePettyCashCfg['execute']>>;
+export const managePettyCash = createCaller<ManagePettyCashInputType, ManagePettyCashOutputType>('managePettyCash');
+
 type _ManageSupplierBillsCfg = typeof _ManageSupplierBillsEp;
 export type ManageSupplierBillsInputType = NonNullable<_ManageSupplierBillsCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_ManageSupplierBillsCfg['execute']>[0]['input'];
 export type ManageSupplierBillsOutputType = Awaited<ReturnType<_ManageSupplierBillsCfg['execute']>>;
@@ -452,6 +458,7 @@ export const api = {
   importStorageStock,
   inviteUser,
   manageHeldOrders,
+  managePettyCash,
   manageSupplierBills,
   manageSupplierSupplies,
   monthlyArchival,

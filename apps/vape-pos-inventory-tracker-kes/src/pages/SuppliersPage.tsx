@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { managePettyCash } from 'zitejs/api';
+import { useBranch } from '../hooks/useBranch';
 import { getSuppliers, saveSupplier, deleteRecord, exportCsv, importCsv, bulkDeleteRecords, getSupplierDetails, recordDeposit, manageSupplierBills, getAddresses, saveAddress, syncSupplierAddresses } from 'zitejs/api';
 import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
@@ -39,7 +41,7 @@ interface Bill {
   status: 'pending' | 'paid';
   source: 'manual' | 'pickup';
   items?: { name: string; quantity: number; unitCost: number }[];
-  paidFrom?: 'cash' | 'deposit' | null;
+  paidFrom?: 'cash' | 'deposit' | 'pettycash' | null;
 }
 
 import { useTableControls, TableControls, SortTh, FieldDef } from '../components/TableControls';
@@ -89,6 +91,13 @@ export default function SuppliersPage() {
   const [locCoords, setLocCoords] = useState('');
   const [showLocPicker2, setShowLocPicker2] = useState(false);
   const [busy, setBusy] = useState(false);
+  const { currentBranch } = useBranch();
+  const [pettyBalance, setPettyBalance] = useState<number | null>(null);
+  const loadPetty = async () => {
+    if (!currentBranch?.id) return;
+    try { setPettyBalance((await managePettyCash({ action: 'list', branchId: currentBranch.id })).balance); } catch { setPettyBalance(null); }
+  };
+  useEffect(() => { loadPetty(); }, [currentBranch?.id]);
 
   const load = async () => {
     setLoading(true);
@@ -168,11 +177,12 @@ export default function SuppliersPage() {
     } catch (e: any) { toast.error(e.message || 'Failed'); } finally { setBusy(false); }
   };
 
-  const handlePayBill = async (b: Bill, fromDeposit: boolean) => {
+  const handlePayBill = async (b: Bill, fromDeposit: boolean, fromPettyCash = false) => {
     setBusy(true);
     try {
-      await manageSupplierBills({ action: 'pay', billId: b.id, fromDeposit });
-      toast.success(fromDeposit ? 'Bill paid from deposit' : 'Bill marked as paid');
+      await manageSupplierBills({ action: 'pay', billId: b.id, fromDeposit, fromPettyCash, pettyCashBranchId: fromPettyCash ? currentBranch?.id : undefined });
+      toast.success(fromPettyCash ? 'Bill paid from petty cash' : fromDeposit ? 'Bill paid from deposit' : 'Bill marked as paid');
+      if (fromPettyCash) loadPetty();
       await afterChange();
     } catch (e: any) { toast.error(e.message || 'Failed'); } finally { setBusy(false); }
   };
@@ -547,7 +557,7 @@ export default function SuppliersPage() {
                               <FileText className="w-3 h-3" /> {dateTxt(b.date)}
                               <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{b.source === 'pickup' ? 'POS pick-up' : 'Manual'}</Badge>
                               <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 ${b.status === 'paid' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-pink-500/10 text-pink-400'}`}>
-                                {b.status === 'paid' ? `Paid${b.paidFrom === 'deposit' ? ' (deposit)' : ''}` : 'Pending'}
+                                {b.status === 'paid' ? `Paid${b.paidFrom === 'deposit' ? ' (deposit)' : b.paidFrom === 'pettycash' ? ' (petty cash)' : ''}` : 'Pending'}
                               </Badge>
                             </p>
                             {b.notes && <p className="text-muted-foreground break-words mt-0.5">{b.notes}</p>}
@@ -562,12 +572,13 @@ export default function SuppliersPage() {
                             <>
                               <Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" disabled={busy} onClick={() => handlePayBill(b, false)}>Mark paid</Button>
                               <Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" disabled={busy || (acct.depositBalance || 0) < b.amount} onClick={() => handlePayBill(b, true)} title={(acct.depositBalance || 0) < b.amount ? 'Deposit balance is too low' : 'Pay from deposit'}>Pay from deposit</Button>
+                              <Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" disabled={busy || (pettyBalance ?? 0) < b.amount} onClick={() => handlePayBill(b, false, true)} title={(pettyBalance ?? 0) < b.amount ? `Petty cash is too low (${fmt(pettyBalance ?? 0)})` : `Pay from ${currentBranch?.branchName || 'outlet'} petty cash (${fmt(pettyBalance ?? 0)})`}>Pay from petty cash</Button>
                             </>
                           )}
                           <AlertDialog>
                             <AlertDialogTrigger asChild><Button size="sm" variant="ghost" className="h-6 px-1.5 text-destructive"><Trash2 className="w-3 h-3" /></Button></AlertDialogTrigger>
                             <AlertDialogContent>
-                              <AlertDialogHeader><AlertDialogTitle>Delete this bill?</AlertDialogTitle><AlertDialogDescription>This cannot be undone. A bill already paid from the deposit will not be refunded.</AlertDialogDescription></AlertDialogHeader>
+                              <AlertDialogHeader><AlertDialogTitle>Delete this bill?</AlertDialogTitle><AlertDialogDescription>This cannot be undone. A bill already paid from the deposit will not be refunded; one paid from petty cash goes back to petty cash.</AlertDialogDescription></AlertDialogHeader>
                               <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleDeleteBill(b)} className="bg-destructive">Delete</AlertDialogAction></AlertDialogFooter>
                             </AlertDialogContent>
                           </AlertDialog>

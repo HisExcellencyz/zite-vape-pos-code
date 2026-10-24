@@ -17,6 +17,8 @@ import { toast } from 'sonner';
 import { usePermissions } from '../hooks/usePermissions';
 import { useBranch } from '../hooks/useBranch';
 import { useTheme } from '../hooks/useTheme';
+import LandingBackdrop from './LandingBackdrop';
+import { LANDING_BG } from '../lib/brand';
 
 const DEFAULT_LOGO = 'https://images.fillout.com/orgid-811092/flowpublicid-6hepsbbapu/widgetid-default/xmArbfbmsBwLWSE2d2Et7u/pasted-image-1788367385543-n4ulma8b.png';
 
@@ -45,7 +47,7 @@ const navGroups: { title: string; items: { to: string; icon: any; label: string;
 const allItems = navGroups.flatMap(g => g.items);
 const toneFor = (path: string) => allItems.find(i => i.to === '/' + (path.split('/')[1] || ''))?.tone || 'gold';
 
-export default function AppLayout({ children }: { children: ReactNode }) {
+export default function AppLayout({ children, landing }: { children: ReactNode; landing?: boolean }) {
   const { user } = useAuth();
   const { can, roleName } = usePermissions();
   const { branches, currentBranch, setCurrentBranchId } = useBranch();
@@ -77,6 +79,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="h-screen overflow-hidden flex">
+      <LandingBackdrop src={LANDING_BG} position="center 35%" opacity={0.1} />
       {/* Floating glass sidebar */}
       <aside
         className={cn(
@@ -204,7 +207,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
       {/* Main content */}
       <main data-tone={toneFor(location.pathname)} className="flex-1 min-w-0 h-screen overflow-y-auto">
-        <div key={location.pathname} className="animate-rise min-h-full">{children}</div>
+        <div key={location.pathname} className={cn('animate-rise min-h-full', landing && 'landing')}>{children}</div>
       </main>
     </div>
   );

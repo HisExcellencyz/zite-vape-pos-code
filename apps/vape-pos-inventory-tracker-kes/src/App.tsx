@@ -1,5 +1,5 @@
 import { useEffect, ReactElement } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth, logout, loginWithRedirect } from 'zitejs/auth';
 import { Toaster } from '@project/components/ui/sonner';
 import { Button } from '@project/components/ui/button';
@@ -21,6 +21,8 @@ import AddressesPage from './pages/AddressesPage';
 import { PermissionsProvider, usePermissions } from './hooks/usePermissions';
 import { BranchProvider } from './hooks/useBranch';
 import { applyStoredTheme } from './hooks/useTheme';
+import LandingBackdrop from './components/LandingBackdrop';
+import { LANDING_BG } from './lib/brand';
 
 // Each screen belongs to a permission "area" (see the roles matrix on the Users page).
 // `alt` is an extra area that also unlocks the screen (Expenses now holds Purchases too).
@@ -44,8 +46,9 @@ function AccessPending() {
   const { roleName, refresh, loading } = usePermissions();
   const { user } = useAuth();
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-6">
-      <div className="max-w-md w-full bg-card border border-border rounded-xl p-8 text-center space-y-4">
+    <div className="landing min-h-screen flex items-end justify-center p-6 pb-[12vh]">
+      <LandingBackdrop src={LANDING_BG} position="center 35%" />
+      <div className="max-w-md w-full bg-card border border-border rounded-2xl p-8 text-center space-y-4">
         <ShieldAlert className="w-12 h-12 mx-auto text-secondary" />
         <h1 className="text-xl font-bold text-foreground">Waiting for access</h1>
         <p className="text-sm text-muted-foreground break-words">
@@ -64,11 +67,13 @@ function AccessPending() {
 
 function AppRoutes() {
   const { can, pending, loading } = usePermissions();
+  const location = useLocation();
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
+      <div className="min-h-screen flex items-end justify-center pb-[18vh]">
+        <LandingBackdrop src={LANDING_BG} position="center 35%" />
+        <div className="glass flex flex-col items-center gap-3 rounded-2xl border border-border/60 px-6 py-4">
           <div className="w-10 h-10 border-3 border-primary border-t-transparent rounded-full animate-spin" />
           <p className="text-muted-foreground text-sm">Checking your access...</p>
         </div>
@@ -83,7 +88,7 @@ function AppRoutes() {
   const home = visible[0].path;
 
   return (
-    <AppLayout>
+    <AppLayout landing={location.pathname === home}>
       <Routes>
         {ROUTES.map(r => (
           <Route
@@ -114,8 +119,9 @@ export default function App() {
 
   if (isLoading || !user) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
+      <div className="min-h-screen flex items-end justify-center pb-[18vh]">
+        <LandingBackdrop src={LANDING_BG} position="center 35%" />
+        <div className="glass flex flex-col items-center gap-3 rounded-2xl border border-border/60 px-6 py-4">
           <div className="w-10 h-10 border-3 border-primary border-t-transparent rounded-full animate-spin" />
           <p className="text-muted-foreground text-sm">Loading...</p>
         </div>

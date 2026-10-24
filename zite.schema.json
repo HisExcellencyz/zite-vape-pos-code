@@ -288,6 +288,20 @@
             "type": "long_text",
             "template": {}
           }
+        },
+        {
+          "id": "fusq15t7nKN",
+          "sdkName": "pettyCash",
+          "definition": {
+            "name": "Petty Cash",
+            "type": "linked_record",
+            "template": {
+              "tableId": "t2iP1PSr2q7",
+              "isInverse": true,
+              "allowMultiple": false,
+              "inverseFieldId": "f68Vx9S6bSo"
+            }
+          }
         }
       ]
     },
@@ -943,6 +957,20 @@
               "isInverse": true,
               "allowMultiple": true,
               "inverseFieldId": "faEk42KugxD"
+            }
+          }
+        },
+        {
+          "id": "f39NUSqA6RA",
+          "sdkName": "pettyCash",
+          "definition": {
+            "name": "Petty Cash",
+            "type": "linked_record",
+            "template": {
+              "tableId": "t2iP1PSr2q7",
+              "isInverse": true,
+              "allowMultiple": false,
+              "inverseFieldId": "fmiNRiwWt7Y"
             }
           }
         }
@@ -2499,6 +2527,145 @@
             "type": "checkbox",
             "template": {
               "defaultValue": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "t2iP1PSr2q7",
+      "sdkName": "pettyCash",
+      "name": "Petty Cash",
+      "primaryFieldId": "fwR5W6C5gfD",
+      "fields": [
+        {
+          "id": "fwR5W6C5gfD",
+          "sdkName": "entryNumber",
+          "definition": {
+            "name": "Entry Number",
+            "type": "autonumber",
+            "template": {}
+          }
+        },
+        {
+          "id": "f9PzGHBveB6",
+          "sdkName": "entryDate",
+          "definition": {
+            "name": "Entry Date",
+            "type": "datetime",
+            "template": {
+              "timezone": "",
+              "dateFormat": "local",
+              "timeFormat": "12h",
+              "displayTimeZone": false
+            }
+          }
+        },
+        {
+          "id": "fwg9Z77J8Mk",
+          "sdkName": "type",
+          "definition": {
+            "name": "Type",
+            "type": "single_select",
+            "template": {
+              "options": [
+                {
+                  "value": "auZ7",
+                  "label": "Top Up",
+                  "color": "green"
+                },
+                {
+                  "value": "8Lzh",
+                  "label": "Bill Payment",
+                  "color": "pink"
+                },
+                {
+                  "value": "3DJP",
+                  "label": "Withdrawal",
+                  "color": "orange"
+                }
+              ],
+              "disableColors": false
+            }
+          }
+        },
+        {
+          "id": "fx96rEo3unK",
+          "sdkName": "amount",
+          "definition": {
+            "name": "Amount",
+            "type": "number",
+            "template": {
+              "numberFormat": "local",
+              "decimalPlaces": 2
+            }
+          }
+        },
+        {
+          "id": "fn3rnYhixAT",
+          "sdkName": "description",
+          "definition": {
+            "name": "Description",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "f68Vx9S6bSo",
+          "sdkName": "branch",
+          "definition": {
+            "name": "Branch",
+            "type": "linked_record",
+            "template": {
+              "tableId": "toZ7EnqKNVM",
+              "isInverse": false,
+              "allowMultiple": false,
+              "inverseFieldId": "fusq15t7nKN"
+            }
+          }
+        },
+        {
+          "id": "fmiNRiwWt7Y",
+          "sdkName": "supplier",
+          "definition": {
+            "name": "Supplier",
+            "type": "linked_record",
+            "template": {
+              "tableId": "t8MqEUL33eJ",
+              "isInverse": false,
+              "allowMultiple": false,
+              "inverseFieldId": "f39NUSqA6RA"
+            }
+          }
+        },
+        {
+          "id": "f5cPbeJT5Tz",
+          "sdkName": "billId",
+          "definition": {
+            "name": "Bill Id",
+            "type": "single_line_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "fdXZj9fSseA",
+          "sdkName": "notes",
+          "definition": {
+            "name": "Notes",
+            "type": "long_text",
+            "template": {}
+          }
+        },
+        {
+          "id": "fb4C888Z5aP",
+          "sdkName": "createdBy",
+          "definition": {
+            "name": "Created By",
+            "type": "user",
+            "template": {
+              "internalOnly": false,
+              "allowMultiple": false,
+              "deleteRowWhenUserDeleted": false
             }
           }
         }

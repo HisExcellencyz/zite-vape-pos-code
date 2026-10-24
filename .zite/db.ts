@@ -84,6 +84,8 @@
 //   "ProductsSupplierTransactions" — columns: "productsId", "supplierTransactionsId" (joins "Products" and "Supplier Transactions")
 //   "PurchaseOrdersSuppliers" — columns: "purchaseOrdersId", "suppliersId" (joins "Purchase Orders" and "Suppliers")
 //   "BranchesPurchaseOrders" — columns: "branchesId", "purchaseOrdersId" (joins "Branches" and "Purchase Orders")
+//   "BranchesPettyCash" — columns: "branchesId", "pettyCashId" (joins "Branches" and "Petty Cash")
+//   "PettyCashSuppliers" — columns: "pettyCashId", "suppliersId" (joins "Petty Cash" and "Suppliers")
 import { createTableClient, createSqlClient, createAuthClient } from 'zitejs/runtime';
 
 /** An attachment as returned when reading a record. */
@@ -164,6 +166,8 @@ export type BranchesRecordType = {
   plusCode?: string;
   coordinates?: string;
   commissionRates?: string;
+  /** Links to pettyCash ("Petty Cash"). Single record only. "Petty Cash" */
+  pettyCash?: string | string[];
 };
 
 /** What you may write when creating or updating a record in the "Branches" table. */
@@ -185,6 +189,7 @@ export type BranchesRecordInput = {
   plusCode: string | null;
   coordinates: string | null;
   commissionRates: string | null;
+  pettyCash: string | string[] | null;
 };
 
 /** A record in the "Currencies" table, as it is read back. */
@@ -361,6 +366,8 @@ export type SuppliersRecordType = {
   supplierTransactions?: string | string[];
   /** Links to purchaseOrders ("Purchase Orders"). "Purchase Orders" */
   purchaseOrders?: string | string[];
+  /** Links to pettyCash ("Petty Cash"). Single record only. "Petty Cash" */
+  pettyCash?: string | string[];
 };
 
 /** What you may write when creating or updating a record in the "Suppliers" table. */
@@ -376,6 +383,7 @@ export type SuppliersRecordInput = {
   purchases: string | string[] | null;
   supplierTransactions: string | string[] | null;
   purchaseOrders: string | string[] | null;
+  pettyCash: string | string[] | null;
 };
 
 /** A record in the "Product Suppliers" table, as it is read back. */
@@ -794,6 +802,39 @@ export type AddressesRecordInput = {
   active: string | boolean | null;
 };
 
+/** A record in the "Petty Cash" table, as it is read back. */
+export type PettyCashRecordType = {
+  id: string;
+  /** Primary field. Read-only. "Entry Number" */
+  entryNumber?: number;
+  /** "Entry Date". Date+time field (ISO 8601 timestamp), null when unset, date: "local" format, time: 12h */
+  entryDate?: string;
+  type?: "Top Up" | "Bill Payment" | "Withdrawal" | string;
+  /** "Amount". 2 decimal places, format: local (e.g. 1,000,000.50) */
+  amount?: number;
+  description?: string;
+  /** Links to branches ("Branches"). Single record only. "Branch" */
+  branch?: string | string[];
+  /** Links to suppliers ("Suppliers"). Single record only. "Supplier" */
+  supplier?: string | string[];
+  billId?: string;
+  notes?: string;
+  createdBy?: string | string[];
+};
+
+/** What you may write when creating or updating a record in the "Petty Cash" table. */
+export type PettyCashRecordInput = {
+  entryDate: string | Date | null;
+  type: "Top Up" | "Bill Payment" | "Withdrawal" | string | null;
+  amount: string | number | null;
+  description: string | null;
+  branch: string | string[] | null;
+  supplier: string | string[] | null;
+  billId: string | null;
+  notes: string | null;
+  createdBy: string | string[] | null;
+};
+
 export interface ZiteAuthUser {
   id: string;
   name: string;
@@ -827,6 +868,7 @@ export const zite = {
   roles: createTableClient<RolesRecordType, RolesRecordInput>('Roles'), // "Roles"
   purchaseOrders: createTableClient<PurchaseOrdersRecordType, PurchaseOrdersRecordInput>('PurchaseOrders'), // "Purchase Orders"
   addresses: createTableClient<AddressesRecordType, AddressesRecordInput>('Addresses'), // "Addresses"
+  pettyCash: createTableClient<PettyCashRecordType, PettyCashRecordInput>('PettyCash'), // "Petty Cash"
   sql: createSqlClient(),
   auth: createAuthClient<ZiteAuthUser>(),
 };

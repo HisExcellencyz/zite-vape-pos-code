@@ -22,6 +22,7 @@ import { useBranch } from '../hooks/useBranch';
 import { useTableControls, TableControls, SortTh, FieldDef } from '../components/TableControls';
 import DateRangeFilter, { Range, inRange } from '../components/DateRangeFilter';
 import SummaryTiles from '../components/SummaryTiles';
+import PettyCashPanel from '../components/PettyCashPanel';
 
 interface Expense { id: string; expenseNumber?: number; expenseDate?: string; description?: string; amount?: number; notes?: string; }
 interface Purchase { id: string; purchaseNumber?: number; purchaseDate?: string; total?: number; paymentType?: string; notes?: string; }
@@ -277,7 +278,7 @@ export default function ExpensesPage() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <ViewToggle value={viewMode} onChange={setViewMode} />
-          {allow(tab === 'purchases' ? 'purchase' : 'expense', 'export') && <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExport}><Download className="w-4 h-4 mr-1" /> Export</Button>}
+          {tab !== 'pettycash' && allow(tab === 'purchases' ? 'purchase' : 'expense', 'export') && <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExport}><Download className="w-4 h-4 mr-1" /> Export</Button>}
           {tab === 'purchases' && (
             <>
               {allow('purchase', 'import') && <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10" onClick={() => setImportOpen(true)}><Upload className="w-4 h-4 mr-1" /> Import</Button>}
@@ -294,11 +295,15 @@ export default function ExpensesPage() {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 items-center">
-        <DateRangeFilter value={range} onChange={setRange} />
-        <TableControls c={activeControls} />
-      </div>
-      <SummaryTiles items={tiles} />
+      {tab !== 'pettycash' && (
+        <>
+          <div className="flex flex-wrap gap-2 items-center">
+            <DateRangeFilter value={range} onChange={setRange} />
+            <TableControls c={activeControls} />
+          </div>
+          <SummaryTiles items={tiles} />
+        </>
+      )}
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
@@ -307,6 +312,7 @@ export default function ExpensesPage() {
           <TabsTrigger value="deductions">Deductions ({dD.length})</TabsTrigger>
           <TabsTrigger value="discounts">Discounts ({dX.length})</TabsTrigger>
           <TabsTrigger value="other">Other Expenses ({dE.length})</TabsTrigger>
+          <TabsTrigger value="pettycash">Petty Cash</TabsTrigger>
         </TabsList>
 
         {/* Purchases */}
@@ -519,6 +525,11 @@ export default function ExpensesPage() {
               ))}
             </div>
           )}
+        </TabsContent>
+
+        {/* Petty cash: per-outlet balance; supplier bills can be paid from it */}
+        <TabsContent value="pettycash" className="mt-4">
+          {tab === 'pettycash' && <PettyCashPanel branchId={currentBranch?.id} branchName={currentBranch?.branchName} suppliers={suppliers} />}
         </TabsContent>
       </Tabs>
 
