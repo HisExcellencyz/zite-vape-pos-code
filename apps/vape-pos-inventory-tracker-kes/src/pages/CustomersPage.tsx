@@ -1,0 +1,487 @@
+import { useState, useEffect } from 'react';
+import { getCustomers, saveCustomer, deleteRecord, exportCsv, importCsv, getCustomerDetails, bulkDeleteRecords } from 'zitejs/api';
+import { Card, CardContent } from '@project/components/ui/card';
+import { Button } from '@project/components/ui/button';
+import { Input } from '@project/components/ui/input';
+import { Label } from '@project/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
+import { Search, Plus, Download, Upload, Users, Pencil, Trash2, Phone, Eye, MapPin, CheckSquare, Mail, ArrowUp, ArrowDown, UserCheck } from 'lucide-react';
+import { toast } from 'sonner';
+import { downloadCsv } from '../lib/exportHelper';
+import { format } from 'date-fns';
+import LocationPickerDialog from '../components/LocationPickerDialog';
+import ViewToggle, { useViewMode } from '../components/ViewToggle';
+import ImportDialog from '../components/ImportDialog';
+import { usePermissions } from '../hooks/usePermissions';
+
+interface Customer {
+  id: string;
+  customerName?: string;
+  phoneNumber?: string;
+  email?: string;
+  address?: string;
+  notes?: string;
+  orderCount?: number;
+  totalSpent?: number;
+}
+
+type SortBy = 'name' | 'date' | 'orders' | 'value';
+type SortDir = 'asc' | 'desc';
+
+const SORT_LABELS: Record<SortBy, string> = {
+  name: 'Name',
+  date: 'Date Added',
+  orders: 'Number of Orders',
+  value: 'Total Value',
+};
+
+const fmt = (n?: number) => `KES ${(n || 0).toLocaleString()}`;
+
+import { useTableControls, TableControls, SortTh, FieldDef } from '../components/TableControls';
+
+const FIELDS: FieldDef<Customer>[] = [{ key: 'customerName', label: 'Name' }, { key: 'phoneNumber', label: 'Phone' }, { key: 'email', label: 'Email' }, { key: 'address', label: 'Address' }, { key: 'notes', label: 'Notes' }, { key: 'orderCount', label: 'Orders' }, { key: 'totalSpent', label: 'Total Spent' }];
+
+export default function CustomersPage() {
+  const { can } = usePermissions();
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState<SortBy>('name');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<Customer | null>(null);
+  const [formName, setFormName] = useState('');
+  const [formPhone, setFormPhone] = useState('');
+  const [formEmail, setFormEmail] = useState('');
+  const [formAddress, setFormAddress] = useState('');
+  const [formCoords, setFormCoords] = useState('');
+  const [prevLocations, setPrevLocations] = useState<any[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [duplicateMatch, setDuplicateMatch] = useState<Customer | null>(null);
+  const [showDetails, setShowDetails] = useState(false);
+  const [detailCustomer, setDetailCustomer] = useState<any>(null);
+  const [detailOrders, setDetailOrders] = useState<any[]>([]);
+  const [detailStats, setDetailStats] = useState({ orderCount: 0, totalSpent: 0 });
+  const [importOpen, setImportOpen] = useState(false);
+  const [showLocationPicker, setShowLocationPicker] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const tc = useTableControls(customers, FIELDS);
+  const [viewMode, setViewMode] = useViewMode('customers', 'list');
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const res = await getCustomers({ search, sortBy, sortDir });
+      setCustomers(res.customers as Customer[]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, [search, sortBy, sortDir]);
+
+  const toggleSortDir = () => setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+
+  const openNew = () => {
+    setEditing(null);
+    setFormName(''); setFormPhone(''); setFormEmail(''); setFormAddress(''); setFormCoords('');
+    setDuplicateMatch(null);
+    setShowForm(true);
+  };
+
+  const openEdit = (c: Customer) => {
+    setEditing(c);
+    setFormName(c.customerName || '');
+    setFormPhone(c.phoneNumber || '');
+    setFormEmail(c.email || '');
+    setFormAddress(c.address || '');
+    setFormCoords('');
+    setDuplicateMatch(null);
+    setShowForm(true);
+  };
+
+  // As the phone number is typed for a NEW customer, quietly check whether it
+  // already belongs to someone — so we can offer that customer instead of
+  // erroring out only after they press Save.
+  const checkExistingByPhone = async (phoneRaw: string) => {
+    if (editing) return; // duplicate check only matters when creating new
+    const phone = phoneRaw.trim();
+    if (!phone) { setDuplicateMatch(null); return; }
+    const normalized = phone.startsWith('+') ? phone : '+' + phone;
+    try {
+      const res = await getCustomers({ search: normalized });
+      const match = (res.customers as Customer[]).find(c => (c.phoneNumber || '') === normalized);
+      setDuplicateMatch(match || null);
+    } catch {
+      setDuplicateMatch(null);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!formName || !formPhone) return toast.error('Name and phone number are required');
+    setSaving(true);
+    try {
+      await saveCustomer({
+        id: editing?.id,
+        customerName: formName,
+        phoneNumber: formPhone,
+        email: formEmail || undefined,
+        address: formAddress || undefined,
+        coordinates: formCoords || undefined,
+      });
+      toast.success(editing ? 'Customer updated' : 'Customer created');
+      setShowForm(false);
+      load();
+    } catch (e: any) {
+      const msg = e.message || 'Failed';
+      if (!editing && msg.toLowerCase().includes('already exists')) {
+        await checkExistingByPhone(formPhone);
+        toast.error('That number is already registered — use the existing customer below, or pick a different number.');
+      } else {
+        toast.error(msg);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      await deleteRecord({ table: 'customers', id });
+      toast.success('Customer deleted');
+      load();
+    } catch { toast.error('Failed'); }
+  };
+
+  const handleExport = async () => {
+    try {
+      const res = await exportCsv({ table: 'customers' });
+      downloadCsv(res.csv, res.filename);
+      toast.success('Exported');
+    } catch { toast.error('Export failed'); }
+  };
+
+  const runImport = async (rows: Record<string, string>[]) => {
+    const res = await importCsv({ table: 'customers', rows });
+    return { imported: res.imported, updated: res.updated, errors: res.errors };
+  };
+
+  const openDetails = async (c: Customer) => {
+    try {
+      const res = await getCustomerDetails({ customerId: c.id });
+      setDetailCustomer(res.customer);
+      setDetailOrders(res.orders);
+      setDetailStats({ orderCount: res.orderCount, totalSpent: res.totalSpent });
+      setPrevLocations((res as any).previousLocations || []);
+      setShowDetails(true);
+    } catch { toast.error('Failed to load details'); }
+  };
+
+  const toggleSelect = (id: string) => {
+    const next = new Set(selectedIds);
+    next.has(id) ? next.delete(id) : next.add(id);
+    setSelectedIds(next);
+  };
+
+  const toggleSelectAll = () => {
+    setSelectedIds(selectedIds.size === customers.length ? new Set() : new Set(customers.map(c => c.id)));
+  };
+
+  const handleBulkDelete = async () => {
+    try {
+      const res = await bulkDeleteRecords({ table: 'customers', ids: Array.from(selectedIds) });
+      toast.success(`Deleted ${res.deleted} customers`);
+      setSelectedIds(new Set());
+      load();
+    } catch { toast.error('Bulk delete failed'); }
+  };
+
+  const renderActions = (c: Customer) => (
+    <div className="flex justify-end gap-1">
+      <Button variant="ghost" size="sm" onClick={() => openDetails(c)}><Eye className="w-3.5 h-3.5" /></Button>
+      {can('customers', 'edit') && <Button variant="ghost" size="sm" onClick={() => openEdit(c)}><Pencil className="w-3.5 h-3.5" /></Button>}
+      {can('customers', 'delete') && <AlertDialog>
+        <AlertDialogTrigger asChild><Button variant="ghost" size="sm" className="text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button></AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete customer?</AlertDialogTitle>
+            <AlertDialogDescription>This will permanently delete {c.customerName}.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => handleDelete(c.id)} className="bg-destructive">Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>}
+    </div>
+  );
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="sticky top-0 z-20 -mx-6 -mt-6 px-6 pt-6 pb-4 space-y-4 bg-background/95 backdrop-blur border-b border-border">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Customers</h1>
+          <p className="text-sm text-muted-foreground">{customers.length} customers</p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <ViewToggle value={viewMode} onChange={setViewMode} />
+          {selectedIds.size > 0 && can('customers', 'delete') && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline" size="sm" className="border-destructive text-destructive hover:bg-destructive/10">
+                  <CheckSquare className="w-4 h-4 mr-1" /> Delete Selected ({selectedIds.size})
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete {selectedIds.size} customers?</AlertDialogTitle>
+                  <AlertDialogDescription>This cannot be undone.</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleBulkDelete} className="bg-destructive">Delete</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
+          {can('customers', 'export') && <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExport}><Download className="w-4 h-4 mr-1" /> Export</Button>}
+          {can('customers', 'import') && <Button variant="outline" size="sm" className="border-green-500 text-green-400 hover:bg-green-500/10" onClick={() => setImportOpen(true)}><Upload className="w-4 h-4 mr-1" /> Import</Button>}
+          {can('customers', 'create') && <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" /> Add Customer</Button>}
+        </div>
+      </div>
+
+      <TableControls c={tc} />
+      </div>
+
+      {viewMode === 'list' ? (
+        <Card className="bg-card border-border">
+          <CardContent className="p-0">
+            <div className="overflow-auto max-h-[65vh]">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 z-10 bg-card">
+                  <tr className="border-b border-border text-muted-foreground bg-card">
+                    <th className="p-3 w-8"><input type="checkbox" checked={selectedIds.size === customers.length && customers.length > 0} onChange={toggleSelectAll} className="rounded" /></th>
+                    <SortTh c={tc} k="customerName" className="text-left">Name</SortTh>
+                    <SortTh c={tc} k="phoneNumber" className="text-left">Phone</SortTh>
+                    <SortTh c={tc} k="email" className="text-left">Email</SortTh>
+                    <SortTh c={tc} k="orderCount" className="text-right">Orders</SortTh>
+                    <SortTh c={tc} k="totalSpent" className="text-right">Total Spent</SortTh>
+                    <th className="text-right p-3 font-medium">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    [...Array(5)].map((_, i) => (
+                      <tr key={i} className="border-b border-border">
+                        <td className="p-3"></td>
+                        {[...Array(6)].map((_, j) => <td key={j} className="p-3"><div className="h-4 bg-muted rounded animate-pulse" /></td>)}
+                      </tr>
+                    ))
+                  ) : tc.view.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="text-center py-12 text-muted-foreground">
+                        <Users className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                        No customers found
+                      </td>
+                    </tr>
+                  ) : tc.view.map(c => (
+                    <tr key={c.id} className="border-b border-border hover:bg-muted/30">
+                      <td className="p-3"><input type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} className="rounded" /></td>
+                      <td className="p-3 font-medium text-foreground break-words whitespace-normal">{c.customerName}</td>
+                      <td className="p-3 text-muted-foreground whitespace-nowrap"><span className="inline-flex items-center gap-1.5"><Phone className="w-3.5 h-3.5" />{c.phoneNumber}</span></td>
+                      <td className="p-3 text-muted-foreground break-all">{c.email || '-'}</td>
+                      <td className="p-3 text-right text-foreground">{c.orderCount || 0}</td>
+                      <td className="p-3 text-right font-semibold text-primary whitespace-nowrap">{fmt(c.totalSpent)}</td>
+                      <td className="p-3 text-right">{renderActions(c)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {customers.length > 0 && (
+            <label className="flex items-center gap-2 text-xs text-muted-foreground select-none w-fit cursor-pointer">
+              <input type="checkbox" checked={selectedIds.size === customers.length} onChange={toggleSelectAll} className="rounded" />
+              Select all
+            </label>
+          )}
+          {/* Smaller tiles: five per row on large screens */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
+            {loading ? (
+              [...Array(5)].map((_, i) => (
+                <Card key={i} className="bg-card border-border"><CardContent className="p-3"><div className="h-20 bg-muted rounded animate-pulse" /></CardContent></Card>
+              ))
+            ) : tc.view.length === 0 ? (
+              <Card className="col-span-full bg-card border-border">
+                <CardContent className="py-12 text-center text-muted-foreground">
+                  <Users className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                  No customers found
+                </CardContent>
+              </Card>
+            ) : tc.view.map(c => (
+              <Card key={c.id} className={`bg-card ${selectedIds.has(c.id) ? 'border-primary' : 'border-border'}`}>
+                <CardContent className="p-2.5 space-y-2">
+                  <div className="flex items-start gap-2">
+                    <input type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} className="mt-1 rounded shrink-0" />
+                    <p className="text-sm font-semibold text-foreground break-words whitespace-normal leading-snug min-w-0 flex-1">{c.customerName}</p>
+                  </div>
+                  <div className="space-y-1 text-[11px] text-muted-foreground">
+                    <p className="flex items-start gap-1.5"><Phone className="w-3 h-3 mt-0.5 shrink-0" /><span className="break-all">{c.phoneNumber}</span></p>
+                    {c.email && <p className="flex items-start gap-1.5"><Mail className="w-3 h-3 mt-0.5 shrink-0" /><span className="break-all">{c.email}</span></p>}
+                    {c.address && <p className="flex items-start gap-1.5"><MapPin className="w-3 h-3 mt-0.5 shrink-0" /><span className="break-words whitespace-normal min-w-0 line-clamp-2">{c.address}</span></p>}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[11px] border-t border-border pt-1.5">
+                    <div>
+                      <p className="text-muted-foreground">Orders</p>
+                      <p className="font-semibold text-foreground">{c.orderCount || 0}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Total Spent</p>
+                      <p className="font-semibold text-primary break-words">{fmt(c.totalSpent)}</p>
+                    </div>
+                  </div>
+                  <div className="border-t border-border pt-1">{renderActions(c)}</div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <ImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        title="Import Customers"
+        template="customers"
+        chunkSize={100}
+        description={<>Upload a CSV with columns: <span className="font-medium text-foreground">Customer Name, Phone Number, Email, Address</span>. Customers matched by phone number are updated. Press OK to start the import.</>}
+        onImport={runImport}
+        onDone={load}
+      />
+
+      <Dialog open={showForm} onOpenChange={setShowForm}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>{editing ? 'Edit Customer' : 'New Customer'}</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Name *</Label><Input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Customer name" /></div>
+            <div>
+              <Label>Phone Number * (with +)</Label>
+              <Input
+                value={formPhone}
+                onChange={e => { setFormPhone(e.target.value); setDuplicateMatch(null); }}
+                onBlur={e => checkExistingByPhone(e.target.value)}
+                placeholder="+254712345678"
+              />
+            </div>
+            {duplicateMatch && (
+              <div className="rounded-lg border border-primary/40 bg-primary/5 p-3 space-y-2">
+                <p className="text-xs text-muted-foreground flex items-center gap-1.5"><UserCheck className="w-3.5 h-3.5" /> A customer with this number already exists:</p>
+                <p className="text-sm font-medium text-foreground">{duplicateMatch.customerName} · {duplicateMatch.phoneNumber}</p>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => { openEdit(duplicateMatch); }}
+                >
+                  Edit this customer instead
+                </Button>
+              </div>
+            )}
+            <div><Label>Email</Label><Input value={formEmail} onChange={e => setFormEmail(e.target.value)} placeholder="email@example.com" /></div>
+            <div><Label>Address</Label>
+              <div className="flex gap-2">
+                <Input value={formAddress} onChange={e => setFormAddress(e.target.value)} placeholder="Address" className="flex-1" />
+                <Button type="button" variant="outline" size="icon" className="shrink-0" onClick={() => setShowLocationPicker(true)}><MapPin className="w-4 h-4" /></Button>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
+            <Button onClick={handleSave} disabled={saving}>{saving ? 'Saving...' : 'Save'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <LocationPickerDialog
+        open={showLocationPicker}
+        onOpenChange={setShowLocationPicker}
+        title="Customer Location"
+        value={formAddress}
+        onSelect={(address, coords) => { setFormAddress(address); setFormCoords(coords); }}
+      />
+
+      <Dialog open={showDetails} onOpenChange={setShowDetails}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader><DialogTitle className="break-words">{detailCustomer?.customerName}</DialogTitle></DialogHeader>
+          {detailCustomer && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-4 text-sm text-muted-foreground flex-wrap">
+                <span className="flex items-center gap-1"><Phone className="w-3.5 h-3.5" /> {detailCustomer.phoneNumber}</span>
+                {detailCustomer.email && <span className="break-all">{detailCustomer.email}</span>}
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <Card className="bg-muted/50 border-border"><CardContent className="pt-4">
+                  <p className="text-xs text-muted-foreground">Total Orders</p>
+                  <p className="text-2xl font-bold text-foreground">{detailStats.orderCount}</p>
+                </CardContent></Card>
+                <Card className="bg-muted/50 border-border"><CardContent className="pt-4">
+                  <p className="text-xs text-muted-foreground">Total Spent</p>
+                  <p className="text-2xl font-bold text-primary">{fmt(detailStats.totalSpent)}</p>
+                </CardContent></Card>
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-foreground mb-2">Saved Location</h3>
+                {detailCustomer.address || detailCustomer.coordinates ? (
+                  <div className="p-3 bg-muted/30 rounded-lg text-sm">
+                    <p className="text-foreground break-words">{detailCustomer.address || detailCustomer.coordinates}</p>
+                    {detailCustomer.address && detailCustomer.coordinates && <p className="text-xs font-mono text-muted-foreground">{detailCustomer.coordinates}</p>}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No location saved</p>
+                )}
+                {prevLocations.length > 0 && (
+                  <div className="mt-3">
+                    <h4 className="text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wider">Previous locations (archived)</h4>
+                    <div className="space-y-1.5">
+                      {prevLocations.map((l: any, i: number) => (
+                        <div key={i} className="p-2 bg-muted/20 rounded-lg text-xs">
+                          <p className="text-foreground break-words">{l.address || l.coordinates}</p>
+                          <p className="text-muted-foreground">
+                            {l.address && l.coordinates ? `${l.coordinates} · ` : ''}replaced {l.archivedAt ? format(new Date(l.archivedAt), 'dd MMM yyyy') : ''}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-foreground mb-2">Order History</h3>
+                {detailOrders.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No orders yet</p>
+                ) : (
+                  <div className="space-y-2">
+                    {detailOrders.map((o: any) => (
+                      <div key={o.id} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+                        <div>
+                          <p className="text-sm text-foreground">{o.saleDate ? format(new Date(o.saleDate), 'dd MMM yyyy') : '-'}</p>
+                          <p className="text-xs text-muted-foreground">{o.paymentMethod} · {o.status}</p>
+                        </div>
+                        <p className="text-sm font-semibold text-foreground">{fmt(o.total)}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

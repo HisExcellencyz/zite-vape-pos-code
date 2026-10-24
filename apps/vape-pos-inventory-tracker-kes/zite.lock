@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "integrations": {
+    "googlesheets": {
+      "idMappings": {
+        "spreadsheet": "1bCRujv1eQXslPcZ7-yRWC4ExG75SSBri39b_-BEbDqg",
+        "tables": {},
+        "fields": {}
+      }
+    }
+  }
+}

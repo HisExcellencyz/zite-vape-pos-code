@@ -1,0 +1,1421 @@
+import { useState, useEffect, useRef } from 'react';
+import { getProducts, getCategories, getCustomers, getCustomerDetails, createSale, saveCustomer, getSales, manageHeldOrders, manageSupplierBills, getStorages } from 'zitejs/api';
+import { StorageLite, StockMap, storageBreakdown } from '../lib/storageMath';
+import { Button } from '@project/components/ui/button';
+import { Input } from '@project/components/ui/input';
+import { Label } from '@project/components/ui/label';
+import { Badge } from '@project/components/ui/badge';
+import { Checkbox } from '@project/components/ui/checkbox';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator, DropdownMenuLabel } from '@project/components/ui/dropdown-menu';
+import { Search, Plus, Minus, ShoppingCart, Trash2, UserPlus, X, Receipt, DollarSign, MapPin, Route, UserCheck, Pause, Play, Clock, Layers, Truck, Bike, ChevronDown, Check } from 'lucide-react';
+import { toast } from 'sonner';
+import DeliveryRouteMap, { PickupItem, sortRoutePoints } from '../components/DeliveryRouteMap';
+import LocationPickerDialog from '../components/LocationPickerDialog';
+import CustomerLocationDialog from '../components/CustomerLocationDialog';
+import ViewToggle, { useViewMode } from '../components/ViewToggle';
+import OtherIncomeDialog from '../components/OtherIncomeDialog';
+import ProductImage from '../components/ProductImage';
+import CustomerPicker, { PickableCustomer } from '../components/CustomerPicker';
+import { useBranch, commissionAmount, autoOn, Commission } from '../hooks/useBranch';
+import SummaryTiles from '../components/SummaryTiles';
+import CategoryRibbon, { CategoryLite, matchesCategory, productCategoryId } from '../components/CategoryRibbon';
+import DateRangeFilter, { Range, inRange } from '../components/DateRangeFilter';
+import { isCashPayment } from '../lib/payments';
+import { parseCoordinates, geocode } from '../lib/geocode';
+import { RiderType, Riders, RIDER_LABELS, DEFAULT_DELIVERY_FEE, DEFAULT_RIDER_FEE, loadRiders } from '../lib/delivery';
+
+interface Product {
+  id: string;
+  productName?: string;
+  sku?: string;
+  sellingPrice?: number;
+  costPrice?: number;
+  stockQuantity?: number;
+  taxRate?: number;
+  status?: string;
+  category?: string | string[];
+  images?: { url: string }[];
+}
+
+interface CartItem {
+  product: Product;
+  quantity: number;
+  unitPrice: number;
+}
+
+interface Customer {
+  id: string;
+  customerName?: string;
+  phoneNumber?: string;
+  address?: string;
+  coordinates?: string;
+}
+
+interface SelectedRider { type: RiderType; id: string; name: string; }
+
+type DiscountType = 'KES' | '%';
+
+/** An order put on hold. Stock is only deducted when it is finally checked out. */
+interface HeldOrder {
+  id: string;
+  heldAt: string;
+  heldBy?: string;
+  branchId?: string | null;
+  /** 2 = the Rider Fee is one of the outlet's deductions. Missing = older order with a separate rider fee. */
+  v?: number;
+  items: { productId: string; productName?: string; sku?: string; image?: string; quantity: number; unitPrice: number }[];
+  customer: Customer | null;
+  paymentMethod: string;
+  selectedDeductions: string[];
+  /** Per-order edited amounts (KES) for the Rider Fee deduction, keyed by deduction name. */
+  deductionAmounts?: Record<string, string>;
+  rider: SelectedRider | null;
+  feeOn: boolean;
+  feeAmount: string;
+  /** Other incomes & revenues (besides the delivery fee) that were switched on for this order. */
+  extraIncomes?: { name: string; amount: number }[];
+  /** Only present on older held orders (before the Rider Fee became a deduction). */
+  riderFeeOn?: boolean;
+  riderFeeAmount?: string;
+  discountValue: string;
+  discountType: DiscountType;
+  routePoints: any[];
+  distanceKm: number;
+  pickupSelections?: Record<string, string[]>;
+}
+
+/** Discount in KES for a given subtotal, never more than the subtotal. */
+const calcDiscount = (subtotal: number, value: string | number, type: DiscountType) => {
+  const v = Math.max(0, Number(value) || 0);
+  const raw = type === '%' ? (subtotal * Math.min(v, 100)) / 100 : v;
+  return Math.round(Math.min(subtotal, raw) * 100) / 100;
+};
+
+const heldTotals = (h: HeldOrder) => {
+  const sub = h.items.reduce((s, i) => s + i.unitPrice * i.quantity, 0);
+  const discount = calcDiscount(sub, h.discountValue, h.discountType);
+  const total = sub - discount;
+  const fee = h.feeOn ? Math.max(0, Number(h.feeAmount) || 0) : 0;
+  const extra = (h.extraIncomes || []).reduce((s, e) => s + (e.amount || 0), 0);
+  return { sub, discount, total, fee, extra, payable: total + fee + extra };
+};
+
+/** Rider fee (KES) of an OLDER held order that had a separate rider fee. New held orders use the Rider Fee deduction instead. */
+const legacyRiderFee = (h: HeldOrder) =>
+  h.v === 2 || h.riderFeeOn === false ? 0 : Math.max(0, Number(h.riderFeeAmount ?? DEFAULT_RIDER_FEE) || 0);
+
+const isRiderFeeName = (name?: string) => (name || '').trim().toLowerCase() === 'rider fee';
+
+/** Splits a list of route points into the text fields stored on a sale. */
+const routeFields = (pts: any[]) => {
+  const pickups = pts.filter(p => p.tag === 'pickup');
+  const dropoffs = pts.filter(p => p.tag === 'dropoff');
+  const other = pts.filter(p => !p.tag || !['start', 'end', 'pickup', 'dropoff'].includes(p.tag));
+  return {
+    pickupPoint: pickups.map(p => p.label).join('; ') || undefined,
+    deliveryAddress: dropoffs.map(p => p.label).join('; ') || undefined,
+    // Each pin is tagged (e.g. "dropoff:-1.29,36.82") so the Addresses > Deliveries tab can tell drop-offs apart.
+    deliveryCoordinates: pts.length > 0 ? pts.map(p => `${p.tag || 'stop'}:${p.lat},${p.lng}`).join(' → ') : undefined,
+    stops: [...other, ...pickups, ...dropoffs].map(p => p.label).join('; ') || undefined,
+  };
+};
+
+const isMergedPoint = (p: any) => String(p.id).startsWith('m_');
+/** Drop-offs that were added automatically from a customer's saved location. */
+const isAutoCustomerPoint = (p: any) => String(p.id).startsWith('c_') || /^m_.+_c_/.test(String(p.id));
+
+/** Long product names in the cart shrink (down to 80% of normal size) so more items stay in view. */
+const cartNameSize = (name?: string) => {
+  const n = (name || '').length;
+  if (n > 45) return 'text-[11.2px]';
+  if (n > 32) return 'text-[12px]';
+  if (n > 22) return 'text-[13px]';
+  return 'text-sm';
+};
+
+/**
+ * Quantity controls for a product that is in the cart: (-) qty (+).
+ * When the quantity is 1 the (-) button becomes a delete icon that removes the product.
+ * `inline` renders it in the normal flow (list view); otherwise it sits at the bottom right of the tile image.
+ */
+function QtyControl({ qty, onMinus, onPlus, small, inline }: {
+  qty: number; onMinus: () => void; onPlus: () => void; small?: boolean; inline?: boolean;
+}) {
+  if (qty <= 0) return null;
+  const btn = small ? 'w-5 h-5' : 'w-6 h-6';
+  const icon = small ? 'w-3 h-3' : 'w-3.5 h-3.5';
+  const stop = (fn: () => void) => (e: React.MouseEvent) => { e.stopPropagation(); fn(); };
+  return (
+    <div
+      onClick={e => e.stopPropagation()}
+      className={`${inline ? '' : 'absolute bottom-1 right-1'} flex items-center gap-0.5 rounded-full bg-primary text-primary-foreground shadow-md p-0.5 w-fit`}
+    >
+      <button
+        type="button"
+        onClick={stop(onMinus)}
+        title={qty === 1 ? 'Remove from cart' : 'Decrease quantity'}
+        className={`${btn} rounded-full flex items-center justify-center ${qty === 1 ? 'bg-destructive text-destructive-foreground' : 'bg-white/25 hover:bg-white/40'}`}
+      >
+        {qty === 1 ? <Trash2 className={icon} /> : <Minus className={icon} />}
+      </button>
+      <span className={`${small ? 'min-w-[16px] text-[10px]' : 'min-w-[22px] text-xs'} text-center font-bold`}>{qty}</span>
+      <button
+        type="button"
+        onClick={stop(onPlus)}
+        title="Increase quantity"
+        className={`${btn} rounded-full bg-white/25 hover:bg-white/40 flex items-center justify-center`}
+      >
+        <Plus className={icon} />
+      </button>
+    </div>
+  );
+}
+
+/** Half-width tile: tap the label to switch on/off, edit the KES amount on the right. */
+function FeeTile({ label, on, onToggle, value, onValue, onCls, offCls, title }: {
+  label: string; on: boolean; onToggle: () => void; value: string; onValue: (v: string) => void;
+  onCls: string; offCls: string; title: string;
+}) {
+  return (
+    <div className={`h-7 rounded-md border flex items-center overflow-hidden transition-all ${on ? onCls : offCls}`}>
+      <button
+        type="button"
+        onClick={onToggle}
+        title={`Tap to switch ${label} on or off`}
+        className="flex-1 min-w-0 h-full pl-2 text-left text-[11px] font-medium truncate"
+      >
+        {label}
+      </button>
+      <input
+        type="number"
+        min={0}
+        value={on ? value : '0'}
+        disabled={!on}
+        onChange={e => onValue(e.target.value)}
+        title={title}
+        className={`h-5 w-14 mr-1 rounded px-1 text-right text-[11px] outline-none ${on ? 'bg-white/25 text-white' : 'bg-transparent'}`}
+      />
+    </div>
+  );
+}
+
+const AMBER_ON = 'border-amber-500 bg-amber-500 text-white';
+const AMBER_OFF = 'border-border text-muted-foreground hover:border-amber-500/60';
+const PINK_ON = 'border-pink-500 bg-pink-500 text-white';
+const PINK_OFF = 'border-border text-muted-foreground hover:border-pink-500/60';
+
+export default function POSPage() {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [search, setSearch] = useState('');
+  const [categories, setCategories] = useState<CategoryLite[]>([]);
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState('Cash/M-PESA');
+  const [showCustomerDialog, setShowCustomerDialog] = useState(false);
+  const [newCustName, setNewCustName] = useState('');
+  const [newCustPhone, setNewCustPhone] = useState('');
+  const [newCustAddress, setNewCustAddress] = useState('');
+  const [newCustCoords, setNewCustCoords] = useState('');
+  const [duplicateMatch, setDuplicateMatch] = useState<Customer | null>(null);
+  const [showCustLocationPicker, setShowCustLocationPicker] = useState(false);
+  const [showCustLocation, setShowCustLocation] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [showOtherIncome, setShowOtherIncome] = useState(false);
+  const [catalogView, setCatalogView] = useViewMode('pos', 'grid');
+  const { currentBranch } = useBranch();
+
+  // Deductions and incomes are set up per outlet in Settings > Outlets. Items switched on there
+  // are applied automatically; the cashier can switch any of them off (or on) for a single order.
+  // Every outlet carries Glovo, Rider Fee and Promo (Rider Fee sits between the other two).
+  const outletDeductions: Commission[] = currentBranch?.commissions || [];
+  const outletIncomes: Commission[] = currentBranch?.incomes ?? [
+    { name: 'Delivery Fee', type: 'fixed', value: currentBranch?.deliveryFee ?? DEFAULT_DELIVERY_FEE, enabled: true },
+  ];
+  const feeInc: Commission | undefined = outletIncomes[0]; // the first income is the Delivery Fee
+
+  // Per-order overrides of what Settings switched on/off.
+  const [dedOverrides, setDedOverrides] = useState<Record<string, boolean>>({});
+  // Per-order edited KES amounts for the Rider Fee deduction (keyed by deduction name).
+  const [dedAmounts, setDedAmounts] = useState<Record<string, string>>({});
+  const selectedDeductions = outletDeductions.filter(d => dedOverrides[d.name] ?? autoOn(d)).map(d => d.name);
+
+  const [feeOnOverride, setFeeOnOverride] = useState<boolean | null>(null);
+  const [feeOverride, setFeeOverride] = useState<string | null>(null);
+  const [extraOn, setExtraOn] = useState<Record<string, boolean>>({});
+  const [extraVal, setExtraVal] = useState<Record<string, string>>({});
+
+  // Discount on the order, either a KES amount or a percentage of the subtotal.
+  const [discountValue, setDiscountValue] = useState('');
+  const [discountType, setDiscountType] = useState<DiscountType>('KES');
+
+  // The rider assigned to this order (3PL or own), chosen from the riders set up in Settings > Delivery.
+  const [rider, setRider] = useState<SelectedRider | null>(null);
+  const [riders, setRiders] = useState<Riders>({ threePl: [], own: [] });
+  useEffect(() => { loadRiders().then(setRiders).catch(() => {}); }, []);
+
+  // Storages (Office, custom storages, own riders) and the stock each one holds.
+  const [storages, setStorages] = useState<StorageLite[]>([]);
+  const [stockMap, setStockMap] = useState<StockMap>({});
+  const loadStorages = () => getStorages({}).then(r => { setStorages((r.storages || []) as StorageLite[]); setStockMap((r.stock || {}) as StockMap); }).catch(() => {});
+  useEffect(() => { loadStorages(); }, []);
+  const storageLine = (p: Product) =>
+    storageBreakdown(storages, stockMap, p.id, p.stockQuantity || 0).map(x => `${x.storage.name} ${x.qty}`).join(' · ');
+
+  const [showDeliveryMap, setShowDeliveryMap] = useState(false);
+  const [showMergeDialog, setShowMergeDialog] = useState(false);
+  const [routePoints, setRoutePoints] = useState<any[]>([]);
+  const [distanceKm, setDistanceKm] = useState(0);
+  // Items ticked as picked up, per route point id (supplier pick-up pins only).
+  const [pickupSelections, setPickupSelections] = useState<Record<string, string[]>>({});
+  const [range, setRange] = useState<Range>({});
+  const [recentSales, setRecentSales] = useState<any[]>([]);
+  const loadSales = () => getSales({ branchId: currentBranch?.id }).then(r => setRecentSales(r.sales)).catch(() => {});
+  useEffect(() => { loadSales(); }, [currentBranch?.id]);
+
+  // ── On-hold (pending) orders ──
+  const [cartTab, setCartTab] = useState<'cart' | 'pending'>('cart');
+  const [heldOrders, setHeldOrders] = useState<HeldOrder[]>([]);
+  const [holding, setHolding] = useState(false);
+  const [mergedIds, setMergedIds] = useState<string[]>([]);
+  const loadHeld = () =>
+    manageHeldOrders({ action: 'list', branchId: currentBranch?.id })
+      .then(r => setHeldOrders(r.orders as HeldOrder[]))
+      .catch(() => {});
+  useEffect(() => {
+    loadHeld();
+    const t = setInterval(loadHeld, 30000);
+    return () => clearInterval(t);
+  }, [currentBranch?.id]);
+
+  // Orders merged into this checkout (ignores any that were resumed/deleted elsewhere in the meantime).
+  const mergeList = heldOrders.filter(h => mergedIds.includes(h.id));
+
+  // Items that can be picked up from a supplier: the active cart plus every merged pending order,
+  // combined per product (with cost price, which is what the supplier bills).
+  const pickupItems: PickupItem[] = (() => {
+    const map = new Map<string, PickupItem>();
+    const add = (productId: string, name: string, quantity: number, fallbackCost: number) => {
+      const cur = map.get(productId);
+      if (cur) { cur.quantity += quantity; return; }
+      const cost = products.find(p => p.id === productId)?.costPrice ?? fallbackCost;
+      map.set(productId, { productId, name, quantity, unitCost: cost || 0 });
+    };
+    cart.forEach(c => add(c.product.id, c.product.productName || 'Item', c.quantity, c.product.costPrice || 0));
+    mergeList.forEach(h => h.items.forEach(i => add(i.productId, i.productName || 'Item', i.quantity, 0)));
+    return Array.from(map.values());
+  })();
+
+  // Switching outlet changes the available incomes/deductions, so start fresh.
+  useEffect(() => {
+    setDedOverrides({});
+    setDedAmounts({});
+    setFeeOnOverride(null); setFeeOverride(null);
+    setExtraOn({}); setExtraVal({});
+  }, [currentBranch?.id]);
+
+  useEffect(() => {
+    Promise.all([getProducts({ status: 'Active', branchId: currentBranch?.id }), getCustomers({})]).then(([prods, custs]) => {
+      setProducts(prods.products as Product[]);
+      setCustomers(custs.customers as Customer[]);
+    });
+  }, [currentBranch?.id]);
+
+  useEffect(() => {
+    getCategories({}).then(r => setCategories(r.categories as CategoryLite[])).catch(() => {});
+  }, []);
+
+  const filtered = products.filter(p =>
+    matchesCategory(categoryFilter, productCategoryId(p), categories) && (
+      (p.productName || '').toLowerCase().includes(search.toLowerCase()) ||
+      (p.sku || '').toLowerCase().includes(search.toLowerCase())
+    )
+  );
+
+  const qtyInCart = (productId: string) => cart.find(c => c.product.id === productId)?.quantity || 0;
+
+  const addToCart = (product: Product) => {
+    setCart(prev => {
+      const existing = prev.find(c => c.product.id === product.id);
+      if (existing) return prev.map(c => c.product.id === product.id ? { ...c, quantity: c.quantity + 1 } : c);
+      return [...prev, { product, quantity: 1, unitPrice: product.sellingPrice || 0 }];
+    });
+  };
+
+  /** (-) on a product tile: one less, and removed from the cart when it was the last one. */
+  const decrementFromCart = (productId: string) => {
+    setCart(prev => prev.flatMap(c => {
+      if (c.product.id !== productId) return [c];
+      return c.quantity <= 1 ? [] : [{ ...c, quantity: c.quantity - 1 }];
+    }));
+  };
+
+  const updateQty = (productId: string, delta: number) => {
+    setCart(cart.map(c => {
+      if (c.product.id !== productId) return c;
+      const newQty = c.quantity + delta;
+      return newQty <= 0 ? c : { ...c, quantity: newQty };
+    }));
+  };
+
+  const removeFromCart = (productId: string) => setCart(cart.filter(c => c.product.id !== productId));
+
+  const subtotal = cart.reduce((sum, c) => sum + c.unitPrice * c.quantity, 0);
+  const discountAmount = calcDiscount(subtotal, discountValue, discountType);
+  const total = subtotal - discountAmount;
+
+  // Delivery fee (first income): % is taken on the order total after discount; the amount can be edited per order.
+  const feeOn = feeInc ? (feeOnOverride ?? autoOn(feeInc)) : false;
+  const feeAmount = feeOverride ?? String(feeInc ? commissionAmount(feeInc, total) : 0);
+  const deliveryFee = feeOn ? Math.max(0, Number(feeAmount) || 0) : 0;
+
+  // Any other incomes & revenues of the outlet.
+  const extraIncomes = outletIncomes.slice(1).map(c => {
+    const on = extraOn[c.name] ?? autoOn(c);
+    const amount = extraVal[c.name] ?? String(commissionAmount(c, total));
+    return { name: c.name, on, amount, value: on ? Math.max(0, Number(amount) || 0) : 0 };
+  });
+  const appliedExtras = extraIncomes.filter(e => e.value > 0).map(e => ({ name: e.name, amount: e.value }));
+  const extraTotal = appliedExtras.reduce((s, e) => s + e.amount, 0);
+
+  const payable = total + deliveryFee + extraTotal;
+
+  // Amount (KES) of a deduction on this order. The Rider Fee can be edited per order; the others follow the outlet setup.
+  const deductionAmountText = (d: Commission) =>
+    isRiderFeeName(d.name) && dedAmounts[d.name] !== undefined ? dedAmounts[d.name] : String(commissionAmount(d, total));
+  const deductionAmount = (d: Commission) =>
+    isRiderFeeName(d.name) && dedAmounts[d.name] !== undefined
+      ? Math.max(0, Number(dedAmounts[d.name]) || 0)
+      : commissionAmount(d, total);
+
+  const appliedDeductions = outletDeductions.filter(d => selectedDeductions.includes(d.name));
+  const deductionsTotal = appliedDeductions.reduce((s, d) => s + deductionAmount(d), 0);
+  const toggleDeduction = (d: Commission) =>
+    setDedOverrides(prev => ({ ...prev, [d.name]: !(prev[d.name] ?? autoOn(d)) }));
+
+  const resetOrder = () => {
+    // Clearing the cart also clears the quantity controls on the product tiles.
+    setCart([]);
+    setSelectedCustomer(null);
+    setDedOverrides({});
+    setDedAmounts({});
+    setRider(null);
+    setFeeOnOverride(null); setFeeOverride(null);
+    setExtraOn({}); setExtraVal({});
+    setDiscountValue('');
+    setDiscountType('KES');
+    setRoutePoints([]);
+    setDistanceKm(0);
+    setPickupSelections({});
+    setMergedIds([]);
+  };
+
+  // ── Customer locations as drop-off points ──
+  /** The latest saved location of a customer (from the loaded list, falling back to the order's copy). */
+  const dropFor = (c: Customer | null | undefined, id: string) => {
+    if (!c) return null;
+    const full = customers.find(x => x.id === c.id) || c;
+    const p = parseCoordinates(full.coordinates);
+    if (!p) return null;
+    return { id, label: full.address || full.customerName || `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`, tag: 'dropoff', lat: p.lat, lng: p.lng };
+  };
+
+  /**
+   * Finds a customer's drop-off location even when the loaded list or a held order's copy lacks coordinates:
+   * list/copy -> saved record -> geocoding the saved address.
+   */
+  const resolveDrop = async (c: Customer | null | undefined, id: string) => {
+    if (!c) return null;
+    const quick = dropFor(c, id);
+    if (quick) return quick;
+    try {
+      const res: any = await getCustomerDetails({ customerId: c.id });
+      const rec = res?.customer;
+      const f = rec?.fields || rec || {};
+      const coords = f.coordinates ?? rec?.coordinates;
+      const addr = f.address ?? rec?.address ?? c.address;
+      const name = f.customerName ?? rec?.customerName ?? c.customerName;
+      const p = parseCoordinates(coords);
+      if (p) return { id, label: addr || name || `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`, tag: 'dropoff', lat: p.lat, lng: p.lng };
+      if (addr) {
+        const g: any = await geocode(String(addr));
+        const r = g?.results?.[0];
+        if (r) return { id, label: addr, tag: 'dropoff', lat: r.lat, lng: r.lng };
+      }
+    } catch { /* fall through */ }
+    if (c.address) {
+      try {
+        const g: any = await geocode(String(c.address));
+        const r = g?.results?.[0];
+        if (r) return { id, label: c.address, tag: 'dropoff', lat: r.lat, lng: r.lng };
+      } catch { /* ignore */ }
+    }
+    return null;
+  };
+
+  const mergedRef = useRef<string[]>([]);
+  useEffect(() => { mergedRef.current = mergedIds; }, [mergedIds]);
+
+  /**
+   * Opens the Route Plan dialog. The linked customer's saved location, and that of every merged order,
+   * is added as a drop-off point (replacing any earlier auto-added ones so they are never stale).
+   */
+  const openRoutePlanner = async () => {
+    setShowDeliveryMap(true);
+    const wanted: any[] = [];
+    const own = await resolveDrop(selectedCustomer, `c_${selectedCustomer?.id}`);
+    if (own) wanted.push(own);
+    for (const h of mergeList) {
+      const d = await resolveDrop(h.customer, `m_${h.id}_c_${h.customer?.id}`);
+      if (d) wanted.push(d);
+    }
+    setRoutePoints(pts => {
+      const keep = pts.filter(p => !isAutoCustomerPoint(p));
+      const fresh = wanted.filter((w, i) => !keep.some(p => p.tag === 'dropoff' && p.lat === w.lat && p.lng === w.lng) && wanted.findIndex(x => x.lat === w.lat && x.lng === w.lng) === i);
+      return sortRoutePoints([...keep, ...fresh]);
+    });
+  };
+
+  // ── Hold / resume / delete ──
+  const handleHold = async () => {
+    if (cart.length === 0) return toast.error('Cart is empty');
+    if (mergedIds.length > 0) return toast.error('Unmerge the pending orders before putting this order on hold');
+    setHolding(true);
+    try {
+      const order = {
+        v: 2,
+        items: cart.map(c => ({
+          productId: c.product.id,
+          productName: c.product.productName,
+          sku: c.product.sku,
+          image: c.product.images?.[0]?.url,
+          quantity: c.quantity,
+          unitPrice: c.unitPrice,
+        })),
+        customer: selectedCustomer,
+        paymentMethod,
+        selectedDeductions,
+        deductionAmounts: dedAmounts,
+        rider,
+        feeOn,
+        feeAmount,
+        extraIncomes: appliedExtras,
+        discountValue,
+        discountType,
+        routePoints,
+        distanceKm,
+        pickupSelections,
+      };
+      const res = await manageHeldOrders({ action: 'hold', branchId: currentBranch?.id, order });
+      setHeldOrders(res.orders as HeldOrder[]);
+      resetOrder();
+      toast.success('Order put on hold');
+    } catch (e: any) {
+      toast.error(e.message || 'Could not hold the order');
+    } finally {
+      setHolding(false);
+    }
+  };
+
+  const resumeHeld = async (h: HeldOrder) => {
+    if (cart.length > 0) return toast.error('Hold or clear the current cart before resuming another order');
+    try {
+      const res = await manageHeldOrders({ action: 'remove', id: h.id, branchId: currentBranch?.id });
+      setHeldOrders(res.orders as HeldOrder[]);
+      setCart(h.items.map(i => {
+        const live = products.find(p => p.id === i.productId);
+        const product: Product = live || {
+          id: i.productId, productName: i.productName, sku: i.sku, sellingPrice: i.unitPrice,
+          images: i.image ? [{ url: i.image }] : undefined,
+        };
+        return { product, quantity: i.quantity, unitPrice: i.unitPrice };
+      }));
+      setSelectedCustomer(h.customer || null);
+      setPaymentMethod(h.paymentMethod || 'Cash/M-PESA');
+      // Restore exactly which deductions / incomes were on for this order.
+      // An older held order with a separate rider fee switches the Rider Fee deduction on.
+      const legacyRider = legacyRiderFee(h) > 0;
+      setDedOverrides(Object.fromEntries(outletDeductions.map(d => [
+        d.name,
+        (h.selectedDeductions || []).includes(d.name) || (legacyRider && isRiderFeeName(d.name)),
+      ])));
+      // Restore an edited Rider Fee amount (older held orders carried it as a separate rider fee).
+      const amounts: Record<string, string> = { ...(h.deductionAmounts || {}) };
+      if (legacyRider) {
+        const rf = outletDeductions.find(d => isRiderFeeName(d.name));
+        if (rf && amounts[rf.name] === undefined) amounts[rf.name] = String(legacyRiderFee(h));
+      }
+      setDedAmounts(amounts);
+      setRider(h.rider || null);
+      setFeeOnOverride(h.feeOn !== false);
+      setFeeOverride(h.feeAmount ?? null);
+      setExtraOn(Object.fromEntries(outletIncomes.slice(1).map(c => [c.name, (h.extraIncomes || []).some(e => e.name === c.name)])));
+      setExtraVal(Object.fromEntries((h.extraIncomes || []).map(e => [e.name, String(e.amount)])));
+      setDiscountValue(h.discountValue || '');
+      setDiscountType(h.discountType || 'KES');
+      setRoutePoints(sortRoutePoints(h.routePoints || []));
+      setDistanceKm(h.distanceKm || 0);
+      setPickupSelections(h.pickupSelections || {});
+      setMergedIds(prev => prev.filter(id => id !== h.id));
+      setCartTab('cart');
+      toast.success('Order resumed');
+    } catch (e: any) {
+      toast.error(e.message || 'Could not resume the order');
+    }
+  };
+
+  const deleteHeld = async (h: HeldOrder) => {
+    if (!window.confirm('Delete this pending order? This cannot be undone.')) return;
+    try {
+      const res = await manageHeldOrders({ action: 'remove', id: h.id, branchId: currentBranch?.id });
+      setHeldOrders(res.orders as HeldOrder[]);
+      setMergedIds(prev => prev.filter(id => id !== h.id));
+      setRoutePoints(pts => pts.filter(p => !String(p.id).startsWith(`m_${h.id}_`)));
+      toast.success('Pending order deleted');
+    } catch (e: any) {
+      toast.error(e.message || 'Could not delete');
+    }
+  };
+
+  // ── Merge pending orders into this delivery route ──
+  const toggleMerge = async (h: HeldOrder) => {
+    if (mergedIds.includes(h.id)) {
+      setMergedIds(ids => ids.filter(x => x !== h.id));
+      setRoutePoints(pts => pts.filter(p => !String(p.id).startsWith(`m_${h.id}_`)));
+      return;
+    }
+    setMergedIds(ids => [...ids, h.id]);
+    // Bring over the drop-offs (and any extra stops). Pick-ups and start/end stay those of the active order.
+    const add: any[] = (h.routePoints || [])
+      .filter(p => p.tag !== 'start' && p.tag !== 'end' && p.tag !== 'pickup')
+      .map(p => ({ ...p, id: `m_${h.id}_${p.id}` }));
+    // The merged order's customer location is a drop-off too.
+    const cust = await resolveDrop(h.customer, `m_${h.id}_c_${h.customer?.id}`);
+    if (cust) add.push(cust);
+    if (!mergedRef.current.includes(h.id)) return; // unmerged while the location was being looked up
+    setRoutePoints(pts => {
+      const fresh = add.filter((a, i) => !pts.some(p => p.lat === a.lat && p.lng === a.lng) && add.findIndex(b => b.lat === a.lat && b.lng === a.lng) === i);
+      return fresh.length === 0 ? pts : sortRoutePoints([...pts, ...fresh]);
+    });
+  };
+
+  // Unmerges every merged pending order straight from the cart (no need to reopen Plan Route).
+  const unmergeAll = () => {
+    setMergedIds([]);
+    setRoutePoints(pts => pts.filter(p => !isMergedPoint(p)));
+    toast.success('Pending orders unmerged');
+  };
+
+  const handleCheckout = async () => {
+    if (cart.length === 0) return toast.error('Cart is empty');
+    setProcessing(true);
+    try {
+      // The merged orders' drop-offs belong to their own sales, so the active sale only records its own points.
+      // The distance covers the whole merged trip and is stored once, on the active sale.
+      const rf = routeFields(routePoints.filter(p => !isMergedPoint(p)));
+
+      // Work out which supplier pick-ups have items ticked (before the cart is cleared).
+      const pickupBills = routePoints
+        .filter(p => p.tag === 'pickup' && p.supplierId && !isMergedPoint(p))
+        .map(p => {
+          const ids = pickupSelections[p.id] || [];
+          const items = pickupItems.filter(i => ids.includes(i.productId));
+          return {
+            supplierId: p.supplierId as string,
+            supplierName: (p.supplierName || p.label) as string,
+            items,
+            amount: items.reduce((s, i) => s + i.unitCost * i.quantity, 0),
+          };
+        })
+        .filter(b => b.items.length > 0);
+
+      // Items ticked at supplier pick-ups are not taken from any storage; items ticked at storage
+      // pick-ups come out of that storage. Everything else comes from the own rider's storage (if any), then the Office.
+      const pickedIds = (pt: any): string[] => (pickupSelections[pt.id] || []).filter(id => pickupItems.some(i => i.productId === id));
+      const ownPoints = routePoints.filter(pt => pt.tag === 'pickup' && !isMergedPoint(pt));
+      const supplierPicked = Array.from(new Set(ownPoints.filter(pt => pt.supplierId && !pt.storageId).flatMap(pickedIds)));
+      const storagePicks: Record<string, string[]> = {};
+      ownPoints.filter(pt => pt.storageId).forEach(pt => {
+        const sid = pt.storageId as string;
+        storagePicks[sid] = Array.from(new Set([...(storagePicks[sid] || []), ...pickedIds(pt)]));
+      });
+      const riderId = rider?.type === 'own' ? rider.id : undefined;
+      const stockArgs = { supplierPickedProductIds: supplierPicked, storagePicks, riderId };
+
+      const activeRes = await createSale({
+        ...stockArgs,
+        items: cart.map(c => ({ productId: c.product.id, quantity: c.quantity, unitPrice: c.unitPrice })),
+        customerId: selectedCustomer?.id,
+        paymentMethod,
+        discount: discountAmount,
+        branchId: currentBranch?.id,
+        ...rf,
+        deliveryDistanceKm: distanceKm || undefined,
+        deductions: appliedDeductions.map(d => ({ name: d.name, amount: deductionAmount(d) })),
+        deliveryFee,
+        extraIncomes: appliedExtras,
+        riderType: rider?.type,
+        riderName: rider?.name,
+      });
+      const saleNo = (activeRes.sale as any)?.saleNumber;
+
+      // Complete every merged pending order together with this one.
+      let completed = 0;
+      const failed: string[] = [];
+      for (const h of mergeList) {
+        try {
+          const t = heldTotals(h);
+          const heldDeductions = outletDeductions
+            .filter(d => (h.selectedDeductions || []).includes(d.name))
+            .map(d => {
+              // A Rider Fee edited on the held order keeps its edited amount.
+              const edited = isRiderFeeName(d.name) ? h.deductionAmounts?.[d.name] : undefined;
+              return {
+                name: d.name,
+                amount: edited !== undefined ? Math.max(0, Number(edited) || 0) : commissionAmount(d, t.total),
+              };
+            });
+          // Older held orders carried a separate rider fee.
+          const oldRider = legacyRiderFee(h);
+          if (oldRider > 0 && !heldDeductions.some(d => isRiderFeeName(d.name))) heldDeductions.push({ name: 'Rider Fee', amount: oldRider });
+          // When a route was planned, the merged order's customer location is its drop-off.
+          const heldPoints: any[] = [...(h.routePoints || [])];
+          const custDrop = routePoints.length > 0 ? await resolveDrop(h.customer, 'x') : null;
+          if (custDrop && !heldPoints.some(p => p.tag === 'dropoff' && p.lat === custDrop.lat && p.lng === custDrop.lng)) heldPoints.push(custDrop);
+          await createSale({
+            ...stockArgs,
+            items: h.items.map(i => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice })),
+            customerId: h.customer?.id,
+            paymentMethod: h.paymentMethod,
+            discount: t.discount,
+            branchId: currentBranch?.id,
+            ...routeFields(sortRoutePoints(heldPoints)),
+            deductions: heldDeductions,
+            deliveryFee: t.fee,
+            extraIncomes: h.extraIncomes,
+            riderType: rider?.type,
+            riderName: rider?.name,
+            notes: saleNo ? `Merged delivery with Sale #${saleNo}` : 'Merged delivery',
+          });
+          await manageHeldOrders({ action: 'remove', id: h.id, branchId: currentBranch?.id });
+          completed++;
+        } catch (e: any) {
+          failed.push(h.customer?.customerName || 'Pending order');
+        }
+      }
+
+      // Add a pending bill (at cost price) for each supplier that items were picked up from.
+      let billsAdded = 0;
+      const billIssues: string[] = [];
+      for (const b of pickupBills) {
+        if (!(b.amount > 0)) { billIssues.push(`${b.supplierName} (items have no cost price)`); continue; }
+        try {
+          await manageSupplierBills({
+            action: 'add',
+            supplierId: b.supplierId,
+            amount: b.amount,
+            notes: saleNo ? `POS pick-up, Sale #${saleNo}` : 'POS pick-up',
+            date: new Date().toISOString(),
+            source: 'pickup',
+            items: b.items.map(i => ({ productId: i.productId, name: i.name, quantity: i.quantity, unitCost: i.unitCost })),
+            saleNumber: saleNo || undefined,
+            branchId: currentBranch?.id,
+          });
+          billsAdded++;
+        } catch {
+          billIssues.push(b.supplierName);
+        }
+      }
+
+      toast.success(completed > 0 ? `Sale completed, plus ${completed} merged order${completed === 1 ? '' : 's'}!` : 'Sale completed!');
+      if (billsAdded > 0) toast.success(`${billsAdded} supplier bill${billsAdded === 1 ? '' : 's'} added to Suppliers`);
+      if (billIssues.length > 0) toast.error(`Could not add a bill for: ${billIssues.join(', ')}. Add it manually under Suppliers.`);
+      if (failed.length > 0) toast.error(`Could not complete: ${failed.join(', ')}. They remain in Pending.`);
+
+      resetOrder();
+      loadSales();
+      loadStorages();
+      loadHeld();
+      const prods = await getProducts({ status: 'Active', branchId: currentBranch?.id });
+      setProducts(prods.products as Product[]);
+    } catch (e: any) {
+      toast.error(e.message || 'Sale failed');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  // As the phone number for a brand-new customer is typed, quietly check
+  // whether it's already registered so we can offer that customer instead of
+  // erroring out only after Save is pressed.
+  const checkExistingByPhone = async (phoneRaw: string) => {
+    const phone = phoneRaw.trim();
+    if (!phone) { setDuplicateMatch(null); return; }
+    const normalized = phone.startsWith('+') ? phone : '+' + phone;
+    try {
+      const res = await getCustomers({ search: normalized });
+      const match = (res.customers as Customer[]).find(c => (c.phoneNumber || '') === normalized);
+      setDuplicateMatch(match || null);
+    } catch {
+      setDuplicateMatch(null);
+    }
+  };
+
+  const clearNewCustomerForm = () => { setNewCustName(''); setNewCustPhone(''); setNewCustAddress(''); setNewCustCoords(''); };
+
+  const useDuplicateMatch = () => {
+    if (!duplicateMatch) return;
+    setSelectedCustomer(duplicateMatch);
+    setShowCustomerDialog(false);
+    setDuplicateMatch(null);
+    clearNewCustomerForm();
+  };
+
+  const handleCreateCustomer = async () => {
+    if (!newCustName || !newCustPhone) return toast.error('Name and phone are required');
+    try {
+      const res = await saveCustomer({
+        customerName: newCustName,
+        phoneNumber: newCustPhone,
+        address: newCustAddress || undefined,
+        coordinates: newCustCoords || undefined,
+      });
+      setCustomers(prev => [...prev, res.customer as Customer]);
+      setSelectedCustomer(res.customer as Customer);
+      setShowCustomerDialog(false);
+      clearNewCustomerForm();
+      setDuplicateMatch(null);
+      toast.success('Customer created');
+    } catch (e: any) {
+      const msg = e.message || 'Failed';
+      if (msg.toLowerCase().includes('already exists')) {
+        await checkExistingByPhone(newCustPhone);
+        toast.error('That number is already registered — use the existing customer below.');
+      } else {
+        toast.error(msg);
+      }
+    }
+  };
+
+  const fmt = (n: number) => `KES ${n.toLocaleString()}`;
+  const mergedPayable = mergeList.reduce((s, h) => s + heldTotals(h).payable, 0);
+  const timeOf = (iso: string) =>
+    iso ? new Date(iso).toLocaleTimeString('en-KE', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Africa/Nairobi' }) : '';
+
+  return (
+    <div className="p-6 h-[calc(100vh-0px)] flex gap-6">
+      {/* Left: Product Catalog */}
+      <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
+          <h1 className="text-2xl font-bold text-foreground">Point of Sale</h1>
+          <div className="flex items-center gap-2">
+            <ViewToggle value={catalogView} onChange={setCatalogView} />
+            <Button variant="outline" size="sm" onClick={() => setShowOtherIncome(true)}>
+              <DollarSign className="w-4 h-4 mr-1" /> Other Income
+            </Button>
+          </div>
+        </div>
+
+        <div className="mb-3 space-y-2">
+          <DateRangeFilter value={range} onChange={setRange} />
+          <SummaryTiles small items={(() => {
+            const f = recentSales.filter(x => x.status !== 'Voided' && inRange(range, x.saleDate));
+            const sum = (xs: any[], k: string) => xs.reduce((a, x) => a + (x[k] || 0), 0);
+            const cash = f.filter(x => isCashPayment(x.paymentMethod));
+            return [
+              { label: 'Sales Made', value: fmt(sum(f, 'total')) },
+              { label: 'Deductions', value: fmt(sum(f, 'deductions')) },
+              { label: 'Platform Pay', value: fmt(sum(f, 'total') - sum(cash, 'total')) },
+              { label: 'Cash/M-PESA', value: fmt(sum(cash, 'total')) },
+            ];
+          })()} />
+          <CategoryRibbon categories={categories} selected={categoryFilter} onSelect={setCategoryFilter} />
+        </div>
+
+        <div className="relative mb-4">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input placeholder="Search products by name or SKU..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {catalogView === 'grid' ? (
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3 items-stretch">
+              {filtered.map(p => (
+                <div
+                  key={p.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => addToCart(p)}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); addToCart(p); } }}
+                  className={`bg-card border rounded-xl p-4 text-left hover:border-primary/50 hover:bg-muted/30 transition-all group flex flex-col min-w-0 h-full cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring ${qtyInCart(p.id) > 0 ? 'border-primary/60' : 'border-border'}`}
+                >
+                  <div className="relative w-full mb-3">
+                    <ProductImage src={p.images?.[0]?.url} alt={p.productName} className="w-full" />
+                    <QtyControl qty={qtyInCart(p.id)} onMinus={() => decrementFromCart(p.id)} onPlus={() => addToCart(p)} />
+                  </div>
+                  <p className="text-sm font-medium text-foreground w-full break-words whitespace-normal leading-snug [overflow-wrap:anywhere]">{p.productName}</p>
+                  <p className="text-xs text-muted-foreground font-mono w-full break-all whitespace-normal mt-0.5">{p.sku}</p>
+                  <div className="flex items-center justify-between gap-2 mt-auto pt-2 flex-wrap">
+                    <p className="text-sm font-bold text-primary whitespace-normal break-words">{fmt(p.sellingPrice || 0)}</p>
+                    <Badge variant="secondary" className="text-[10px] whitespace-nowrap">{p.stockQuantity || 0} left</Badge>
+                  </div>
+                  {storageLine(p) && <p className="text-[9px] leading-tight text-muted-foreground break-words w-full mt-1">{storageLine(p)}</p>}
+                </div>
+              ))}
+              {filtered.length === 0 && (
+                <div className="col-span-full text-center py-12 text-muted-foreground">
+                  <ShoppingCart className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                  No products found
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="border border-border rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-muted-foreground bg-muted/30">
+                    <th className="text-left p-3 font-medium">Product</th>
+                    <th className="text-left p-3 font-medium">SKU</th>
+                    <th className="text-right p-3 font-medium">Price</th>
+                    <th className="text-right p-3 font-medium">Stock</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="text-center py-12 text-muted-foreground">
+                        <ShoppingCart className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                        No products found
+                      </td>
+                    </tr>
+                  ) : filtered.map(p => (
+                    <tr key={p.id} onClick={() => addToCart(p)} className="border-b border-border last:border-0 hover:bg-muted/30 cursor-pointer transition-colors">
+                      <td className="p-3 font-medium text-foreground max-w-xs">
+                        <div className="flex items-center gap-3">
+                          <div className="shrink-0">
+                            <ProductImage src={p.images?.[0]?.url} alt={p.productName} className="w-10 h-10" />
+                          </div>
+                          <div className="min-w-0">
+                            <span className="break-words whitespace-normal min-w-0 [overflow-wrap:anywhere]">{p.productName}</span>
+                            {storageLine(p) && <p className="text-[9px] leading-tight font-normal text-muted-foreground break-words">{storageLine(p)}</p>}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="p-3 text-muted-foreground font-mono text-xs break-all">{p.sku}</td>
+                      <td className="p-3 text-right font-semibold text-primary whitespace-nowrap">{fmt(p.sellingPrice || 0)}</td>
+                      <td className="p-3 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <QtyControl inline small qty={qtyInCart(p.id)} onMinus={() => decrementFromCart(p.id)} onPlus={() => addToCart(p)} />
+                          <Badge variant="secondary" className="text-[10px] whitespace-nowrap">{p.stockQuantity || 0} left</Badge>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Right: Cart */}
+      <div className="w-96 shrink-0 flex flex-col min-h-0 bg-card border border-border rounded-xl">
+        <div className="p-4 border-b border-border">
+          {/* Cart / Pending Orders tabs */}
+          <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-1">
+            <button
+              type="button"
+              onClick={() => setCartTab('cart')}
+              aria-pressed={cartTab === 'cart'}
+              className={`h-8 rounded-md text-xs font-medium flex items-center justify-center gap-1.5 transition-colors ${cartTab === 'cart' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              <ShoppingCart className="w-3.5 h-3.5" /> Cart
+              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{cart.length}</Badge>
+            </button>
+            <button
+              type="button"
+              onClick={() => setCartTab('pending')}
+              aria-pressed={cartTab === 'pending'}
+              className={`h-8 rounded-md text-xs font-medium flex items-center justify-center gap-1.5 transition-colors ${cartTab === 'pending' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              <Clock className="w-3.5 h-3.5" /> Pending Orders
+              <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 ${heldOrders.length > 0 ? 'bg-amber-500/20 text-amber-400' : ''}`}>{heldOrders.length}</Badge>
+            </button>
+          </div>
+
+          {cartTab === 'cart' && (
+            <div className="mt-3 flex items-center gap-2">
+              {selectedCustomer ? (
+                <div className="flex-1 flex items-center justify-between bg-muted rounded-lg px-3 py-2 gap-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-foreground break-words whitespace-normal">{selectedCustomer.customerName}</p>
+                    <p className="text-[10px] text-muted-foreground break-all">{selectedCustomer.phoneNumber}</p>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setShowCustLocation(true)}
+                      title="View or update this customer's saved location"
+                      className="w-6 h-6 rounded-md border border-amber-400/70 flex items-center justify-center hover:bg-amber-400/10"
+                    >
+                      <MapPin className="w-3.5 h-3.5 text-amber-400" />
+                    </button>
+                    <button onClick={() => setSelectedCustomer(null)}><X className="w-3.5 h-3.5 text-muted-foreground" /></button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <CustomerPicker
+                    className="w-1/2 min-w-0 rounded-md ring-1 ring-pink-400/70"
+                    placeholder="Link customer..."
+                    onSelect={(c: PickableCustomer) => setSelectedCustomer(c as Customer)}
+                  />
+                  <Button size="sm" variant="outline" onClick={() => setShowCustomerDialog(true)} className="h-9 w-1/2 border-amber-400/80 hover:border-amber-400 hover:shadow-[0_0_12px_hsl(45_95%_55%/0.35)]"><UserPlus className="w-3.5 h-3.5 mr-1" /> Add Customer</Button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        {cartTab === 'pending' ? (
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-2">
+            {heldOrders.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <Clock className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                <p className="text-sm">No pending orders</p>
+              </div>
+            ) : heldOrders.map(h => {
+              const t = heldTotals(h);
+              const merged = mergedIds.includes(h.id);
+              return (
+                <div key={h.id} className={`rounded-lg border px-3 py-2 space-y-1.5 ${merged ? 'border-emerald-500/70 bg-emerald-500/5' : 'border-border bg-muted/30'}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground break-words">{h.customer?.customerName || 'Walk-in customer'}</p>
+                      {h.customer?.phoneNumber && <p className="text-[10px] text-muted-foreground">{h.customer.phoneNumber}</p>}
+                    </div>
+                    <span className="text-[10px] text-muted-foreground shrink-0">Held {timeOf(h.heldAt)}</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground line-clamp-2 break-words">
+                    {h.items.map(i => `${i.quantity}× ${i.productName || 'Item'}`).join(', ')}
+                  </p>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">Total{t.fee + t.extra > 0 ? ' (incl. fees)' : ''}</span>
+                    <span className="font-bold text-primary">{fmt(t.payable)}</span>
+                  </div>
+                  {merged && <p className="text-[10px] text-emerald-400">Merged</p>}
+                  <div className="flex gap-1.5">
+                    <Button size="sm" className="h-7 flex-1 text-xs" onClick={() => resumeHeld(h)}><Play className="w-3 h-3 mr-1" /> Resume</Button>
+                    <Button size="sm" variant="ghost" className="h-7 text-destructive" onClick={() => deleteHeld(h)}><Trash2 className="w-3.5 h-3.5" /></Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <>
+            {/* Selected items: tighter rows so more of the order stays in view */}
+            <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-1">
+              {cart.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <Receipt className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">Cart is empty</p>
+                </div>
+              ) : cart.map(item => (
+                <div key={item.product.id} className="flex items-center gap-2 bg-muted/50 rounded-lg px-2.5 py-1">
+                  <div className="flex-1 min-w-0">
+                    <p className={`${cartNameSize(item.product.productName)} font-medium text-foreground break-words whitespace-normal leading-tight [overflow-wrap:anywhere]`}>{item.product.productName}</p>
+                    <p className="text-[11px] leading-tight text-muted-foreground">{fmt(item.unitPrice)} each</p>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button onClick={() => updateQty(item.product.id, -1)} className="w-6 h-6 rounded bg-muted flex items-center justify-center hover:bg-border"><Minus className="w-3 h-3" /></button>
+                    <span className="text-sm font-semibold w-6 text-center">{item.quantity}</span>
+                    <button onClick={() => updateQty(item.product.id, 1)} className="w-6 h-6 rounded bg-muted flex items-center justify-center hover:bg-border"><Plus className="w-3 h-3" /></button>
+                  </div>
+                  <p className="text-sm font-semibold text-foreground w-20 text-right shrink-0 break-words">{fmt(item.unitPrice * item.quantity)}</p>
+                  <button onClick={() => removeFromCart(item.product.id)} className="text-destructive hover:text-red-300 shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
+                </div>
+              ))}
+            </div>
+
+            <div className="border-t border-border flex flex-col shrink-0">
+              {/* Scrollable options */}
+              <div className="px-3 pt-2.5 pb-2 space-y-2 max-h-[40vh] overflow-y-auto">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Subtotal</span>
+                  <span className="text-foreground">{fmt(subtotal)}</span>
+                </div>
+                {discountAmount > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Discount{discountType === '%' ? ` (${Math.min(Number(discountValue) || 0, 100)}%)` : ''}</span>
+                    <span className="text-sky-400">-{fmt(discountAmount)}</span>
+                  </div>
+                )}
+                {deliveryFee > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">{feeInc?.name || 'Delivery fee'}</span>
+                    <span className="text-foreground">{fmt(deliveryFee)}</span>
+                  </div>
+                )}
+                {appliedExtras.map(e => (
+                  <div key={e.name} className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">{e.name}</span>
+                    <span className="text-foreground">{fmt(e.amount)}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between text-lg font-bold">
+                  <span className="text-foreground">Total</span>
+                  <span className="text-primary">{fmt(payable)}</span>
+                </div>
+
+                {/* Payment method */}
+                <div className="grid grid-cols-2 gap-1.5">
+                  {['Platform Pay', 'Cash/M-PESA'].map(m => (
+                    <button key={m} type="button" onClick={() => setPaymentMethod(m)}
+                      className={`h-7 rounded-md border text-[11px] font-medium transition-all ${paymentMethod === m ? 'border-sky-500 bg-sky-500 text-white' : 'border-border text-muted-foreground hover:border-sky-500/60'}`}>
+                      {m}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Delivery fee (first income of the outlet) and Discount, side by side */}
+                <div className="grid grid-cols-2 gap-1.5">
+                  {feeInc && (
+                    <FeeTile
+                      label={`${feeInc.name || 'Delivery Fee'} KES`}
+                      on={feeOn}
+                      onToggle={() => setFeeOnOverride(!feeOn)}
+                      value={feeAmount}
+                      onValue={setFeeOverride}
+                      onCls={AMBER_ON}
+                      offCls={AMBER_OFF}
+                      title={`${feeInc.name} in KES`}
+                    />
+                  )}
+                  {/* Discount: permanent label, amount in KES or % */}
+                  <div className={`h-7 rounded-md border flex items-center overflow-hidden transition-all ${discountAmount > 0 ? 'border-sky-500 bg-sky-500 text-white' : 'border-border text-muted-foreground hover:border-sky-500/60'}`}>
+                    <span className="flex-1 min-w-0 pl-2 text-[11px] font-medium truncate">Discount</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={discountValue}
+                      placeholder="0"
+                      onChange={e => setDiscountValue(e.target.value)}
+                      title="Discount amount"
+                      className={`h-5 w-11 mr-1 rounded px-1 text-right text-[11px] outline-none ${discountAmount > 0 ? 'bg-white/25 text-white placeholder:text-white/70' : 'bg-transparent text-foreground placeholder:text-muted-foreground'}`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setDiscountType(t => (t === 'KES' ? '%' : 'KES'))}
+                      title="Switch between KES and %"
+                      className={`h-full px-1.5 border-l text-[11px] font-semibold ${discountAmount > 0 ? 'border-white/40 hover:bg-white/20' : 'border-border hover:bg-muted'}`}
+                    >
+                      {discountType}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Other incomes & revenues of the outlet (Settings > Outlets > Incomes & Revenues) */}
+                {extraIncomes.length > 0 && (
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {extraIncomes.map(e => (
+                      <FeeTile
+                        key={e.name}
+                        label={`${e.name} KES`}
+                        on={e.on}
+                        onToggle={() => setExtraOn(p => ({ ...p, [e.name]: !e.on }))}
+                        value={e.amount}
+                        onValue={v => setExtraVal(p => ({ ...p, [e.name]: v }))}
+                        onCls={AMBER_ON}
+                        offCls={AMBER_OFF}
+                        title={`${e.name} in KES`}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {/* Outlet deductions (Glovo, Rider Fee, Promo and any others) */}
+                {outletDeductions.length > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-[11px] font-medium text-muted-foreground">Deductions</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {outletDeductions.map(d => {
+                        const on = selectedDeductions.includes(d.name);
+                        if (isRiderFeeName(d.name)) {
+                          return (
+                            <div key={d.name} className="flex-[1.6] min-w-[140px]">
+                              <FeeTile
+                                label={`${d.name} KES`}
+                                on={on}
+                                onToggle={() => toggleDeduction(d)}
+                                value={deductionAmountText(d)}
+                                onValue={v => setDedAmounts(p => ({ ...p, [d.name]: v }))}
+                                onCls={PINK_ON}
+                                offCls={PINK_OFF}
+                                title={`${d.name} in KES`}
+                              />
+                            </div>
+                          );
+                        }
+                        return (
+                          <button key={d.name} type="button" onClick={() => toggleDeduction(d)}
+                            className={`flex-1 h-7 px-2 rounded-md border text-[11px] font-medium whitespace-nowrap transition-all ${on ? 'border-pink-500 bg-pink-500 text-white' : 'border-border text-muted-foreground hover:border-pink-500/60'}`}>
+                            {d.name} · {d.type === 'percent' ? `${d.value}%` : `KES ${d.value.toLocaleString()}`}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {appliedDeductions.length > 0 && (
+                  <p className="text-[11px] text-pink-400">
+                    Deductions on this order: {fmt(deductionsTotal)}
+                  </p>
+                )}
+
+                {/* Riders: pick a 3PL or own rider (set up in Settings > Delivery) for this order */}
+                <div className="space-y-1">
+                  <p className="text-[11px] font-medium text-muted-foreground">Rider</p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {(['threePl', 'own'] as RiderType[]).map(type => {
+                      const active = rider?.type === type;
+                      const list = riders[type];
+                      const Icon = type === 'threePl' ? Truck : Bike;
+                      return (
+                        <DropdownMenu key={type}>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              type="button"
+                              className={`h-7 px-2 rounded-md border text-[11px] font-medium flex items-center justify-between gap-1 transition-all ${active ? 'border-sky-500 bg-sky-500 text-white' : 'border-border text-muted-foreground hover:border-sky-500/60'}`}
+                            >
+                              <span className="flex items-center gap-1 min-w-0">
+                                <Icon className="w-3.5 h-3.5 shrink-0" />
+                                <span className="truncate">{active ? rider!.name : RIDER_LABELS[type]}</span>
+                              </span>
+                              <ChevronDown className="w-3 h-3 shrink-0" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start" className="w-52 max-h-64 overflow-y-auto">
+                            <DropdownMenuLabel className="text-xs">{RIDER_LABELS[type]}</DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            {list.length === 0 ? (
+                              <p className="px-2 py-2 text-xs text-muted-foreground">No riders yet.</p>
+                            ) : list.map(r => (
+                              <DropdownMenuItem key={r.id} onSelect={() => setRider({ type, id: r.id, name: r.name })} className="gap-2 text-xs">
+                                {active && rider?.id === r.id ? <Check className="w-3.5 h-3.5" /> : <span className="w-3.5" />}
+                                <span className="truncate">{r.name}</span>
+                              </DropdownMenuItem>
+                            ))}
+                            {active && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onSelect={() => setRider(null)} className="gap-2 text-xs text-destructive">
+                                  <X className="w-3.5 h-3.5" /> Clear rider
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5 border-t border-border pt-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-medium text-muted-foreground flex items-center gap-1"><MapPin className="w-3 h-3" /> Delivery</p>
+                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={openRoutePlanner}>
+                      <Route className="w-3 h-3 mr-1" /> {routePoints.length > 0 ? `${routePoints.length} stops` : 'Plan Route'}
+                    </Button>
+                  </div>
+                  {routePoints.length > 0 && (
+                    <div className="bg-muted/50 rounded-lg p-2 space-y-1 max-h-40 overflow-y-auto">
+                      {routePoints.map((pt: any, i: number) => (
+                        <div key={pt.id} className="text-[10px] text-muted-foreground flex gap-1 items-start">
+                          <span className="font-bold text-foreground shrink-0">{i + 1}.</span>
+                          <span className="capitalize font-medium shrink-0" style={{ color: pt.tag === 'start' ? '#22c55e' : pt.tag === 'pickup' ? '#3b82f6' : pt.tag === 'dropoff' ? '#ef4444' : pt.tag === 'end' ? '#a855f7' : '#6b7280' }}>{pt.tag || 'pin'}</span>
+                          <span className="min-w-0 break-words whitespace-normal">{pt.label}</span>
+                        </div>
+                      ))}
+                      {distanceKm > 0 && <div className="text-xs font-semibold text-primary mt-1">Distance: {distanceKm.toFixed(2)} km</div>}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Frozen footer */}
+              <div className="shrink-0 border-t border-border bg-card rounded-b-xl px-3 py-2.5 space-y-2">
+                {mergeList.length > 0 && (
+                  <div className="flex items-center gap-2 rounded-md border border-emerald-500/60 bg-emerald-500/5 px-2 py-1">
+                    <Layers className="w-3 h-3 text-emerald-400 shrink-0" />
+                    <p className="flex-1 min-w-0 text-[11px] truncate">
+                      <span className="font-medium text-emerald-400">{mergeList.length} merged</span>
+                      <span className="text-muted-foreground"> · +{fmt(mergedPayable)}</span>
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-6 px-2 text-[10px] border-emerald-500/70 hover:border-emerald-500"
+                      onClick={unmergeAll}
+                      title="Remove the merged pending orders from this checkout"
+                    >
+                      Unmerge
+                    </Button>
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    className="h-12 px-3 border-amber-400/80 hover:border-amber-400"
+                    onClick={handleHold}
+                    disabled={holding || processing || cart.length === 0}
+                    title="Put this order on hold"
+                  >
+                    <Pause className="w-4 h-4 mr-1" /> {holding ? '...' : 'Hold'}
+                  </Button>
+                  <Button className="flex-1 h-12 text-base bg-gradient-to-r from-primary to-secondary" onClick={handleCheckout} disabled={processing || cart.length === 0}>
+                    {processing ? 'Processing...' : `Checkout ${fmt(payable)}`}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Other Income (now a working dialog) */}
+      <OtherIncomeDialog open={showOtherIncome} onOpenChange={setShowOtherIncome} />
+
+      {/* Retain / Update the linked customer's saved location */}
+      <CustomerLocationDialog
+        open={showCustLocation}
+        onOpenChange={setShowCustLocation}
+        customer={selectedCustomer}
+        onChanged={loc => {
+          if (!selectedCustomer) return;
+          setSelectedCustomer({ ...selectedCustomer, ...loc });
+          setCustomers(prev => prev.map(c => (c.id === selectedCustomer.id ? { ...c, ...loc } : c)));
+        }}
+      />
+
+      {/* New Customer Dialog */}
+      <Dialog open={showCustomerDialog} onOpenChange={(open) => { setShowCustomerDialog(open); if (!open) setDuplicateMatch(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>New Customer</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Name *</Label><Input value={newCustName} onChange={e => setNewCustName(e.target.value)} placeholder="Customer name" /></div>
+            <div>
+              <Label>Phone Number *</Label>
+              <Input
+                value={newCustPhone}
+                onChange={e => { setNewCustPhone(e.target.value); setDuplicateMatch(null); }}
+                onBlur={e => checkExistingByPhone(e.target.value)}
+                placeholder="+254..."
+              />
+            </div>
+            {duplicateMatch && (
+              <div className="rounded-lg border border-primary/40 bg-primary/5 p-3 space-y-2">
+                <p className="text-xs text-muted-foreground flex items-center gap-1.5"><UserCheck className="w-3.5 h-3.5" /> A customer with this number already exists:</p>
+                <p className="text-sm font-medium text-foreground">{duplicateMatch.customerName} · {duplicateMatch.phoneNumber}</p>
+                <Button type="button" size="sm" onClick={useDuplicateMatch}>Use this customer</Button>
+              </div>
+            )}
+            <div>
+              <Label>Location</Label>
+              <div className="flex gap-2">
+                <Input value={newCustAddress} onChange={e => { setNewCustAddress(e.target.value); setNewCustCoords(''); }} placeholder="Address (optional)" className="flex-1" />
+                <Button type="button" variant="outline" size="icon" className="shrink-0" onClick={() => setShowCustLocationPicker(true)}><MapPin className="w-4 h-4" /></Button>
+              </div>
+              {newCustCoords && <p className="text-[10px] font-mono text-muted-foreground mt-1">Pin saved: {newCustCoords}</p>}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCustomerDialog(false)}>Cancel</Button>
+            <Button onClick={handleCreateCustomer}>Add Customer</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <LocationPickerDialog
+        open={showCustLocationPicker}
+        onOpenChange={setShowCustLocationPicker}
+        title="Customer Location"
+        value={newCustAddress}
+        onSelect={(address, coords) => { setNewCustAddress(address); setNewCustCoords(coords); }}
+      />
+
+      <Dialog open={showDeliveryMap} onOpenChange={setShowDeliveryMap}>
+        <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Route className="w-5 h-5 text-primary" /> Plan Delivery Route</DialogTitle>
+          </DialogHeader>
+
+          <DeliveryRouteMap
+            points={routePoints}
+            onPointsChange={setRoutePoints}
+            totalDistance={distanceKm}
+            onDistanceChange={setDistanceKm}
+            pickupItems={pickupItems}
+            pickupSelections={pickupSelections}
+            onPickupSelectionsChange={setPickupSelections}
+            extraActions={
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 text-xs border-emerald-500/70 hover:border-emerald-500"
+                onClick={() => setShowMergeDialog(true)}
+              >
+                <Layers className="w-3.5 h-3.5 mr-1.5 shrink-0 text-emerald-400" />
+                <span className="truncate">Merge Orders{mergeList.length > 0 ? ` (${mergeList.length})` : ''}</span>
+              </Button>
+            }
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setRoutePoints([]); setDistanceKm(0); setMergedIds([]); setPickupSelections({}); }}>Clear All</Button>
+            <Button onClick={() => setShowDeliveryMap(false)}>Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Merge pending orders into the delivery route */}
+      <Dialog open={showMergeDialog} onOpenChange={setShowMergeDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Layers className="w-5 h-5 text-emerald-400" /> Merge pending orders</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            {heldOrders.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-4 text-center">No pending orders to merge.</p>
+            ) : (
+              <div className="space-y-1.5 max-h-72 overflow-y-auto">
+                {heldOrders.map(h => {
+                  const t = heldTotals(h);
+                  const drops = (h.routePoints || []).filter((p: any) => p.tag === 'dropoff').length + (dropFor(h.customer, 'x') ? 1 : 0);
+                  return (
+                    <label key={h.id} className="flex items-center gap-2 rounded-md bg-muted/50 px-2 py-1.5 cursor-pointer text-xs">
+                      <Checkbox checked={mergedIds.includes(h.id)} onCheckedChange={() => toggleMerge(h)} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block font-medium text-foreground truncate">{h.customer?.customerName || 'Walk-in customer'}</span>
+                        <span className="block text-[10px] text-muted-foreground">
+                          {h.items.length} item{h.items.length === 1 ? '' : 's'} · {drops > 0 ? `${drops} drop-off pin${drops === 1 ? '' : 's'}` : 'no drop-off pin'}
+                        </span>
+                      </span>
+                      <span className="font-semibold text-primary shrink-0">{fmt(t.payable)}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={unmergeAll} disabled={mergeList.length === 0}>Unmerge all</Button>
+            <Button onClick={() => setShowMergeDialog(false)}>Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

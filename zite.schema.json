@@ -1164,6 +1164,16 @@
                   "value": "3zRY",
                   "label": "bank_transfer",
                   "color": "red"
+                },
+                {
+                  "value": "knAc",
+                  "label": "Platform Pay",
+                  "color": "yellow"
+                },
+                {
+                  "value": "9Z1Y",
+                  "label": "Cash/M-PESA",
+                  "color": "pink"
                 }
               ],
               "disableColors": false
@@ -2429,6 +2439,16 @@
                   "value": "2nfa",
                   "label": "pickup",
                   "color": "orange"
+                },
+                {
+                  "value": "2Wa9",
+                  "label": "supplier",
+                  "color": "red"
+                },
+                {
+                  "value": "47n9",
+                  "label": "storage",
+                  "color": "yellow"
                 }
               ],
               "disableColors": false

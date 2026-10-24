@@ -1,0 +1,275 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+    /* Auto-restored theme variables */
+    --shadow-x: 0px;
+    --shadow-y: 1px;
+    --shadow-blur: 4px;
+    --shadow-spread: 0px;
+    --shadow-opacity: 0.2;
+    --shadow-color: #000000;
+    --shadow-2xs: var(--shadow-x) var(--shadow-y) color-mix(in srgb, var(--shadow-color) calc(var(--shadow-opacity) * 100%), transparent);
+    --shadow-xs: var(--shadow-x) var(--shadow-y) var(--shadow-blur) var(--shadow-spread) color-mix(in srgb, var(--shadow-color) calc(var(--shadow-opacity) * 100%), transparent);
+    --shadow-sm: var(--shadow-x) var(--shadow-y) calc(var(--shadow-blur) * 1.5) var(--shadow-spread) color-mix(in srgb, var(--shadow-color) calc(var(--shadow-opacity) * 100%), transparent);
+    --shadow-md: calc(var(--shadow-x) * 2) calc(var(--shadow-y) * 2) calc(var(--shadow-blur) * 3) calc(var(--shadow-spread) - 1px) color-mix(in srgb, var(--shadow-color) calc(var(--shadow-opacity) * 100%), transparent);
+    --shadow-lg: calc(var(--shadow-x) * 4) calc(var(--shadow-y) * 4) calc(var(--shadow-blur) * 5) calc(var(--shadow-spread) - 3px) color-mix(in srgb, var(--shadow-color) calc(var(--shadow-opacity) * 100%), transparent);
+    --shadow-xl: calc(var(--shadow-x) * 6) calc(var(--shadow-y) * 6) calc(var(--shadow-blur) * 7) calc(var(--shadow-spread) - 5px) color-mix(in srgb, var(--shadow-color) calc(var(--shadow-opacity) * 100%), transparent);
+    --shadow-2xl: calc(var(--shadow-x) * 8) calc(var(--shadow-y) * 8) calc(max(0px, var(--shadow-blur) * 9 - 8px)) calc(var(--shadow-spread) - 12px) color-mix(in srgb, var(--shadow-color) calc(var(--shadow-opacity) * 250%), transparent);
+    --shadow: var(--shadow-md);
+
+  --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --background: 220 20% 97%;
+  --foreground: 230 25% 12%;
+  --card: 0 0% 100%;
+  --card-foreground: 230 25% 12%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 230 25% 12%;
+  --primary: 210 85% 48%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 40 95% 45%;
+  --secondary-foreground: 230 25% 10%;
+  --muted: 220 16% 92%;
+  --muted-foreground: 220 10% 42%;
+  --accent: 160 70% 36%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 75% 52%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 220 15% 86%;
+  --input: 220 15% 86%;
+  --ring: 210 85% 48%;
+  --radius: 0.75rem;
+
+  --chart-1: 210 85% 58%;
+  --chart-2: 45 93% 52%;
+  --chart-3: 335 78% 58%;
+  --chart-4: 160 70% 42%;
+  --chart-5: 280 65% 60%;
+
+  --sidebar-background: 0 0% 100%;
+  --sidebar-foreground: 230 25% 15%;
+  --sidebar-primary: 210 85% 58%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 220 16% 92%;
+  --sidebar-accent-foreground: 230 25% 12%;
+  --sidebar-border: 220 15% 86%;
+  --sidebar-ring: 335 78% 58%;
+}
+
+.dark {
+  --background: 230 25% 7%;
+  --foreground: 60 20% 94%;
+  --card: 230 25% 10%;
+  --card-foreground: 60 20% 94%;
+  --popover: 230 25% 10%;
+  --popover-foreground: 60 20% 94%;
+  --primary: 210 85% 58%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 45 93% 52%;
+  --secondary-foreground: 230 25% 7%;
+  --muted: 230 20% 15%;
+  --muted-foreground: 220 15% 55%;
+  --accent: 160 70% 42%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 230 20% 18%;
+  --input: 230 20% 18%;
+  --ring: 335 78% 58%;
+  --sidebar-background: 230 25% 8%;
+  --sidebar-foreground: 60 20% 88%;
+  --sidebar-accent: 230 20% 15%;
+  --sidebar-accent-foreground: 60 20% 94%;
+  --sidebar-border: 230 20% 15%;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Aurora UI — shared design layer for Uptown Drinks POS and the
+   G-Shock Vapes Portal. Brand colours come from each app's tokens;
+   everything below only uses those tokens, so the apps look alike
+   while keeping their own palette.
+   ═══════════════════════════════════════════════════════════════════ */
+
+@layer base {
+  :root {
+    --tone-gold: 45 95% 55%;
+    --tone-pink: 330 85% 62%;
+    --tone-blue: 205 90% 58%;
+    --tone-green: 150 70% 48%;
+    --aurora-a: 0.10;
+    --aurora-b: 0.07;
+  }
+  .dark {
+    --aurora-a: 0.16;
+    --aurora-b: 0.10;
+  }
+
+  html { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+
+  /* Soft brand-coloured aurora behind every screen */
+  body {
+    background-color: hsl(var(--background));
+    background-image:
+      radial-gradient(1100px 620px at 105% -12%, hsl(var(--primary) / var(--aurora-a)), transparent 62%),
+      radial-gradient(900px 520px at -8% 108%, hsl(var(--secondary) / var(--aurora-b)), transparent 60%);
+    background-attachment: fixed;
+    letter-spacing: -0.005em;
+  }
+
+  h1, h2, h3 { letter-spacing: -0.02em; }
+  main h1 {
+    font-weight: 800;
+    background-image: linear-gradient(100deg, hsl(var(--foreground)) 10%, hsl(var(--primary)) 70%, hsl(var(--secondary)) 100%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  }
+
+  /* Numbers line up in tables and tiles */
+  td, .tabular, [class*='font-mono'] { font-variant-numeric: tabular-nums; }
+
+  ::selection { background: hsl(var(--primary) / 0.25); }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: hsl(var(--muted-foreground) / 0.25); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.45); background-clip: padding-box; }
+}
+
+@layer components {
+  /* Frosted surfaces */
+  .glass {
+    background-color: hsl(var(--card) / 0.72);
+    backdrop-filter: blur(16px) saturate(150%);
+    -webkit-backdrop-filter: blur(16px) saturate(150%);
+  }
+
+  /* Brand gradient text for page titles and logos */
+  .text-gradient {
+    background-image: linear-gradient(100deg, hsl(var(--foreground)) 10%, hsl(var(--primary)) 70%, hsl(var(--secondary)) 100%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  }
+
+  /* Sticky page headers: glass bar with a thin glowing brand line */
+  .sticky.top-0.backdrop-blur.border-b,
+  .page-header {
+    background-color: hsl(var(--background) / 0.78) !important;
+    backdrop-filter: blur(18px) saturate(150%);
+    -webkit-backdrop-filter: blur(18px) saturate(150%);
+    border-bottom-color: hsl(var(--border) / 0.7) !important;
+    box-shadow: 0 1px 0 hsl(var(--primary) / 0.18), 0 10px 30px -24px hsl(var(--primary) / 0.6);
+  }
+
+  /* Sidebar / top-bar navigation items (all apps) */
+  .nav-item {
+    --glow: var(--tone, var(--primary));
+    position: relative;
+    display: flex; align-items: center; gap: 0.75rem;
+    border-radius: 0.75rem;
+    padding: 0.55rem 0.75rem;
+    font-size: 0.875rem; font-weight: 600;
+    color: hsl(var(--muted-foreground));
+    transition: background-color .2s ease, color .2s ease, box-shadow .25s ease, transform .2s ease;
+  }
+  .nav-item:hover { background-color: hsl(var(--glow) / 0.14); color: hsl(var(--foreground)); }
+  .nav-item.is-active, .nav-item[aria-current='page'] {
+    color: hsl(var(--primary-foreground));
+    background-image: linear-gradient(135deg, hsl(var(--glow)), hsl(var(--glow) / 0.72));
+    box-shadow: 0 10px 24px -12px hsl(var(--glow) / 0.9), inset 0 1px 0 hsl(0 0% 100% / 0.22);
+  }
+  .nav-item.is-active::before, .nav-item[aria-current='page']::before {
+    content: ''; position: absolute; left: -0.5rem; top: 22%; bottom: 22%; width: 3px; border-radius: 999px;
+    background: hsl(var(--glow)); box-shadow: 0 0 10px hsl(var(--glow));
+  }
+  /* Light tones (gold, green) read better with dark text */
+  [data-tone='gold'].nav-item.is-active, [data-tone='green'].nav-item.is-active,
+  [data-tone='gold'].nav-item[aria-current='page'], [data-tone='green'].nav-item[aria-current='page'] { color: hsl(0 0% 8%); }
+  .top-nav .nav-item { padding: 0.4rem 0.85rem; }
+  .top-nav .nav-item.is-active::before, .top-nav .nav-item[aria-current='page']::before { display: none; }
+
+  [data-tone='gold'] { --tone: var(--tone-gold); }
+  [data-tone='pink'] { --tone: var(--tone-pink); }
+  [data-tone='blue'] { --tone: var(--tone-blue); }
+  [data-tone='green'] { --tone: var(--tone-green); }
+
+  /* Tabs pick up the page tone where one is set */
+  [data-tone] [role='tab'][data-state='active'] {
+    background-color: hsl(var(--tone)) !important;
+    color: hsl(0 0% 8%) !important;
+    box-shadow: 0 6px 18px -8px hsl(var(--tone) / 0.9) !important;
+  }
+
+  /* Tiles and cards: lift + rotating four-colour glow on hover */
+  .bg-card.border, .bg-card.rounded-xl, .bg-card.rounded-2xl, .tile {
+    --glow: var(--tone-gold);
+    transition: border-color .2s ease, box-shadow .3s ease, transform .2s ease, background-color .2s ease;
+  }
+  :nth-child(4n + 2 of .bg-card, .tile) { --glow: var(--tone-pink); }
+  :nth-child(4n + 3 of .bg-card, .tile) { --glow: var(--tone-blue); }
+  :nth-child(4n + 4 of .bg-card, .tile) { --glow: var(--tone-green); }
+  .bg-card.border:hover, .bg-card.rounded-xl:hover, .bg-card.rounded-2xl:hover, .tile:hover {
+    border-color: hsl(var(--glow) / 0.6);
+    box-shadow: 0 0 0 1px hsl(var(--glow) / 0.22), 0 14px 34px -18px hsl(var(--glow) / 0.55);
+  }
+  .tile:hover { transform: translateY(-1px); }
+  /* An explicit tone beats the automatic rotation */
+  [data-tone='bad'] { --tone: var(--destructive); }
+  .stat-tile[data-tone], .tile[data-tone] { --glow: var(--tone); }
+
+  /* Stat tile (shared across apps) */
+  .stat-tile {
+    --glow: var(--tone, var(--primary));
+    position: relative; overflow: hidden;
+    border-radius: 1rem;
+    border: 1px solid hsl(var(--border) / 0.7);
+    background-color: hsl(var(--card) / 0.8);
+    padding: 0.6rem 0.9rem 0.65rem 1rem;
+    line-height: 1.15;
+  }
+  .stat-tile::before {
+    content: ''; position: absolute; inset: 0 auto 0 0; width: 3px;
+    background: linear-gradient(180deg, hsl(var(--glow)), hsl(var(--glow) / 0.2));
+  }
+  .stat-tile::after {
+    content: ''; position: absolute; right: -30px; top: -30px; width: 90px; height: 90px; border-radius: 999px;
+    background: radial-gradient(circle, hsl(var(--glow) / 0.22), transparent 70%);
+    pointer-events: none;
+  }
+  .stat-tile .stat-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: hsl(var(--muted-foreground)); white-space: nowrap; }
+  .stat-tile .stat-value { margin-top: 2px; font-size: 0.95rem; font-weight: 800; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; white-space: nowrap; color: hsl(var(--foreground)); }
+
+  /* Raw HTML tables (pages that don't use the Table component) */
+  main table thead th {
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+    color: hsl(var(--muted-foreground));
+  }
+  main table tbody tr { transition: background-color .15s ease; }
+  main table tbody tr:hover { background-color: hsl(var(--primary) / 0.05); }
+
+  /* Menus and popovers */
+  [role='menu'], [data-radix-popper-content-wrapper] > [role='dialog'] {
+    border-radius: 0.875rem !important;
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+  }
+
+  /* Gentle entrance for each screen */
+  @keyframes aurora-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .animate-rise { animation: aurora-rise .35s cubic-bezier(.2,.8,.2,1) both; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-rise, .tile, .nav-item { animation: none !important; transition: none !important; }
+  }
+}
