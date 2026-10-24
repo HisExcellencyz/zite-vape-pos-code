@@ -1,0 +1,83 @@
+# Keeps this repo in sync with a Zite workspace.
+# Every hour (and on demand) it opens the workspace through the Zite Build API,
+# downloads every tracked file, and commits here only if something changed.
+# It never writes to Zite. README.md and .github/ in this repo are left alone.
+#
+# Setup: add a repository secret named ZITE_API_KEY
+# (create the key at https://app.zite.com/home/settings/developer).
+
+name: Sync from Zite
+
+on:
+  schedule:
+    - cron: '17 * * * *'   # hourly
+  workflow_dispatch: {}     # "Run workflow" button in the Actions tab
+
+permissions:
+  contents: write
+
+concurrency:
+  group: zite-sync
+  cancel-in-progress: false
+
+env:
+  ZITE_WORKSPACE_ID: cf50e75140326e2f   # POS & Inventory (Uptown Drinks POS)
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download workspace files from Zite
+        env:
+          ZITE_API_KEY: ${{ secrets.ZITE_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ZITE_API_KEY:-}" ]; then echo "::error::Add a ZITE_API_KEY repository secret first."; exit 1; fi
+
+          api() {
+            local body="${2:-}"; [ -n "$body" ] || body='{}'
+            curl -sS --fail-with-body --retry 3 --retry-all-errors -X POST "https://api.zite.com/v1$1" \
+              -H "Authorization: Bearer $ZITE_API_KEY" -H 'Content-Type: application/json' -d "$body"
+          }
+          zrun() { api "/sessions/$SID/bash" "$(jq -n --arg s "$1" '{script: $s}')"; }
+
+          SID=$(api "/workspaces/$ZITE_WORKSPACE_ID/sessions" | jq -r '.sessionId')
+          [ -n "$SID" ] && [ "$SID" != "null" ] || { echo "::error::Could not open a Zite session."; exit 1; }
+
+          # Package every tracked file in the workspace (latest main)
+          INFO=$(zrun 'cd /workspace && git pull -q --ff-only origin main >/dev/null 2>&1 || true
+            git ls-files -z | tar --null -T - -czf /tmp/zite-sync.tgz
+            base64 -w0 /tmp/zite-sync.tgz > /tmp/zite-sync.b64
+            echo "$(wc -c < /tmp/zite-sync.b64) $(git rev-parse --short HEAD)"' | jq -r '.stdout')
+          read -r SIZE HEAD <<< "$INFO"
+          [ "${SIZE:-0}" -gt 0 ] || { echo "::error::Unexpected reply from Zite: $INFO"; exit 1; }
+
+          # Download in 60 KB chunks and check the total size
+          : > "$RUNNER_TEMP/sync.b64"
+          START=1
+          while [ "$START" -le "$SIZE" ]; do
+            END=$((START + 59999))
+            zrun "cut -c $START-$END /tmp/zite-sync.b64 | tr -d '\n'" | jq -j '.stdout' >> "$RUNNER_TEMP/sync.b64"
+            START=$((END + 1))
+          done
+          [ "$(wc -c < "$RUNNER_TEMP/sync.b64")" -eq "$SIZE" ] || { echo "::error::Download incomplete."; exit 1; }
+          base64 -d "$RUNNER_TEMP/sync.b64" > "$RUNNER_TEMP/sync.tgz"
+          tar -tzf "$RUNNER_TEMP/sync.tgz" > /dev/null   # fail before touching the repo if the archive is broken
+
+          # Replace this repo's files with the workspace's (keep README.md and .github/)
+          git ls-files -z | grep -zvE '^(README\.md$|\.github/)' | xargs -0 -r rm -f
+          tar -xzf "$RUNNER_TEMP/sync.tgz"
+          echo "ZITE_HEAD=$HEAD" >> "$GITHUB_ENV"
+
+      - name: Commit if anything changed
+        run: |
+          git add -A
+          if git diff --cached --quiet; then echo "Already in sync with Zite ($ZITE_HEAD)."; exit 0; fi
+          git diff --cached --stat | tail -1
+          git -c user.name='zite-sync[bot]' -c user.email='zite-sync@users.noreply.github.com' \
+            commit -q -m "Sync with Zite workspace ($ZITE_HEAD)"
+          git push
+
