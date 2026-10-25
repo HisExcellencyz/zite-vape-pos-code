@@ -123,51 +123,37 @@ export default createEndpoint({
       lineTotal: item.lineTotal,
     }));
 
-    if (saleItemRecords.length > 0) {
-      await zite.saleItems.bulkCreate({ records: saleItemRecords });
-    }
-
-    // Deduct stock: Office by default, the assigned Own Rider's storage when he has the products,
-    // a Storage pick-up's storage for items ticked there, and nothing for items picked up from suppliers.
-    await deductStock(
-      input.items.map(i => ({ productId: i.productId, quantity: i.quantity })),
-      {
-        supplierPicked: input.supplierPickedProductIds,
-        storagePicks: input.storagePicks,
-        riderId: input.riderType === 'own' ? input.riderId : undefined,
-      },
-    );
-
     // Delivery fee: always income. Stored as an Other Income entry (description starts with
     // "Delivery fee") so the dashboard and profit figures pick it up automatically.
-    if ((input.deliveryFee || 0) > 0) {
-      await zite.otherIncome.create({
-        record: {
-          incomeDate: saleDate,
-          description: `Delivery fee - Sale #${sale.saleNumber ?? ''}`.trim(),
-          amount: input.deliveryFee,
-          branch: input.branchId || null,
-          notes: riderText || null,
-          createdBy: context.user.id,
-        },
-      });
-    }
-
     // Any other incomes & revenues set up for the outlet (Settings > Outlets) are also recorded as Other Income,
     // named after the income so they can be told apart.
-    for (const inc of input.extraIncomes || []) {
-      if (!(inc.amount > 0)) continue;
-      await zite.otherIncome.create({
-        record: {
-          incomeDate: saleDate,
-          description: `${inc.name} - Sale #${sale.saleNumber ?? ''}`.trim(),
-          amount: inc.amount,
-          branch: input.branchId || null,
-          notes: riderText || null,
-          createdBy: context.user.id,
+    const incomeRows = [
+      ...((input.deliveryFee || 0) > 0 ? [{ name: 'Delivery fee', amount: input.deliveryFee as number }] : []),
+      ...(input.extraIncomes || []).filter(inc => inc.amount > 0),
+    ].map(inc => ({
+      incomeDate: saleDate,
+      description: `${inc.name} - Sale #${sale.saleNumber ?? ''}`.trim(),
+      amount: inc.amount,
+      branch: input.branchId || null,
+      notes: riderText || null,
+      createdBy: context.user.id,
+    }));
+
+    // Sale lines, stock deduction and incomes don't depend on each other, so they are saved together.
+    await Promise.all([
+      saleItemRecords.length > 0 ? zite.saleItems.bulkCreate({ records: saleItemRecords }) : null,
+      // Deduct stock: Office by default, the assigned Own Rider's storage when he has the products,
+      // a Storage pick-up's storage for items ticked there, and nothing for items picked up from suppliers.
+      deductStock(
+        input.items.map(i => ({ productId: i.productId, quantity: i.quantity })),
+        {
+          supplierPicked: input.supplierPickedProductIds,
+          storagePicks: input.storagePicks,
+          riderId: input.riderType === 'own' ? input.riderId : undefined,
         },
-      });
-    }
+      ),
+      incomeRows.length > 0 ? zite.otherIncome.bulkCreate({ records: incomeRows }) : null,
+    ]);
 
     // Bundled orders: the active order, this order and every earlier merged order of the same checkout
     // each get a "Bundled with: Sale #..." note listing all the others.
@@ -175,14 +161,16 @@ export default createEndpoint({
     if (mergedMatch && Number.isFinite(mine)) {
       try {
         const activeNo = Number(mergedMatch[1]);
-        const active = await zite.sql({
-          query: `SELECT id, "saleNumber", "notes" FROM "Sales" WHERE "saleNumber" = $1`,
-          params: [activeNo],
-        });
-        const siblings = await zite.sql({
-          query: `SELECT id, "saleNumber", "notes" FROM "Sales" WHERE "notes" LIKE $1`,
-          params: [`%Bundled with:%Sale #${activeNo}%`],
-        });
+        const [active, siblings] = await Promise.all([
+          zite.sql({
+            query: `SELECT id, "saleNumber", "notes" FROM "Sales" WHERE "saleNumber" = $1`,
+            params: [activeNo],
+          }),
+          zite.sql({
+            query: `SELECT id, "saleNumber", "notes" FROM "Sales" WHERE "notes" LIKE $1`,
+            params: [`%Bundled with:%Sale #${activeNo}%`],
+          }),
+        ]);
         const linkRe = new RegExp(`Bundled with:[^|]*Sale #${activeNo}(?!\\d)`);
         const members = new Map<number, { id: string; notes: string | null }>();
         for (const r of active.rows) members.set(Number(r.saleNumber), { id: String(r.id), notes: r.notes ? String(r.notes) : null });
@@ -191,12 +179,10 @@ export default createEndpoint({
         }
         members.set(mine, { id: sale.id, notes });
         const numbers = Array.from(members.keys()).sort((a, b) => a - b);
-        for (const [num, m] of members) {
-          await zite.sales.update({
-            id: m.id,
-            record: { notes: bundleNotes(m.notes, numbers.filter(n => n !== num)) },
-          });
-        }
+        await Promise.all(Array.from(members, ([num, m]) => zite.sales.update({
+          id: m.id,
+          record: { notes: bundleNotes(m.notes, numbers.filter(n => n !== num)) },
+        })));
       } catch (e) {
         console.error('Could not link bundled sales', e);
       }

@@ -192,9 +192,21 @@ export async function deductStock(
   const riderStorage = opts.riderId ? storages.find(s => s.riderId === opts.riderId) : undefined;
   let changed = false;
 
-  for (const item of items) {
-    if (supplier.has(item.productId)) continue;
-    const product = await zite.products.findOne({ id: item.productId });
+  // Same product on several lines counts once with the summed quantity, then every product
+  // is read in parallel (one round trip instead of one per line).
+  const merged = new Map<string, number>();
+  for (const it of items) {
+    if (supplier.has(it.productId)) continue;
+    merged.set(it.productId, (merged.get(it.productId) || 0) + it.quantity);
+  }
+  const lines = Array.from(merged, ([productId, quantity]) => ({ productId, quantity }));
+  const products = await Promise.all(lines.map(l => zite.products.findOne({ id: l.productId })));
+  const updates: Promise<unknown>[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const item = lines[i];
+    // (supplier pick-ups were already left out above)
+    const product = products[i];
     if (!product) continue;
     const total = product.stockQuantity || 0;
     let remaining = item.quantity;
@@ -214,8 +226,10 @@ export async function deductStock(
     else if (riderStorage) take(riderStorage.id);
     // Whatever is left comes out of the Office, which is simply the remainder of the total.
 
-    await zite.products.update({ id: item.productId, record: { stockQuantity: Math.max(0, total - item.quantity) } });
+    updates.push(zite.products.update({ id: item.productId, record: { stockQuantity: Math.max(0, total - item.quantity) } }));
   }
+
+  await Promise.all(updates);
 
   if (changed) {
     cfg.storageStock = stock;

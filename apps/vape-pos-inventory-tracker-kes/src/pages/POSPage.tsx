@@ -284,10 +284,15 @@ export default function POSPage() {
     manageHeldOrders({ action: 'list', branchId: currentBranch?.id })
       .then(r => setHeldOrders(r.orders as HeldOrder[]))
       .catch(() => {});
+  // Refresh held orders every 2 minutes, only while the POS tab is on screen,
+  // and right away when someone comes back to it (each check is a workflow run).
   useEffect(() => {
     loadHeld();
-    const t = setInterval(loadHeld, 30000);
-    return () => clearInterval(t);
+    const visible = () => document.visibilityState === 'visible';
+    const t = setInterval(() => { if (visible()) loadHeld(); }, 120000);
+    const onShow = () => { if (visible()) loadHeld(); };
+    document.addEventListener('visibilitychange', onShow);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', onShow); };
   }, [currentBranch?.id]);
 
   // Orders merged into this checkout (ignores any that were resumed/deleted elsewhere in the meantime).
