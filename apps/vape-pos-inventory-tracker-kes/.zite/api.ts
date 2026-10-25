@@ -25,10 +25,12 @@ import type { default as _GetCustomerDetailsEp } from '../src/api/getCustomerDet
 import type { default as _GetCustomersEp } from '../src/api/getCustomers';
 import type { default as _GetDashboardEp } from '../src/api/getDashboard';
 import type { default as _GetExpensesEp } from '../src/api/getExpenses';
+import type { default as _GetHistoryEp } from '../src/api/getHistory';
 import type { default as _GetIncomeEp } from '../src/api/getIncome';
 import type { default as _GetInventoryValuationEp } from '../src/api/getInventoryValuation';
 import type { default as _GetMyPermissionsEp } from '../src/api/getMyPermissions';
 import type { default as _GetProductSalesEp } from '../src/api/getProductSales';
+import type { default as _GetProductSalesSummaryEp } from '../src/api/getProductSalesSummary';
 import type { default as _GetProductsEp } from '../src/api/getProducts';
 import type { default as _GetPurchaseOrdersEp } from '../src/api/getPurchaseOrders';
 import type { default as _GetPurchasesEp } from '../src/api/getPurchases';
@@ -186,6 +188,11 @@ export type GetExpensesInputType = NonNullable<_GetExpensesCfg['inputSchema']> e
 export type GetExpensesOutputType = Awaited<ReturnType<_GetExpensesCfg['execute']>>;
 export const getExpenses = createCaller<GetExpensesInputType, GetExpensesOutputType>('getExpenses');
 
+type _GetHistoryCfg = typeof _GetHistoryEp;
+export type GetHistoryInputType = NonNullable<_GetHistoryCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_GetHistoryCfg['execute']>[0]['input'];
+export type GetHistoryOutputType = Awaited<ReturnType<_GetHistoryCfg['execute']>>;
+export const getHistory = createCaller<GetHistoryInputType, GetHistoryOutputType>('getHistory');
+
 type _GetIncomeCfg = typeof _GetIncomeEp;
 export type GetIncomeInputType = NonNullable<_GetIncomeCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_GetIncomeCfg['execute']>[0]['input'];
 export type GetIncomeOutputType = Awaited<ReturnType<_GetIncomeCfg['execute']>>;
@@ -205,6 +212,11 @@ type _GetProductSalesCfg = typeof _GetProductSalesEp;
 export type GetProductSalesInputType = NonNullable<_GetProductSalesCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_GetProductSalesCfg['execute']>[0]['input'];
 export type GetProductSalesOutputType = Awaited<ReturnType<_GetProductSalesCfg['execute']>>;
 export const getProductSales = createCaller<GetProductSalesInputType, GetProductSalesOutputType>('getProductSales');
+
+type _GetProductSalesSummaryCfg = typeof _GetProductSalesSummaryEp;
+export type GetProductSalesSummaryInputType = NonNullable<_GetProductSalesSummaryCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_GetProductSalesSummaryCfg['execute']>[0]['input'];
+export type GetProductSalesSummaryOutputType = Awaited<ReturnType<_GetProductSalesSummaryCfg['execute']>>;
+export const getProductSalesSummary = createCaller<GetProductSalesSummaryInputType, GetProductSalesSummaryOutputType>('getProductSalesSummary');
 
 type _GetProductsCfg = typeof _GetProductsEp;
 export type GetProductsInputType = NonNullable<_GetProductsCfg['inputSchema']> extends { _input: infer I } ? I : Parameters<_GetProductsCfg['execute']>[0]['input'];
@@ -436,10 +448,12 @@ export const api = {
   getCustomers,
   getDashboard,
   getExpenses,
+  getHistory,
   getIncome,
   getInventoryValuation,
   getMyPermissions,
   getProductSales,
+  getProductSalesSummary,
   getProducts,
   getPurchaseOrders,
   getPurchases,

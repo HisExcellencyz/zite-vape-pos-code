@@ -15,6 +15,7 @@ import { OFFICE_ID, StockMap, StorageLite, qtyIn } from '../lib/storageMath';
 import { downloadCsv } from '../lib/exportHelper';
 import ProductMultiSearch from '../components/ProductMultiSearch';
 import ImportDialog from '../components/ImportDialog';
+import { peek, remember } from '../lib/listCache';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
 
 interface Product { id: string; productName?: string; sku?: string; stockQuantity?: number; status?: string; }
@@ -68,12 +69,17 @@ export default function StoragesPage() {
   const [importOpen, setImportOpen] = useState(false);
 
   const load = async () => {
-    setLoading(true);
-    try {
-      const [s, p] = await Promise.all([getStorages({}), getProducts({})]);
+    const apply = ([s, p]: [any, any]) => {
       setStorages(s.storages as StorageLite[]);
       setStock((s.stock || {}) as StockMap);
       setProducts(p.products as Product[]);
+    };
+    // When the page first opens, a list seen before shows at once and the fresh one replaces it.
+    // Reloads after an edit skip this so old figures never flash back.
+    const hit = storages.length === 0 ? peek<[any, any]>('storages') : undefined;
+    if (hit) apply(hit); else setLoading(true);
+    try {
+      apply(await remember('storages', Promise.all([getStorages({}), getProducts({})])));
     } catch (e: any) {
       toast.error(e.message || 'Failed to load storages');
     } finally {

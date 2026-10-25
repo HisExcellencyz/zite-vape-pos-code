@@ -27,7 +27,7 @@ export default createEndpoint({
   description: 'List, add, pay or delete bills owed to suppliers. Bills can be added manually or automatically from POS pick-ups.',
   authenticated: true,
   inputSchema: z.object({
-    action: z.enum(['list', 'add', 'pay', 'delete']),
+    action: z.enum(['list', 'add', 'addMany', 'pay', 'delete']),
     supplierId: z.string().optional(),
     billId: z.string().optional(),
     amount: z.number().optional(),
@@ -46,8 +46,25 @@ export default createEndpoint({
     /** Pay the bill from this outlet's petty cash (deducts the petty cash balance). */
     fromPettyCash: z.boolean().optional(),
     pettyCashBranchId: z.string().optional(),
+    /** addMany: several bills saved in one go (e.g. every supplier pick-up on one sale). */
+    bills: z.array(z.object({
+      supplierId: z.string(),
+      amount: z.number(),
+      notes: z.string().optional(),
+      date: z.string().optional(),
+      source: z.enum(['manual', 'pickup']).optional(),
+      items: z.array(z.object({ productId: z.string(), name: z.string(), quantity: z.number(), unitCost: z.number() })).optional(),
+      saleNumber: z.number().optional(),
+      branchId: z.string().optional(),
+    })).optional(),
   }),
-  outputSchema: z.object({ bills: z.array(z.any()), pending: z.number() }),
+  outputSchema: z.object({
+    bills: z.array(z.any()),
+    pending: z.number(),
+    /** addMany: how many bills were saved, and the supplier ids that were skipped. */
+    added: z.number().optional(),
+    skipped: z.array(z.string()).optional(),
+  }),
   execute: async ({ input, context }) => {
     let settings = await zite.businessSettings.findOne({});
     let cfg: any = {};
@@ -64,7 +81,37 @@ export default createEndpoint({
       }
     };
 
-    if (input.action === 'add') {
+    let added: number | undefined;
+    let skipped: string[] | undefined;
+
+    if (input.action === 'addMany') {
+      const wanted = input.bills || [];
+      const ids = [...new Set(wanted.map(b => b.supplierId))];
+      const found = await Promise.all(ids.map(id => zite.suppliers.findOne({ id }).catch(() => null)));
+      const known = new Set(found.filter(Boolean).map(s => s!.id));
+      added = 0;
+      skipped = [];
+      for (const b of wanted) {
+        if (!known.has(b.supplierId) || !(b.amount > 0)) { skipped.push(b.supplierId); continue; }
+        bills.push({
+          id: `b_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          supplierId: b.supplierId,
+          amount: Math.round(b.amount * 100) / 100,
+          notes: b.notes || null,
+          date: b.date || new Date().toISOString(),
+          status: 'pending',
+          source: b.source || 'manual',
+          items: b.items,
+          saleNumber: b.saleNumber ?? null,
+          branchId: b.branchId || null,
+          createdBy: context.user.email || context.user.id,
+          paidAt: null,
+          paidFrom: null,
+        });
+        added++;
+      }
+      if (added > 0) await save();
+    } else if (input.action === 'add') {
       if (!input.supplierId) throw new Error('Supplier is required');
       if (!(input.amount && input.amount > 0)) throw new Error('Enter a bill amount greater than 0');
       const supplier = await zite.suppliers.findOne({ id: input.supplierId });
@@ -156,6 +203,6 @@ export default createEndpoint({
       .filter(b => !input.supplierId || b.supplierId === input.supplierId)
       .sort((a, b) => String(b.date).localeCompare(String(a.date)));
     const pending = list.filter(b => b.status === 'pending').reduce((s, b) => s + b.amount, 0);
-    return { bills: list, pending };
+    return { bills: list, pending, added, skipped };
   },
 });

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
-import { fullPermissions, normalizePerms, isAdminRoleName } from '../lib/permissionAreas';
+import { fullPermissions, normalizePerms, isAdminRoleName, canBackdateSalesRole } from '../lib/permissionAreas';
 
 /**
  * IMPORTANT: put the business owner's sign-in email here, e.g. ['owner@example.com'].
@@ -19,6 +19,7 @@ export default createEndpoint({
     roleName: z.string(),
     pending: z.boolean().optional(),
     canBackdate: z.boolean().optional(),
+    canBackdateSales: z.boolean().optional(),
   }),
   execute: async ({ context }) => {
     const settings = await zite.businessSettings.findOne({});
@@ -60,7 +61,7 @@ export default createEndpoint({
       }
     }
 
-    if (isOwner) return { permissions: fullPermissions(), roleName: 'Owner', pending: false, canBackdate: true };
+    if (isOwner) return { permissions: fullPermissions(), roleName: 'Owner', pending: false, canBackdate: true, canBackdateSales: true };
 
     const roleId = cfg.userRoles[userId];
     if (!roleId) return { permissions: {}, roleName: 'No role assigned', pending: true, canBackdate: false };
@@ -70,12 +71,12 @@ export default createEndpoint({
 
     // Any role with "admin" in its name has every permission, same as the Owner.
     if (isAdminRoleName(role.roleName)) {
-      return { permissions: fullPermissions(), roleName: role.roleName || 'Admin', pending: false, canBackdate: true };
+      return { permissions: fullPermissions(), roleName: role.roleName || 'Admin', pending: false, canBackdate: true, canBackdateSales: true };
     }
 
     let raw: any = {};
     try { raw = role.permissions ? JSON.parse(role.permissions) : {}; } catch {}
     // normalizePerms lets roles saved before newer areas existed inherit the older area's permissions.
-    return { permissions: normalizePerms(raw), roleName: role.roleName || 'Unknown', pending: false, canBackdate: false };
+    return { permissions: normalizePerms(raw), roleName: role.roleName || 'Unknown', pending: false, canBackdate: false, canBackdateSales: canBackdateSalesRole(raw) };
   },
 });

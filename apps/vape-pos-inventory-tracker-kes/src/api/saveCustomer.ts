@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
+import { normalizePhone } from '../lib/phone';
 import { archiveCustomerLocation } from '../lib/customerLocations';
 
 export default createEndpoint({
@@ -18,8 +19,7 @@ export default createEndpoint({
   outputSchema: z.object({ success: z.boolean(), customer: z.any() }),
   execute: async ({ input }) => {
     // Phone number must start with +
-    let phone = input.phoneNumber.trim();
-    if (!phone.startsWith('+')) phone = '+' + phone;
+    const phone = normalizePhone(input.phoneNumber);
 
     // Check phone uniqueness
     const existing = await zite.customers.findOne({ filters: { phoneNumber: phone } });

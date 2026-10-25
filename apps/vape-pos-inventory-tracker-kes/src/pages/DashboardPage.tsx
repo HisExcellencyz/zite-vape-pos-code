@@ -201,19 +201,19 @@ export default function DashboardPage({ scope = 'outlet' }: { scope?: 'outlet' |
         />
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {loading || !data
-          ? [...Array(4)].map((_, i) => <Card key={i} className="bg-card"><CardContent className="pt-6"><Skeleton className="h-16 w-full" /></CardContent></Card>)
+          ? [...Array(4)].map((_, i) => <Card key={i} className="bg-card"><CardContent className="p-3"><Skeleton className="h-12 w-full" /></CardContent></Card>)
           : kpis.map(kpi => (
             <Card key={kpi.label} className={`bg-card border-border border-l-4 ${KPI_BORDER[kpi.tint]}`}>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs text-muted-foreground uppercase tracking-wider">{kpi.label}</p>
-                    <p className={`text-2xl font-bold mt-1 ${kpi.color}`}>{kpi.value}</p>
-                    <p className="text-xs text-muted-foreground mt-1">{kpi.change}</p>
+              <CardContent className="p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest truncate">{kpi.label}</p>
+                    <p className={`text-[15px] sm:text-lg font-extrabold leading-tight mt-0.5 break-words ${kpi.color}`}>{kpi.value}</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2">{kpi.change}</p>
                   </div>
-                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${kpi.color} ${KPI_BG[kpi.tint]}`}><kpi.icon className="w-5 h-5" /></div>
+                  <div className={`hidden sm:flex w-8 h-8 shrink-0 rounded-xl items-center justify-center ring-1 ring-current/20 ${kpi.color} ${KPI_BG[kpi.tint]}`}><kpi.icon className="w-4 h-4" /></div>
                 </div>
               </CardContent>
             </Card>

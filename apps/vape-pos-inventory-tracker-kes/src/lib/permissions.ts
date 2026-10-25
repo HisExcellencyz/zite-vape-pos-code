@@ -1,5 +1,5 @@
 import { zite } from 'zitejs/db';
-import { fullPermissions, normalizePerms, isAdminRoleName } from './permissionAreas';
+import { fullPermissions, normalizePerms, isAdminRoleName, canBackdateSalesRole } from './permissionAreas';
 
 /**
  * Server-side access check. Owner and any role whose name contains "admin" get every permission,
@@ -27,6 +27,8 @@ export async function getAccess(userId: string) {
     isAdmin,
     /** Only the Owner and Admin may change dates or create backdated entries. */
     canBackdate: full,
+    /** Owner, Admin, and roles given "Can backdate POS sales" may record new sales on an earlier date. */
+    canBackdateSales: full || canBackdateSalesRole(raw),
     can: (area: string, action: string) => full || matrix[area]?.[action] === true,
   };
 }

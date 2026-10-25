@@ -1,6 +1,10 @@
 // Permission areas and actions, shared by the browser and the endpoints.
 // Backdating (changing entry dates / importing dated entries) is NOT part of the matrix:
-// it is always reserved for the Owner and Admin.
+// it is reserved for the Owner and Admin. The one exception is POS sales: a role can be
+// allowed to backdate new sales with the pos.backdate flag (see canBackdateSalesRole).
+
+/** True when a role's saved permissions allow it to record POS sales on an earlier date. */
+export const canBackdateSalesRole = (raw: any) => raw?.pos?.backdate === true;
 
 export const AREAS = [
   'pos', 'income', 'customers', 'inventory', 'categories', 'purchases', 'purchaseOrders',

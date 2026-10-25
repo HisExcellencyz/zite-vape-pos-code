@@ -11,6 +11,8 @@ interface PermContextType {
   pending: boolean;
   /** True for the Owner and Admin only: may change dates and create backdated entries. */
   canBackdate: boolean;
+  /** Owner, Admin, and roles allowed to backdate POS sales. */
+  canBackdateSales: boolean;
   loading: boolean;
   can: (area: string, action: string) => boolean;
   refresh: () => Promise<void>;
@@ -21,6 +23,7 @@ const PermContext = createContext<PermContextType>({
   roleName: '',
   pending: false,
   canBackdate: false,
+  canBackdateSales: false,
   loading: true,
   can: () => false,
   refresh: async () => {},
@@ -31,6 +34,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   const [roleName, setRoleName] = useState('');
   const [pending, setPending] = useState(false);
   const [canBackdate, setCanBackdate] = useState(false);
+  const [canBackdateSales, setCanBackdateSales] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -40,11 +44,13 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       setRoleName(res.roleName || '');
       setPending(!!res.pending);
       setCanBackdate(!!res.canBackdate);
+      setCanBackdateSales(!!res.canBackdateSales);
       setTemplateBackdate(!!res.canBackdate);
     } catch {
       setPermissions({});
       setPending(true);
       setCanBackdate(false);
+      setCanBackdateSales(false);
       setTemplateBackdate(false);
     } finally {
       setLoading(false);
@@ -58,7 +64,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   const refresh = async () => { setLoading(true); await load(); };
 
   return (
-    <PermContext.Provider value={{ permissions, roleName, pending, canBackdate, loading, can, refresh }}>
+    <PermContext.Provider value={{ permissions, roleName, pending, canBackdate, canBackdateSales, loading, can, refresh }}>
       {children}
     </PermContext.Provider>
   );

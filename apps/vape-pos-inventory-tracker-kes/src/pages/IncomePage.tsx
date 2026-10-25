@@ -256,22 +256,31 @@ export default function IncomePage() {
     </div>
   );
 
+  // Tiles describe only what the open tab lists (within the date range and status filter).
+  const revenues = live.reduce((a, x) => a + (x.revenues || 0), 0);
+  const withRevenues = live.filter(x => (x.revenues || 0) > 0).length;
+  const avg = (total: number, n: number) => fmt(n ? Math.round(total / n) : 0);
+  const riderTotals = new Map<string, number>();
+  fees.forEach(f => { const r = parseRider(f.notes) || 'No rider'; riderTotals.set(r, (riderTotals.get(r) || 0) + (f.amount || 0)); });
+  const topRider = [...riderTotals.entries()].sort((a, b) => b[1] - a[1])[0];
+  const biggest = other.reduce<Income | null>((m, x) => (!m || (x.amount || 0) > (m.amount || 0) ? x : m), null);
   const tiles =
     tab === 'sales' ? [
-      { label: 'Sales Made', value: fmt(sum(live, 'total')), sub: `${live.length} sales` },
-      { label: 'Deductions', value: fmt(sum(live, 'deductions')) },
-      { label: 'Platform Pay', value: fmt(sum(live.filter(x => !isCashPayment(x.paymentMethod)), 'total')) },
-      { label: 'Cash/M-PESA', value: fmt(sum(live.filter(x => isCashPayment(x.paymentMethod)), 'total')) },
+      { label: 'Sales Made', value: fmt(sum(live, 'total')), sub: `${live.length} sales · avg ${avg(sum(live, 'total'), live.length)}` },
+      { label: 'Revenues', value: fmt(revenues), sub: `${withRevenues} sales with revenues` },
+      { label: 'Deductions', value: fmt(sum(live, 'deductions')), sub: `${live.filter(x => (x.deductions || 0) > 0).length} sales` },
+      { label: 'Platform Pay', value: fmt(sum(live.filter(x => !isCashPayment(x.paymentMethod)), 'total')), sub: `${live.filter(x => !isCashPayment(x.paymentMethod)).length} sales` },
+      { label: 'Cash/M-PESA', value: fmt(sum(live.filter(x => isCashPayment(x.paymentMethod)), 'total')), sub: `${live.filter(x => isCashPayment(x.paymentMethod)).length} sales` },
     ] : tab === 'delivery' ? [
-      { label: 'Delivery Fees', value: fmt(isum(fees)), sub: `${fees.length} orders` },
-      { label: 'Average Fee', value: fmt(fees.length ? Math.round(isum(fees) / fees.length) : 0) },
-      { label: 'Sales Made', value: fmt(sum(live, 'total')), sub: `${live.length} sales` },
-      { label: 'Fees + Sales', value: fmt(isum(fees) + sum(live, 'total')) },
+      { label: 'Delivery Fees', value: fmt(isum(fees)), sub: `${fees.length} deliveries` },
+      { label: 'Average Fee', value: avg(isum(fees), fees.length) },
+      { label: 'Riders', value: String(riderTotals.size), sub: 'with delivery fees' },
+      { label: 'Top Rider', value: topRider ? topRider[0] : '-', sub: topRider ? fmt(topRider[1]) : undefined },
     ] : [
       { label: 'Other Income', value: fmt(isum(other)), sub: `${other.length} records` },
-      { label: 'Delivery Fees', value: fmt(isum(fees)), sub: `${fees.length} orders` },
-      { label: 'Sales Made', value: fmt(sum(live, 'total')) },
-      { label: 'Total Income', value: fmt(sum(live, 'total') + isum(fees) + isum(other)) },
+      { label: 'Average Entry', value: avg(isum(other), other.length) },
+      { label: 'Largest Entry', value: fmt(biggest?.amount), sub: biggest?.description || undefined },
+      { label: 'Share of Income', value: `${(sum(live, 'total') + isum(fees) + isum(other)) ? Math.round(isum(other) / (sum(live, 'total') + isum(fees) + isum(other)) * 100) : 0}%`, sub: 'of sales + fees + other' },
     ];
 
   return (

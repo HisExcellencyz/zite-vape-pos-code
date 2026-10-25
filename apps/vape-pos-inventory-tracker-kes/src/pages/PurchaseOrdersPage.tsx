@@ -25,6 +25,7 @@ import ProductMultiSearch from '../components/ProductMultiSearch';
 import { buildCategoryTree, productCategoryId, CategoryLite } from '../components/CategoryRibbon';
 import { useBranch } from '../hooks/useBranch';
 import { usePermissions } from '../hooks/usePermissions';
+import { keyOf, peek, remember } from '../lib/listCache';
 
 interface LPOItem {
   productId: string;
@@ -90,18 +91,24 @@ export default function PurchaseOrdersPage() {
   const [verifying, setVerifying] = useState(false);
 
   const load = async () => {
-    setLoading(true);
-    try {
-      const [o, p, s, c] = await Promise.all([
-        getPurchaseOrders({ branchId: currentBranch?.id }),
-        getProducts({ branchId: currentBranch?.id }),
-        getSuppliers({}),
-        getCategories({}),
-      ]);
+    const key = keyOf('purchase-orders', currentBranch?.id);
+    const apply = ([o, p, s, c]: any[]) => {
       setOrders(o.orders as PurchaseOrder[]);
       setProducts(p.products as Product[]);
       setSuppliers(s.suppliers as Supplier[]);
       setCategories(c.categories as CategoryLite[]);
+    };
+    // When the page first opens, a list seen before shows at once and the fresh one replaces it.
+    // Reloads after an edit skip this so old figures never flash back.
+    const hit = orders.length === 0 && products.length === 0 ? peek<any[]>(key) : undefined;
+    if (hit) apply(hit); else setLoading(true);
+    try {
+      apply(await remember(key, Promise.all([
+        getPurchaseOrders({ branchId: currentBranch?.id }),
+        getProducts({ branchId: currentBranch?.id }),
+        getSuppliers({}),
+        getCategories({}),
+      ])));
     } finally { setLoading(false); }
   };
 

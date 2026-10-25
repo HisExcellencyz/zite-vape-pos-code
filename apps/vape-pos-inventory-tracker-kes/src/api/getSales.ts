@@ -20,13 +20,14 @@ export default createEndpoint({
     const filters: Record<string, unknown> = {};
     if (input.status) filters.status = input.status;
 
-    const { records, hasMore } = await zite.sales.findAll({
-      filters: Object.keys(filters).length > 0 ? filters : undefined,
-      limit: input.limit || 2000,
-      offset: input.offset || 0,
-    });
-
-    const keep = await branchFilter(input.branchId);
+    const [{ records, hasMore }, keep] = await Promise.all([
+      zite.sales.findAll({
+        filters: Object.keys(filters).length > 0 ? filters : undefined,
+        limit: input.limit || 2000,
+        offset: input.offset || 0,
+      }),
+      branchFilter(input.branchId),
+    ]);
     return { sales: records.filter(keep), hasMore };
   },
 });

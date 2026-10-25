@@ -113,22 +113,28 @@ export default function ExpensesPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const [e, p, s, prods, sups] = await Promise.all([
+      const [e, p, s, sups] = await Promise.all([
         getExpenses({ branchId: currentBranch?.id }),
         getPurchases({ branchId: currentBranch?.id }),
         getSales({ branchId: currentBranch?.id }),
-        getProducts({ branchId: currentBranch?.id }),
         getSuppliers({}),
       ]);
       setExpenses(e.expenses as Expense[]);
       setPurchases(p.purchases as Purchase[]);
       setSales(s.sales as any[]);
-      setProducts(prods.products as Product[]);
       setSuppliers(sups.suppliers as Supplier[]);
     } finally { setLoading(false); }
   };
 
   useEffect(() => { load(); }, [currentBranch?.id]);
+
+  // The product list is only needed by the Add Purchase form, so fetch it when the form opens.
+  useEffect(() => {
+    if (!showPurchaseForm) return;
+    let live = true;
+    getProducts({ branchId: currentBranch?.id }).then(r => { if (live) setProducts(r.products as Product[]); }).catch(() => {});
+    return () => { live = false; };
+  }, [showPurchaseForm, currentBranch?.id]);
 
   // Purchases are allowed by either the Expenses or the Purchases area.
   const areaOf = (kind: EntryKind) => (kind === 'purchase' ? ['expenses', 'purchases'] : ['expenses']);
@@ -243,6 +249,7 @@ export default function ExpensesPage() {
     </Badge>
   );
 
+  const pct = (part: number, whole: number) => `${whole ? Math.round((part / whole) * 1000) / 10 : 0}%`;
   const tiles =
     tab === 'purchases' ? [
       { label: 'Total Purchases', value: fmt(totalPurchases), sub: `${dP.length} purchases` },
@@ -252,18 +259,18 @@ export default function ExpensesPage() {
     ] : tab === 'discounts' ? [
       { label: 'Discounts', value: fmt(totalDiscounts), sub: `${dX.length} sales` },
       { label: 'Average Discount', value: fmt(dX.length ? Math.round(totalDiscounts / dX.length) : 0) },
-      { label: 'Purchases + Other + Deductions', value: fmt(totalPurchases + totalExpenses + totalDeductions) },
-      { label: 'Grand Total', value: fmt(grandTotal) },
+      { label: 'Largest Discount', value: fmt(Math.max(0, ...dX.map(x => x.amount))) },
+      { label: 'Of Gross Price', value: pct(totalDiscounts, sumOf(dX, 'subtotal')), sub: `of ${fmt(sumOf(dX, 'subtotal'))}` },
     ] : tab === 'deductions' ? [
       { label: 'Deductions', value: fmt(totalDeductions), sub: `${dD.length} sales` },
       { label: 'Average Deduction', value: fmt(dD.length ? Math.round(totalDeductions / dD.length) : 0) },
-      { label: 'Purchases + Other', value: fmt(totalPurchases + totalExpenses) },
-      { label: 'Grand Total', value: fmt(grandTotal) },
+      { label: 'Largest Deduction', value: fmt(Math.max(0, ...dD.map(x => x.amount))) },
+      { label: 'Of Sale Value', value: pct(totalDeductions, sumOf(dD, 'saleTotal')), sub: `of ${fmt(sumOf(dD, 'saleTotal'))}` },
     ] : [
       { label: 'Other Expenses', value: fmt(totalExpenses), sub: `${dE.length} records` },
       { label: 'Average Expense', value: fmt(dE.length ? Math.round(totalExpenses / dE.length) : 0) },
-      { label: 'Purchases + Deductions + Discounts', value: fmt(totalPurchases + totalDeductions + totalDiscounts) },
-      { label: 'Grand Total', value: fmt(grandTotal) },
+      { label: 'Largest Expense', value: fmt(Math.max(0, ...dE.map(x => x.amount || 0))), sub: [...dE].sort((a, b) => (b.amount || 0) - (a.amount || 0))[0]?.description },
+      { label: 'Of All Expenses', value: pct(totalExpenses, grandTotal), sub: `of ${fmt(grandTotal)}` },
     ];
 
   const activeControls = (tab === 'purchases' ? tcP : tab === 'other' ? tcE : tab === 'discounts' ? tcX : tcD) as any;

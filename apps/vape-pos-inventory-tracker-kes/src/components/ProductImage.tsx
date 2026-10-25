@@ -21,7 +21,7 @@ export default function ProductImage({ src, alt = '', className = 'w-full' }: Pr
           key={src}
           src={src}
           alt={alt}
-          loading="lazy"
+          loading="lazy" decoding="async"
           onError={() => setFailed(true)}
           className="w-full h-full object-cover"
         />

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { getProducts, getCategories, getCustomers, getCustomerDetails, createSale, saveCustomer, getSales, manageHeldOrders, manageSupplierBills, getStorages } from 'zitejs/api';
+import { getProducts, getCategories, getCustomers, getCustomerDetails, createSale, saveCustomer, getSales, manageHeldOrders, manageSupplierBills, getStorages, getProductSalesSummary } from 'zitejs/api';
 import { StorageLite, StockMap, storageBreakdown } from '../lib/storageMath';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
@@ -18,10 +18,14 @@ import OtherIncomeDialog from '../components/OtherIncomeDialog';
 import ProductImage from '../components/ProductImage';
 import CustomerPicker, { PickableCustomer } from '../components/CustomerPicker';
 import { useBranch, commissionAmount, autoOn, Commission } from '../hooks/useBranch';
+import { usePermissions } from '../hooks/usePermissions';
+import { DatePicker } from '@project/components/ui/date-picker';
 import SummaryTiles from '../components/SummaryTiles';
-import CategoryRibbon, { CategoryLite, matchesCategory, productCategoryId } from '../components/CategoryRibbon';
-import DateRangeFilter, { Range, inRange } from '../components/DateRangeFilter';
+import CategoryRibbon, { CategoryLite, matchesCategory, productCategoryId, flattenCategories } from '../components/CategoryRibbon';
+import DateRangeFilter, { Range, inRange, eatBounds } from '../components/DateRangeFilter';
 import { isCashPayment } from '../lib/payments';
+import { normalizePhone } from '../lib/phone';
+import { keyOf, peek, remember, forget } from '../lib/listCache';
 import { parseCoordinates, geocode } from '../lib/geocode';
 import { RiderType, Riders, RIDER_LABELS, DEFAULT_DELIVERY_FEE, DEFAULT_RIDER_FEE, loadRiders } from '../lib/delivery';
 
@@ -211,9 +215,24 @@ export default function POSPage() {
   const [search, setSearch] = useState('');
   const [categories, setCategories] = useState<CategoryLite[]>([]);
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
+  // Units sold per product for the chosen period, used by the tiles when a category is picked.
+  const [catSold, setCatSold] = useState<Record<string, { units: number; revenue: number; sales: number }>>({});
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [paymentMethod, setPaymentMethod] = useState('Cash/M-PESA');
+  // Sale date: today unless someone allowed to backdate sales picks an earlier day.
+  const { canBackdateSales } = usePermissions();
+  const [saleDay, setSaleDay] = useState<Date>(new Date());
+  const dayKey = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  const isBackdated = canBackdateSales && dayKey(saleDay) !== dayKey(new Date());
+  /** The chosen earlier day at the current time of day, or undefined for a sale made now. */
+  const backdatedIso = () => {
+    if (!isBackdated) return undefined;
+    const now = new Date();
+    const d = new Date(saleDay);
+    d.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), 0);
+    return d.toISOString();
+  };
   const [showCustomerDialog, setShowCustomerDialog] = useState(false);
   const [newCustName, setNewCustName] = useState('');
   const [newCustPhone, setNewCustPhone] = useState('');
@@ -271,6 +290,17 @@ export default function POSPage() {
   // Items ticked as picked up, per route point id (supplier pick-up pins only).
   const [pickupSelections, setPickupSelections] = useState<Record<string, string[]>>({});
   const [range, setRange] = useState<Range>({});
+  useEffect(() => {
+    if (!categoryFilter) return;
+    const b = eatBounds(range);
+    let live = true;
+    getProductSalesSummary({
+      branchId: currentBranch?.id,
+      start: range.start ? new Date(b.from).toISOString() : undefined,
+      end: range.end ? new Date(b.to).toISOString() : undefined,
+    }).then(r => { if (live) setCatSold(r.byProduct); }).catch(() => {});
+    return () => { live = false; };
+  }, [categoryFilter, range.start?.getTime(), range.end?.getTime(), currentBranch?.id]);
   const [recentSales, setRecentSales] = useState<any[]>([]);
   const loadSales = () => getSales({ branchId: currentBranch?.id }).then(r => setRecentSales(r.sales)).catch(() => {});
   useEffect(() => { loadSales(); }, [currentBranch?.id]);
@@ -322,14 +352,24 @@ export default function POSPage() {
   }, [currentBranch?.id]);
 
   useEffect(() => {
-    Promise.all([getProducts({ status: 'Active', branchId: currentBranch?.id }), getCustomers({})]).then(([prods, custs]) => {
+    // Show the last list at once (if this page was open before), then the fresh one.
+    let live = true;
+    const key = keyOf('pos', currentBranch?.id);
+    const apply = ([prods, custs]: [any, any]) => {
+      if (!live) return;
       setProducts(prods.products as Product[]);
       setCustomers(custs.customers as Customer[]);
-    });
+    };
+    const hit = peek<[any, any]>(key);
+    if (hit) apply(hit);
+    remember(key, Promise.all([getProducts({ status: 'Active', branchId: currentBranch?.id }), getCustomers({})])).then(apply).catch(() => {});
+    return () => { live = false; };
   }, [currentBranch?.id]);
 
   useEffect(() => {
-    getCategories({}).then(r => setCategories(r.categories as CategoryLite[])).catch(() => {});
+    const hit = peek<any>('categories');
+    if (hit) setCategories(hit.categories as CategoryLite[]);
+    remember('categories', getCategories({})).then(r => setCategories(r.categories as CategoryLite[])).catch(() => {});
   }, []);
 
   const filtered = products.filter(p =>
@@ -401,6 +441,7 @@ export default function POSPage() {
     setDedOverrides(prev => ({ ...prev, [d.name]: !(prev[d.name] ?? autoOn(d)) }));
 
   const resetOrder = () => {
+    setSaleDay(new Date());
     // Clearing the cart also clears the quantity controls on the product tiles.
     setCart([]);
     setSelectedCustomer(null);
@@ -649,8 +690,10 @@ export default function POSPage() {
       const riderId = rider?.type === 'own' ? rider.id : undefined;
       const stockArgs = { supplierPickedProductIds: supplierPicked, storagePicks, riderId };
 
+      const saleDate = backdatedIso();
       const activeRes = await createSale({
         ...stockArgs,
+        saleDate,
         items: cart.map(c => ({ productId: c.product.id, quantity: c.quantity, unitPrice: c.unitPrice })),
         customerId: selectedCustomer?.id,
         paymentMethod,
@@ -691,6 +734,7 @@ export default function POSPage() {
           if (custDrop && !heldPoints.some(p => p.tag === 'dropoff' && p.lat === custDrop.lat && p.lng === custDrop.lng)) heldPoints.push(custDrop);
           await createSale({
             ...stockArgs,
+            saleDate,
             items: h.items.map(i => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice })),
             customerId: h.customer?.id,
             paymentMethod: h.paymentMethod,
@@ -714,23 +758,32 @@ export default function POSPage() {
       // Add a pending bill (at cost price) for each supplier that items were picked up from.
       let billsAdded = 0;
       const billIssues: string[] = [];
-      for (const b of pickupBills) {
-        if (!(b.amount > 0)) { billIssues.push(`${b.supplierName} (items have no cost price)`); continue; }
+      const billable = pickupBills.filter(b => {
+        if (b.amount > 0) return true;
+        billIssues.push(`${b.supplierName} (items have no cost price)`);
+        return false;
+      });
+      // All pick-up bills are saved in one request.
+      if (billable.length > 0) {
         try {
-          await manageSupplierBills({
-            action: 'add',
-            supplierId: b.supplierId,
-            amount: b.amount,
-            notes: saleNo ? `POS pick-up, Sale #${saleNo}` : 'POS pick-up',
-            date: new Date().toISOString(),
-            source: 'pickup',
-            items: b.items.map(i => ({ productId: i.productId, name: i.name, quantity: i.quantity, unitCost: i.unitCost })),
-            saleNumber: saleNo || undefined,
-            branchId: currentBranch?.id,
+          const res = await manageSupplierBills({
+            action: 'addMany',
+            bills: billable.map(b => ({
+              supplierId: b.supplierId,
+              amount: b.amount,
+              notes: saleNo ? `POS pick-up, Sale #${saleNo}` : 'POS pick-up',
+              date: new Date().toISOString(),
+              source: 'pickup' as const,
+              items: b.items.map(i => ({ productId: i.productId, name: i.name, quantity: i.quantity, unitCost: i.unitCost })),
+              saleNumber: saleNo || undefined,
+              branchId: currentBranch?.id,
+            })),
           });
-          billsAdded++;
+          billsAdded = res.added || 0;
+          const skipped = res.skipped || [];
+          billable.filter(b => skipped.includes(b.supplierId)).forEach(b => billIssues.push(b.supplierName));
         } catch {
-          billIssues.push(b.supplierName);
+          billable.forEach(b => billIssues.push(b.supplierName));
         }
       }
 
@@ -739,12 +792,22 @@ export default function POSPage() {
       if (billIssues.length > 0) toast.error(`Could not add a bill for: ${billIssues.join(', ')}. Add it manually under Suppliers.`);
       if (failed.length > 0) toast.error(`Could not complete: ${failed.join(', ')}. They remain in Pending.`);
 
+      // Show the new stock straight away so the till is ready for the next sale,
+      // then refresh everything quietly in the background.
+      const sold: Record<string, number> = {};
+      const addSold = (id: string, q: number) => { if (!supplierPicked.includes(id)) sold[id] = (sold[id] || 0) + q; };
+      cart.forEach(c => addSold(c.product.id, c.quantity));
+      mergeList.forEach(h => h.items.forEach(i => addSold(i.productId, i.quantity)));
+      setProducts(ps => ps.map(p => (sold[p.id] ? { ...p, stockQuantity: (p.stockQuantity || 0) - sold[p.id] } : p)));
+
+      forget('pos:');
       resetOrder();
       loadSales();
       loadStorages();
       loadHeld();
-      const prods = await getProducts({ status: 'Active', branchId: currentBranch?.id });
-      setProducts(prods.products as Product[]);
+      getProducts({ status: 'Active', branchId: currentBranch?.id })
+        .then(prods => setProducts(prods.products as Product[]))
+        .catch(() => {});
     } catch (e: any) {
       toast.error(e.message || 'Sale failed');
     } finally {
@@ -758,7 +821,7 @@ export default function POSPage() {
   const checkExistingByPhone = async (phoneRaw: string) => {
     const phone = phoneRaw.trim();
     if (!phone) { setDuplicateMatch(null); return; }
-    const normalized = phone.startsWith('+') ? phone : '+' + phone;
+    const normalized = normalizePhone(phone);
     try {
       const res = await getCustomers({ search: normalized });
       const match = (res.customers as Customer[]).find(c => (c.phoneNumber || '') === normalized);
@@ -825,7 +888,19 @@ export default function POSPage() {
 
         <div className="mb-3 space-y-2">
           <DateRangeFilter value={range} onChange={setRange} />
-          <SummaryTiles small items={(() => {
+          <SummaryTiles small items={categoryFilter ? (() => {
+            // A category is picked on the ribbon: figures for that category only.
+            const inCat = products.filter(p => matchesCategory(categoryFilter, productCategoryId(p), categories));
+            const units = inCat.reduce((a, p) => a + (catSold[p.id]?.units || 0), 0);
+            const value = inCat.reduce((a, p) => a + (catSold[p.id]?.revenue || 0), 0);
+            const name = flattenCategories(categories).find(c => c.id === categoryFilter)?.label || 'Category';
+            return [
+              { label: `${name} Sales`, value: fmt(value), sub: `${units.toLocaleString()} units sold` },
+              { label: 'Products', value: String(inCat.length), sub: `${inCat.filter(p => (catSold[p.id]?.units || 0) > 0).length} sold in period` },
+              { label: 'In Stock', value: inCat.reduce((a, p) => a + (p.stockQuantity || 0), 0).toLocaleString(), sub: 'units' },
+              { label: 'Low Stock', value: String(inCat.filter(p => (p.stockQuantity || 0) <= ((p as any).reorderLevel || 0)).length), sub: 'at or below reorder level' },
+            ];
+          })() : (() => {
             const f = recentSales.filter(x => x.status !== 'Voided' && inRange(range, x.saleDate));
             const sum = (xs: any[], k: string) => xs.reduce((a, x) => a + (x[k] || 0), 0);
             const cash = f.filter(x => isCashPayment(x.paymentMethod));
@@ -1074,6 +1149,15 @@ export default function POSPage() {
                   <span className="text-foreground">Total</span>
                   <span className="text-primary">{fmt(payable)}</span>
                 </div>
+
+                {/* Sale date: only for roles allowed to backdate sales */}
+                {canBackdateSales && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-muted-foreground shrink-0">Sale date</span>
+                    <div className="flex-1 min-w-0"><DatePicker value={saleDay} onChange={d => d && d <= new Date() && setSaleDay(d)} /></div>
+                    {isBackdated && <span className="text-[10px] font-semibold text-amber-500 shrink-0">Backdated</span>}
+                  </div>
+                )}
 
                 {/* Payment method */}
                 <div className="grid grid-cols-2 gap-1.5">

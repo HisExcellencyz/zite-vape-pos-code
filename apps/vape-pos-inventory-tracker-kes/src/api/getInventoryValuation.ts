@@ -6,12 +6,16 @@ import { zite } from 'zitejs/db';
  * Inventory value (at cost) as it stood at given moments, reconstructed by
  * rolling today's stock back through sales and purchases that happened since.
  */
-async function valueAt(at: string | null, branchId?: string) {
-  const params: string[] = [];
+async function valueAt(at: string | null, branchId?: string, productIds?: string[]) {
+  const params: unknown[] = [];
   let branch = '';
+  if (productIds) {
+    params.push(productIds);
+    branch += ` AND p.id::text = ANY($${params.length})`;
+  }
   if (branchId) {
     params.push(branchId);
-    branch = ` AND EXISTS (SELECT 1 FROM "BranchesProducts" bp WHERE bp."productsId" = p.id AND bp."branchesId" = $1)`;
+    branch += ` AND EXISTS (SELECT 1 FROM "BranchesProducts" bp WHERE bp."productsId" = p.id AND bp."branchesId" = $${params.length})`;
   }
   let sold = '0', bought = '0';
   if (at) {
@@ -40,7 +44,7 @@ async function valueAt(at: string | null, branchId?: string) {
 export default createEndpoint({
   description: 'Inventory value at the start and end of a date range (or right now)',
   authenticated: true,
-  inputSchema: z.object({ start: z.string().optional(), end: z.string().optional(), branchId: z.string().optional() }),
+  inputSchema: z.object({ start: z.string().optional(), end: z.string().optional(), branchId: z.string().optional(), productIds: z.array(z.string()).optional() }),
   outputSchema: z.object({
     current: z.object({ value: z.number(), units: z.number() }),
     start: z.object({ value: z.number(), units: z.number() }).nullable(),
@@ -48,9 +52,9 @@ export default createEndpoint({
   }),
   execute: async ({ input }) => {
     const [current, start, end] = await Promise.all([
-      valueAt(null, input.branchId),
-      input.start ? valueAt(input.start, input.branchId) : Promise.resolve(null),
-      input.end ? valueAt(input.end, input.branchId) : Promise.resolve(null),
+      valueAt(null, input.branchId, input.productIds),
+      input.start ? valueAt(input.start, input.branchId, input.productIds) : Promise.resolve(null),
+      input.end ? valueAt(input.end, input.branchId, input.productIds) : Promise.resolve(null),
     ]);
     return { current, start, end };
   },

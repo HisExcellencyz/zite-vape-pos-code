@@ -29,13 +29,18 @@ export default createEndpoint({
     // the platform's own max per call, so this comfortably covers the whole
     // catalog for a shop this size. If the catalog ever passes ~2000 items,
     // real offset-based pagination should replace this.
-    const { records, hasMore } = await zite.products.findAll({
-      filters: Object.keys(filters).length > 0 ? filters : undefined,
-      limit: input.limit || 2000,
-      offset: input.offset || 0,
-    });
+    // Products, the outlet check and the total count are independent, so fetch them together.
+    const [{ records, hasMore }, keep, countResult] = await Promise.all([
+      zite.products.findAll({
+        filters: Object.keys(filters).length > 0 ? filters : undefined,
+        limit: input.limit || 2000,
+        offset: input.offset || 0,
+      }),
+      branchFilter(input.branchId),
+      zite.sql({ query: `SELECT COUNT(*) AS total FROM "Products"` }),
+    ]);
 
-    let filtered = records.filter(await branchFilter(input.branchId));
+    let filtered = records.filter(keep);
     if (input.search) {
       const s = input.search.toLowerCase();
       filtered = filtered.filter(p =>
@@ -64,11 +69,6 @@ export default createEndpoint({
       default:
         break;
     }
-
-    // Get total count
-    const countResult = await zite.sql({
-      query: `SELECT COUNT(*) AS total FROM "Products"`,
-    });
 
     return {
       products: sorted,

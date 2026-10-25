@@ -75,7 +75,7 @@ export default createEndpoint({
     }
 
     // Total sales & revenue
-    const salesResult = await zite.sql({
+    const salesP = zite.sql({
       query: `
         SELECT COUNT(DISTINCT s.id) AS "totalSales",
                COALESCE(SUM(s."total" + COALESCE(s."discount", 0)), 0) AS "totalRevenue",
@@ -107,7 +107,7 @@ export default createEndpoint({
       pIdx++;
     }
 
-    const purchasesResult = await zite.sql({
+    const purchasesP = zite.sql({
       query: `
         SELECT COALESCE(SUM(p."total"), 0) AS "totalPurchases"
         FROM "Purchases" p
@@ -136,7 +136,7 @@ export default createEndpoint({
       eIdx++;
     }
 
-    const expensesResult = await zite.sql({
+    const expensesP = zite.sql({
       query: `
         SELECT COALESCE(SUM(e."amount"), 0) AS "totalExpenses"
         FROM "OtherExpenses" e
@@ -165,7 +165,7 @@ export default createEndpoint({
       iIdx++;
     }
 
-    const incomeResult = await zite.sql({
+    const incomeP = zite.sql({
       query: `
         SELECT COALESCE(SUM(i."amount"), 0) AS "totalOtherIncome"
         FROM "OtherIncome" i
@@ -199,7 +199,7 @@ export default createEndpoint({
         JOIN "Purchases" pu ON pu.id = lp."purchasesId"
         WHERE l."productsId" = p.id AND pu."purchaseDate" > $${k}), 0)`;
     }
-    const stockResult = await zite.sql({
+    const stockP = zite.sql({
       query: `
         SELECT COALESCE(SUM(COALESCE(p."costPrice", 0) * GREATEST(COALESCE(p."stockQuantity", 0) + ${soldAfter} - ${boughtAfter}, 0)), 0) AS "stockValue"
         FROM "Products" p
@@ -209,7 +209,7 @@ export default createEndpoint({
     });
 
     // Top products
-    const topProducts = await zite.sql({
+    const topProductsP = zite.sql({
       query: `
         SELECT p."productName", 
                COALESCE(SUM(si."quantity"), 0) AS "totalSold",
@@ -228,7 +228,7 @@ export default createEndpoint({
     });
 
     // Top customers
-    const topCustomers = await zite.sql({
+    const topCustomersP = zite.sql({
       query: `
         SELECT c."customerName", c."phoneNumber" AS phone,
                COUNT(DISTINCT s.id) AS "orderCount",
@@ -245,7 +245,7 @@ export default createEndpoint({
     });
 
     // Revenue by day (last 30 days when no start date is chosen)
-    const revByDay = await zite.sql({
+    const revByDayP = zite.sql({
       query: `
         SELECT to_char(s."saleDate" AT TIME ZONE 'Africa/Nairobi', 'YYYY-MM-DD') AS date,
                COALESCE(SUM(s."total" + COALESCE(s."discount", 0)), 0) AS revenue
@@ -260,7 +260,7 @@ export default createEndpoint({
     });
 
     // Expenses by category
-    const expByCat = await zite.sql({
+    const expByCatP = zite.sql({
       query: `
         SELECT COALESCE(ec."categoryName", 'Uncategorized') AS category,
                COALESCE(SUM(e."amount"), 0) AS amount
@@ -276,6 +276,8 @@ export default createEndpoint({
 
     // Rider metrics: the rider is noted on each sale as "Rider (3PL): Name" / "Rider (Own): Name".
     // Orders, amount (sale total), distance and the Rider Fee deduction are added up per rider.
+    // Rider metrics run alongside the other queries.
+    const ridersP = (async () => {
     const riderMap = new Map<string, { name: string; type: string; orders: number; amount: number; km: number; riderCharge: number }>();
     const RIDER_NOTE = /Rider \((3PL|Own)\): ([^|]+)/;
     const PAGE = 2000;
@@ -320,16 +322,11 @@ export default createEndpoint({
         riderCharge: Math.round(r.riderCharge * 100) / 100,
       }))
       .sort((a, b) => b.orders - a.orders);
-
-    const totalRevenue = Number(salesResult.rows[0]?.totalRevenue ?? 0);
-    const totalDeductions = Number(salesResult.rows[0]?.totalDeductions ?? 0);
-    const totalDiscounts = Number(salesResult.rows[0]?.totalDiscounts ?? 0);
-    const totalPurchases = Number(purchasesResult.rows[0]?.totalPurchases ?? 0);
-    const totalExpenses = Number(expensesResult.rows[0]?.totalExpenses ?? 0);
-    const totalOtherIncome = Number(incomeResult.rows[0]?.totalOtherIncome ?? 0);
+    return riderStats;
+    })();
 
     // Delivery distance stats: now limited to the chosen dates (and outlet) like every other tile.
-    const deliveryResult = await zite.sql({
+    const deliveryP = zite.sql({
       query: `
         SELECT COUNT(*) AS cnt,
                COALESCE(AVG(s."deliveryDistanceKm"), 0) AS avg_dist,
@@ -341,6 +338,17 @@ export default createEndpoint({
       `,
       params,
     });
+
+    // Every query above was started without waiting; they all run at the same time.
+    const [salesResult, purchasesResult, expensesResult, incomeResult, stockResult, topProducts, topCustomers, revByDay, expByCat, deliveryResult, riderStats] =
+      await Promise.all([salesP, purchasesP, expensesP, incomeP, stockP, topProductsP, topCustomersP, revByDayP, expByCatP, deliveryP, ridersP]);
+
+    const totalRevenue = Number(salesResult.rows[0]?.totalRevenue ?? 0);
+    const totalDeductions = Number(salesResult.rows[0]?.totalDeductions ?? 0);
+    const totalDiscounts = Number(salesResult.rows[0]?.totalDiscounts ?? 0);
+    const totalPurchases = Number(purchasesResult.rows[0]?.totalPurchases ?? 0);
+    const totalExpenses = Number(expensesResult.rows[0]?.totalExpenses ?? 0);
+    const totalOtherIncome = Number(incomeResult.rows[0]?.totalOtherIncome ?? 0);
 
     return {
       totalSales: Number(salesResult.rows[0]?.totalSales ?? 0),

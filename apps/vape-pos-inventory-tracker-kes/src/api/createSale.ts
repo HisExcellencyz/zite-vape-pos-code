@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
 import { assertCan } from '../lib/permissions';
+import { dayEAT, todayEAT } from '../lib/entryDates';
 import { deductStock } from '../lib/storages';
 
 // Orders merged into one delivery are saved with the note "Merged delivery with Sale #n" (n = the active order).
@@ -52,10 +53,22 @@ export default createEndpoint({
     supplierPickedProductIds: z.array(z.string()).optional(),
     /** Products ticked as picked up at a Storage location: { [storageId]: productIds }. They are deducted from that storage. */
     storagePicks: z.record(z.array(z.string())).optional(),
+    /** Date and time of the sale when it is recorded later (backdated). Needs the "backdate POS sales" right. */
+    saleDate: z.string().optional(),
   }),
   outputSchema: z.object({ success: z.boolean(), sale: z.any() }),
   execute: async ({ input, context }) => {
-    await assertCan(context.user.id, 'pos', 'create');
+    const access = await assertCan(context.user.id, 'pos', 'create');
+    let backdatedTo: string | null = null;
+    if (input.saleDate) {
+      const when = new Date(input.saleDate);
+      if (isNaN(when.getTime())) throw new Error('Invalid sale date');
+      if (dayEAT(when.toISOString()) > todayEAT()) throw new Error('A sale cannot be dated in the future');
+      if (dayEAT(when.toISOString()) !== todayEAT()) {
+        if (!access.canBackdateSales) throw new Error('Your role cannot backdate sales. Ask an administrator to turn on "Can backdate POS sales".');
+        backdatedTo = when.toISOString();
+      }
+    }
     let subtotal = 0;
     let totalTax = 0;
 
@@ -73,7 +86,7 @@ export default createEndpoint({
     });
 
     const total = subtotal - (input.discount || 0);
-    const saleDate = new Date().toISOString();
+    const saleDate = backdatedTo || new Date().toISOString();
 
     const riderText = input.riderType && input.riderName
       ? `Rider (${input.riderType === 'threePl' ? '3PL' : 'Own'}): ${input.riderName}`

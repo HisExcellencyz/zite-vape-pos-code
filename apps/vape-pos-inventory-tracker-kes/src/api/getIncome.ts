@@ -12,8 +12,7 @@ export default createEndpoint({
   }),
   outputSchema: z.object({ income: z.array(z.any()) }),
   execute: async ({ input }) => {
-    const { records } = await zite.otherIncome.findAll({ limit: input.limit || 500 });
-    const keep = await branchFilter(input.branchId);
+    const [{ records }, keep] = await Promise.all([zite.otherIncome.findAll({ limit: input.limit || 500 }), branchFilter(input.branchId)]);
     const income = records.filter(keep).sort((a, b) =>
       String(b.incomeDate || '').localeCompare(String(a.incomeDate || '')),
     );

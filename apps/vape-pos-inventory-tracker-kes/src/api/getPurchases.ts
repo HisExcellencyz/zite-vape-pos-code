@@ -13,11 +13,13 @@ export default createEndpoint({
   }),
   outputSchema: z.object({ purchases: z.array(z.any()), hasMore: z.boolean() }),
   execute: async ({ input }) => {
-    const { records, hasMore } = await zite.purchases.findAll({
-      limit: input.limit || 2000,
-      offset: input.offset || 0,
-    });
-    const keep = await branchFilter(input.branchId);
+    const [{ records, hasMore }, keep] = await Promise.all([
+      zite.purchases.findAll({
+        limit: input.limit || 2000,
+        offset: input.offset || 0,
+      }),
+      branchFilter(input.branchId),
+    ]);
     return { purchases: records.filter(keep), hasMore };
   },
 });

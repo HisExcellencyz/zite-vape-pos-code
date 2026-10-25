@@ -317,3 +317,42 @@
   .stat-tile, .tile[data-tone] { --edge-from: var(--glow); }
   .bg-card.border:hover, .tile:hover, .stat-tile:hover { --edge-a: 1; }
 }
+
+/* Compact, refined sizing: slightly smaller type everywhere and slimmer summary tiles */
+@layer base {
+  html { font-size: 15px; }
+  main h1 { font-size: 1.4rem !important; line-height: 1.2 !important; }
+}
+@layer components {
+  .stat-tile {
+    border-radius: 0.85rem;
+    padding: 0.3rem 0.65rem 0.35rem 0.8rem;
+    line-height: 1.05;
+    transition: transform .2s ease, box-shadow .3s ease;
+  }
+  .stat-tile:hover { transform: translateY(-1px); box-shadow: 0 10px 24px -16px hsl(var(--glow) / 0.8); }
+  .stat-tile .stat-label {
+    display: flex; align-items: center; gap: 0.35rem;
+    font-size: 9px; letter-spacing: .1em; overflow: hidden; text-overflow: ellipsis;
+  }
+  .stat-tile .stat-label::before {
+    content: ''; flex: none; width: 6px; height: 6px; border-radius: 999px;
+    background: hsl(var(--glow)); box-shadow: 0 0 6px hsl(var(--glow));
+  }
+  /* Main figure: the Dashboard's colours in the Dashboard's order (blue, green, pink, gold),
+     at 80% of the Dashboard figure size (15px on phones, 18px wider). */
+  .stat-tile[data-tone='blue'] { --value-color: 199 89% 48%; }
+  .stat-tile[data-tone='green'] { --value-color: 160 84% 39%; }
+  .stat-tile[data-tone='pink'] { --value-color: 330 81% 60%; }
+  .stat-tile[data-tone='gold'] { --value-color: 38 92% 50%; }
+  .stat-tile .stat-value {
+    margin-top: 1px; font-size: 0.8rem; line-height: 1.05; font-weight: 800; letter-spacing: -0.01em;
+    background-image: none;
+    color: hsl(var(--value-color, var(--foreground)));
+    -webkit-text-fill-color: hsl(var(--value-color, var(--foreground)));
+    text-shadow: 0 0 18px hsl(var(--value-color, var(--foreground)) / 0.35);
+    width: auto; max-width: 100%; white-space: normal; overflow-wrap: anywhere;
+  }
+  @media (min-width: 640px) { .stat-tile .stat-value { font-size: 0.9rem; } }
+  .stat-tile .stat-sub { margin-top: 0; line-height: 1.15; font-size: 9.5px; color: hsl(var(--muted-foreground)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}

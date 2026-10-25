@@ -15,7 +15,7 @@ import { toast } from 'sonner';
 import { downloadCsv } from '../lib/exportHelper';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
 
-import { AREAS, ACTIONS, AREA_LABELS, Area, Action, PermMatrix, emptyPermissions, fullPermissions, normalizePerms, isAdminRoleName } from '../lib/permissionAreas';
+import { AREAS, ACTIONS, AREA_LABELS, Area, Action, PermMatrix, emptyPermissions, fullPermissions, normalizePerms, isAdminRoleName, canBackdateSalesRole } from '../lib/permissionAreas';
 
 const emptyPerms = (): PermMatrix => emptyPermissions();
 
@@ -73,6 +73,7 @@ export default function UsersPage() {
   const [roleName, setRoleName] = useState('');
   const [roleDesc, setRoleDesc] = useState('');
   const [rolePerms, setRolePerms] = useState<PermMatrix>(emptyPerms());
+  const [roleBackdateSales, setRoleBackdateSales] = useState(false);
   const [roleDefault, setRoleDefault] = useState(false);
 
   const load = async () => {
@@ -135,7 +136,7 @@ export default function UsersPage() {
 
   const openNewRole = () => {
     setEditRole(null); setRoleName(''); setRoleDesc('');
-    setRolePerms(emptyPerms()); setRoleDefault(false); setRoleOpen(true);
+    setRolePerms(emptyPerms()); setRoleBackdateSales(false); setRoleDefault(false); setRoleOpen(true);
   };
 
   const openEditRole = (r: Role) => {
@@ -145,6 +146,7 @@ export default function UsersPage() {
     setRoleDefault(r.isDefault || false);
     // normalizePerms gives roles saved before newer areas existed the older area's rights as a starting point.
     try { setRolePerms(r.permissions ? normalizePerms(JSON.parse(r.permissions)) : emptyPerms()); } catch { setRolePerms(emptyPerms()); }
+    try { setRoleBackdateSales(canBackdateSalesRole(JSON.parse(r.permissions || '{}'))); } catch { setRoleBackdateSales(false); }
     setRoleOpen(true);
   };
 
@@ -163,7 +165,7 @@ export default function UsersPage() {
         id: editRole?.id,
         roleName: roleName.trim(),
         description: roleDesc.trim() || undefined,
-        permissions: JSON.stringify(adminRole ? fullPermissions() : rolePerms),
+        permissions: JSON.stringify(adminRole ? fullPermissions() : { ...rolePerms, pos: { ...rolePerms.pos, backdate: roleBackdateSales } }),
         isDefault: roleDefault,
         active: true,
       });
@@ -431,6 +433,10 @@ export default function UsersPage() {
               <Switch checked={roleDefault} onCheckedChange={setRoleDefault} />
               <Label className="text-sm">Use as the default role when inviting users without picking one</Label>
             </div>
+            <div className="flex items-center gap-3">
+              <Switch checked={adminRole || roleBackdateSales} disabled={adminRole} onCheckedChange={setRoleBackdateSales} />
+              <Label className="text-sm">Can backdate POS sales (pick an earlier date when completing a sale)</Label>
+            </div>
             <div>
               <Label className="mb-2 block">Permissions Matrix</Label>
               {adminRole && (
@@ -470,7 +476,7 @@ export default function UsersPage() {
               </div>
               <div className="text-xs text-muted-foreground mt-2 space-y-1">
                 <p>"view" controls whether the menu item and page are visible. "create", "edit" and "delete" control adding, changing (including bulk deductions / revenues and customer locations) and removing entries; "export" and "import" control the CSV buttons.</p>
-                <p>Changing an entry's date (backdate) and importing dated or backdated entries are not in this matrix: they are always reserved for the Owner and Admin.</p>
+                <p>Changing an entry's date (backdate) and importing dated or backdated entries are not in this matrix: they are reserved for the Owner and Admin. The one exception is the "Can backdate POS sales" switch above, which lets a role record new POS sales on an earlier date.</p>
                 <p>Areas added since a role was created start with the rights of the older area they came from (for example Income from POS) until the role is saved again.</p>
               </div>
             </div>

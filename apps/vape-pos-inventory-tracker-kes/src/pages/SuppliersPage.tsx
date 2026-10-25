@@ -45,6 +45,7 @@ interface Bill {
 }
 
 import { useTableControls, TableControls, SortTh, FieldDef } from '../components/TableControls';
+import HistoryDialog, { HistoryTarget, rowTap } from '../components/HistoryDialog';
 
 const FIELDS: FieldDef<Supplier>[] = [{ key: 'supplierName', label: 'Name' }, { key: 'phone', label: 'Phone' }, { key: 'email', label: 'Email' }, { key: 'address', label: 'Address' }, { key: 'depositBalance', label: 'Deposit Balance' }, { key: 'billsPending', label: 'Bills Pending' }];
 
@@ -52,6 +53,7 @@ const fmt = (n?: number) => `KES ${(n || 0).toLocaleString()}`;
 const dateTxt = (d?: string | null) => { try { return d ? format(new Date(d), 'dd MMM yyyy') : '-'; } catch { return '-'; } };
 
 export default function SuppliersPage() {
+  const [history, setHistory] = useState<HistoryTarget | null>(null);
   const { can } = usePermissions();
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
@@ -390,7 +392,7 @@ export default function SuppliersPage() {
                       </td>
                     </tr>
                   ) : tc.view.map(s => (
-                    <tr key={s.id} className="border-b border-border hover:bg-muted/30">
+                    <tr onClick={rowTap(() => setHistory({ kind: 'supplier', id: s.id, title: s.supplierName || 'Supplier', subtitle: s.phone }))} title="Tap to see history" key={s.id} className="border-b border-border hover:bg-muted/30 cursor-pointer">
                       <td className="p-3"><input type="checkbox" checked={selectedIds.has(s.id)} onChange={() => toggleSelect(s.id)} className="rounded" /></td>
                       <td className="p-3 font-medium text-foreground break-words whitespace-normal">{s.supplierName}</td>
                       <td className="p-3 text-muted-foreground whitespace-nowrap">{s.phone || '-'}</td>
@@ -427,7 +429,7 @@ export default function SuppliersPage() {
                 </CardContent>
               </Card>
             ) : tc.view.map(s => (
-              <Card key={s.id} className={`bg-card flex flex-col ${selectedIds.has(s.id) ? 'border-primary' : 'border-border'}`}>
+              <Card onClick={rowTap(() => setHistory({ kind: 'supplier', id: s.id, title: s.supplierName || 'Supplier', subtitle: s.phone }))} key={s.id} className={`cursor-pointer bg-card flex flex-col ${selectedIds.has(s.id) ? 'border-primary' : 'border-border'}`}>
                 <CardContent className="p-3 flex flex-col gap-2.5 flex-1">
                   <div className="flex items-start gap-2">
                     <input type="checkbox" checked={selectedIds.has(s.id)} onChange={() => toggleSelect(s.id)} className="mt-1 rounded shrink-0" />
@@ -672,6 +674,7 @@ export default function SuppliersPage() {
         value={locAddress}
         onSelect={(address, coords) => { setLocAddress(address); setLocCoords(coords); }}
       />
+      <HistoryDialog target={history} onClose={() => setHistory(null)} />
     </div>
   );
 }

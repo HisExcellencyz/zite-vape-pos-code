@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
+import { normalizePhone } from '../lib/phone';
 import { normalizeImageUrl, isHttpUrl } from '../lib/imageUrl';
 import { assertCan } from '../lib/permissions';
 import { syncSupplierAddress } from '../lib/supplierAddress';
@@ -119,7 +120,7 @@ export default createEndpoint({
             const name = row['Customer Name'] || row['customerName'] || row['name'] || '';
             let phone = row['Phone Number'] || row['phoneNumber'] || row['phone'] || '';
             if (!name || !phone) { errors.push(`Row missing name or phone: ${JSON.stringify(row)}`); continue; }
-            if (!phone.startsWith('+')) phone = '+' + phone;
+            phone = normalizePhone(phone);
 
             const existing = await zite.customers.findOne({ filters: { phoneNumber: phone } });
             if (existing) {

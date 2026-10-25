@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
+import { normalizePhone } from '../lib/phone';
 import { getAccess } from '../lib/permissions';
 import { todayEAT, resolveDateChange, moveSaleDate } from '../lib/entryDates';
 
@@ -126,9 +127,9 @@ export default createEndpoint({
         if (dateStr) {
           const pd = parseDate(dateStr);
           if (!pd) { skipped++; errors.push(`${label}: invalid date "${dateStr}" (use YYYY-MM-DD or DD/MM/YYYY)`); continue; }
-          // Only the Owner and Admin may import sales with a date other than today.
-          if (pd.day !== todayEAT() && !access.canBackdate) {
-            skipped++; errors.push(`${label}: only the Owner and Admin can import backdated sales (date ${pd.day})`); continue;
+          // Only the Owner, Admin and roles allowed to backdate POS sales may import sales with a date other than today.
+          if (pd.day !== todayEAT() && !access.canBackdateSales) {
+            skipped++; errors.push(`${label}: your role cannot import backdated sales (date ${pd.day})`); continue;
           }
           saleDate = pd.iso;
         }
@@ -157,7 +158,7 @@ export default createEndpoint({
           let cust = phoneMap.get(phoneDigits);
           const custName = first['customername'] || '';
           if (!cust && custName) {
-            cust = await zite.customers.create({ record: { customerName: custName, phoneNumber: '+' + phoneDigits, email: null, address: null, notes: null } });
+            cust = await zite.customers.create({ record: { customerName: custName, phoneNumber: normalizePhone(phoneDigits), email: null, address: null, notes: null } });
             phoneMap.set(phoneDigits, cust);
           }
           if (cust) customerId = cust.id;

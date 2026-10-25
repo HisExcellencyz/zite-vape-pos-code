@@ -15,6 +15,7 @@ import LocationPickerDialog from '../components/LocationPickerDialog';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
 import ImportDialog from '../components/ImportDialog';
 import { usePermissions } from '../hooks/usePermissions';
+import { normalizePhone } from '../lib/phone';
 
 interface Customer {
   id: string;
@@ -40,10 +41,12 @@ const SORT_LABELS: Record<SortBy, string> = {
 const fmt = (n?: number) => `KES ${(n || 0).toLocaleString()}`;
 
 import { useTableControls, TableControls, SortTh, FieldDef } from '../components/TableControls';
+import HistoryDialog, { HistoryTarget, rowTap } from '../components/HistoryDialog';
 
 const FIELDS: FieldDef<Customer>[] = [{ key: 'customerName', label: 'Name' }, { key: 'phoneNumber', label: 'Phone' }, { key: 'email', label: 'Email' }, { key: 'address', label: 'Address' }, { key: 'notes', label: 'Notes' }, { key: 'orderCount', label: 'Orders' }, { key: 'totalSpent', label: 'Total Spent' }];
 
 export default function CustomersPage() {
+  const [history, setHistory] = useState<HistoryTarget | null>(null);
   const { can } = usePermissions();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -109,7 +112,7 @@ export default function CustomersPage() {
     if (editing) return; // duplicate check only matters when creating new
     const phone = phoneRaw.trim();
     if (!phone) { setDuplicateMatch(null); return; }
-    const normalized = phone.startsWith('+') ? phone : '+' + phone;
+    const normalized = normalizePhone(phone);
     try {
       const res = await getCustomers({ search: normalized });
       const match = (res.customers as Customer[]).find(c => (c.phoneNumber || '') === normalized);
@@ -288,7 +291,7 @@ export default function CustomersPage() {
                       </td>
                     </tr>
                   ) : tc.view.map(c => (
-                    <tr key={c.id} className="border-b border-border hover:bg-muted/30">
+                    <tr onClick={rowTap(() => setHistory({ kind: 'customer', id: c.id, title: c.customerName || 'Customer', subtitle: c.phoneNumber }))} title="Tap to see history" key={c.id} className="border-b border-border hover:bg-muted/30 cursor-pointer">
                       <td className="p-3"><input type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} className="rounded" /></td>
                       <td className="p-3 font-medium text-foreground break-words whitespace-normal">{c.customerName}</td>
                       <td className="p-3 text-muted-foreground whitespace-nowrap"><span className="inline-flex items-center gap-1.5"><Phone className="w-3.5 h-3.5" />{c.phoneNumber}</span></td>
@@ -325,7 +328,7 @@ export default function CustomersPage() {
                 </CardContent>
               </Card>
             ) : tc.view.map(c => (
-              <Card key={c.id} className={`bg-card ${selectedIds.has(c.id) ? 'border-primary' : 'border-border'}`}>
+              <Card onClick={rowTap(() => setHistory({ kind: 'customer', id: c.id, title: c.customerName || 'Customer', subtitle: c.phoneNumber }))} key={c.id} className={`cursor-pointer bg-card ${selectedIds.has(c.id) ? 'border-primary' : 'border-border'}`}>
                 <CardContent className="p-2.5 space-y-2">
                   <div className="flex items-start gap-2">
                     <input type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} className="mt-1 rounded shrink-0" />
@@ -482,6 +485,7 @@ export default function CustomersPage() {
           )}
         </DialogContent>
       </Dialog>
+      <HistoryDialog target={history} onClose={() => setHistory(null)} />
     </div>
   );
 }

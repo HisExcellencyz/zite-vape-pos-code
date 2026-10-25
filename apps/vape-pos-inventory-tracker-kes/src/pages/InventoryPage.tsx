@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useBranch } from '../hooks/useBranch';
+import { keyOf, peek, remember } from '../lib/listCache';
 import { getProducts, getCategories, saveProduct, deleteRecord, exportCsv, importCsv, bulkUpdateProducts, bulkDeleteRecords, uploadProductImage } from 'zitejs/api';
 import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
@@ -17,12 +18,13 @@ import { normalizeImageUrl, isDirectImageUrl, isHttpUrl } from '../lib/imageUrl'
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
 import ImportDialog from '../components/ImportDialog';
 import ProductImage from '../components/ProductImage';
-import { getInventoryValuation, GetInventoryValuationOutputType } from 'zitejs/api';
+import { getInventoryValuation, GetInventoryValuationOutputType, getProductSalesSummary } from 'zitejs/api';
 import { useTableControls, TableControls, SortTh, FieldDef } from '../components/TableControls';
 import DateRangeFilter, { Range, eatBounds } from '../components/DateRangeFilter';
 import SummaryTiles from '../components/SummaryTiles';
 import CategoryRibbon, { CategoryLite, flattenCategories, matchesCategory, productCategoryId } from '../components/CategoryRibbon';
 import { usePermissions } from '../hooks/usePermissions';
+import HistoryDialog, { HistoryTarget, rowTap } from '../components/HistoryDialog';
 
 interface Product {
   id: string;
@@ -58,18 +60,12 @@ const FIELDS: FieldDef<any>[] = [
 ];
 
 export default function InventoryPage() {
+  const [history, setHistory] = useState<HistoryTarget | null>(null);
   const { can } = usePermissions();
   const { currentBranch } = useBranch();
   const [range, setRange] = useState<Range>({});
   const [valuation, setValuation] = useState<GetInventoryValuationOutputType | null>(null);
-  useEffect(() => {
-    const b = eatBounds(range);
-    getInventoryValuation({
-      branchId: currentBranch?.id,
-      start: range.start ? new Date(b.from - 1).toISOString() : undefined,
-      end: range.end ? new Date(b.to).toISOString() : undefined,
-    }).then(setValuation).catch(() => setValuation(null));
-  }, [range.start?.getTime(), range.end?.getTime(), currentBranch?.id]);
+  const [sold, setSold] = useState<Record<string, { units: number; revenue: number; sales: number }>>({});
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -102,20 +98,24 @@ export default function InventoryPage() {
   const [bulkCategory, setBulkCategory] = useState('');
 
   const load = async () => {
-    setLoading(true);
-    try {
-      const [prods, cats] = await Promise.all([
-        getProducts({
-          branchId: currentBranch?.id,
-          search,
-          status: statusFilter && statusFilter !== 'all' ? statusFilter : undefined,
-          sortBy,
-          sortDir,
-        }),
-        getCategories({}),
-      ]);
+    const args = {
+      branchId: currentBranch?.id,
+      search,
+      status: statusFilter && statusFilter !== 'all' ? statusFilter : undefined,
+      sortBy,
+      sortDir,
+    };
+    const key = keyOf('inventory', args);
+    const apply = ([prods, cats]: [any, any]) => {
       setProducts(prods.products as Product[]);
       setCategories(cats.categories as Category[]);
+    };
+    // When the page first opens, a list seen before shows at once and the fresh one replaces it.
+    // Reloads after an edit skip this so old figures never flash back.
+    const hit = products.length === 0 ? peek<[any, any]>(key) : undefined;
+    if (hit) apply(hit); else setLoading(true);
+    try {
+      apply(await remember(key, Promise.all([getProducts(args), getCategories({})])));
     } catch {
       toast.error('Failed to load products');
     } finally {
@@ -255,6 +255,25 @@ export default function InventoryPage() {
   const shown = products.filter(p => matchesCategory(categoryFilter, productCategoryId(p), categories));
   const categoryOptions = flattenCategories(categories);
 
+  // Tiles follow the date range and the category picked on the ribbon.
+  const shownKey = categoryFilter ? shown.map(p => p.id).join(',') : '';
+  useEffect(() => {
+    if (categoryFilter && products.length === 0) return;
+    const b = eatBounds(range);
+    const start = range.start ? new Date(b.from - 1).toISOString() : undefined;
+    const end = range.end ? new Date(b.to).toISOString() : undefined;
+    const productIds = categoryFilter ? shown.map(p => p.id) : undefined;
+    let live = true;
+    getInventoryValuation({ branchId: currentBranch?.id, start, end, productIds })
+      .then(v => { if (live) setValuation(v); }).catch(() => { if (live) setValuation(null); });
+    getProductSalesSummary({ branchId: currentBranch?.id, start, end })
+      .then(r => { if (live) setSold(r.byProduct); }).catch(() => {});
+    return () => { live = false; };
+  }, [range.start?.getTime(), range.end?.getTime(), currentBranch?.id, categoryFilter, shownKey]);
+  const soldUnits = shown.reduce((a, p) => a + (sold[p.id]?.units || 0), 0);
+  const soldValue = shown.reduce((a, p) => a + (sold[p.id]?.revenue || 0), 0);
+  const scope = categoryFilter ? (categoryOptions.find(c => c.id === categoryFilter)?.label || 'Category') : 'All products';
+
   const toggleAll = () => {
     setSelectedIds(selectedIds.size === shown.length ? new Set() : new Set(shown.map(p => p.id)));
   };
@@ -334,11 +353,13 @@ export default function InventoryPage() {
           { label: 'Closing Inventory', value: fmt(valuation.end?.value ?? valuation.current.value), sub: `${(valuation.end?.units ?? valuation.current.units).toLocaleString()} units` },
           { label: 'Change', value: fmt((valuation.end?.value ?? valuation.current.value) - (valuation.start?.value ?? valuation.current.value)) },
           { label: 'Current Value', value: fmt(valuation.current.value), sub: `${valuation.current.units.toLocaleString()} units` },
+          { label: 'Sold in Range', value: fmt(soldValue), sub: `${soldUnits.toLocaleString()} units · ${scope}` },
         ] : [
-          { label: 'Inventory Value', value: fmt(valuation.current.value), sub: 'At cost price' },
+          { label: 'Inventory Value', value: fmt(valuation.current.value), sub: `At cost · ${scope}` },
           { label: 'Units in Stock', value: valuation.current.units.toLocaleString() },
-          { label: 'Products', value: String(products.length) },
-          { label: 'Low Stock', value: String(products.filter(p => (p.stockQuantity || 0) <= (p.reorderLevel || 0)).length) },
+          { label: 'Products', value: String(shown.length), sub: `${shown.filter(p => p.status === 'Active').length} active` },
+          { label: 'Low Stock', value: String(shown.filter(p => (p.stockQuantity || 0) <= (p.reorderLevel || 0)).length), sub: 'at or below reorder level' },
+          { label: 'Units Sold', value: soldUnits.toLocaleString(), sub: `${fmt(soldValue)} all time` },
         ]} />
       )}
       <CategoryRibbon categories={categories} selected={categoryFilter} onSelect={setCategoryFilter} />
@@ -378,7 +399,7 @@ export default function InventoryPage() {
                     </tr>
                   ) : (
                     tc.view.map((p: Product) => (
-                      <tr key={p.id} className="border-b border-border hover:bg-muted/30 transition-colors">
+                      <tr onClick={rowTap(() => setHistory({ kind: 'product', id: p.id, title: p.productName || 'Product', subtitle: p.sku ? `SKU ${p.sku}` : undefined }))} title="Tap to see history" key={p.id} className="border-b border-border hover:bg-muted/30 cursor-pointer transition-colors">
                         <td className="p-3"><input type="checkbox" checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} className="rounded" /></td>
                         <td className="p-3 font-medium text-foreground max-w-xs">
                           <div className="flex items-center gap-3">
@@ -424,7 +445,7 @@ export default function InventoryPage() {
                 </CardContent>
               </Card>
             ) : tc.view.map((p: Product) => (
-              <Card key={p.id} className={`bg-card flex flex-col ${selectedIds.has(p.id) ? 'border-primary' : 'border-border'}`}>
+              <Card onClick={rowTap(() => setHistory({ kind: 'product', id: p.id, title: p.productName || 'Product', subtitle: p.sku ? `SKU ${p.sku}` : undefined }))} key={p.id} className={`cursor-pointer bg-card flex flex-col ${selectedIds.has(p.id) ? 'border-primary' : 'border-border'}`}>
                 <CardContent className="p-2 space-y-1.5 flex flex-col flex-1">
                   <div className="relative">
                     <ProductImage src={photoOf(p)} alt={p.productName} className="w-full !aspect-[2/1]" />
@@ -611,6 +632,7 @@ export default function InventoryPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <HistoryDialog target={history} onClose={() => setHistory(null)} />
     </div>
   );
 }
