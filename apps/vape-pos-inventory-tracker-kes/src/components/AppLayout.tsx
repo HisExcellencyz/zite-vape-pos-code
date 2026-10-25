@@ -14,6 +14,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator, DropdownMenuLabel
 } from '@project/components/ui/dropdown-menu';
 import { toast } from 'sonner';
+import { useConfirm } from './DialogKit';
 import { usePermissions } from '../hooks/usePermissions';
 import { useBranch } from '../hooks/useBranch';
 import { useTheme } from '../hooks/useTheme';
@@ -63,9 +64,14 @@ export default function AppLayout({ children, landing }: { children: ReactNode; 
   const canArchive = can('archive', 'view');
   const initial = (user?.firstName?.[0] || user?.email?.[0] || 'U').toUpperCase();
 
+  const confirm = useConfirm();
   const handleArchive = async () => {
     if (archiving) return;
-    if (!window.confirm('Archive all data to Google Sheets now? Sales, purchases, expenses and income older than 3 months will be removed from the app after the archive.')) return;
+    if (!(await confirm({
+      title: 'Archive to Google Sheets now?',
+      description: 'All data is copied to the archive sheet. Sales, purchases, expenses and income older than 3 months are then removed from the app.',
+      confirmLabel: 'Archive now',
+    }))) return;
     setArchiving(true);
     try {
       const res = await syncToGoogleSheets({});

@@ -9,7 +9,7 @@ import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
 import { Badge } from '@project/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@project/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { Checkbox } from '@project/components/ui/checkbox';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
@@ -26,6 +26,7 @@ import { buildCategoryTree, productCategoryId, CategoryLite } from '../component
 import { useBranch } from '../hooks/useBranch';
 import { usePermissions } from '../hooks/usePermissions';
 import { keyOf, peek, remember } from '../lib/listCache';
+import { Field, FormSection, SubmitButton, DESTRUCTIVE } from '../components/DialogKit';
 
 interface LPOItem {
   productId: string;
@@ -271,7 +272,7 @@ export default function PurchaseOrdersPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => handleDelete(o.id)}>Delete</AlertDialogAction>
+            <AlertDialogAction className={DESTRUCTIVE} onClick={() => handleDelete(o.id)}>Delete</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>}
@@ -386,9 +387,9 @@ export default function PurchaseOrdersPage() {
         title="Import Purchase Orders (LPOs)"
         template="lpos"
         description={<>
-          Upload a CSV with one row per product line. Rows sharing the same <span className="font-medium text-foreground">LPO Number</span> become one LPO.
+          One row per product (SKU). Rows sharing the same <span className="font-medium text-foreground">LPO Number</span> become one LPO.
           Columns: <span className="font-medium text-foreground">LPO Number, Supplier Name, Order Date, Expected Delivery Date, Status, Product SKU, Quantity, Unit Price, Notes</span>.
-          <br />Dates can be in the past (YYYY-MM-DD or DD/MM/YYYY). Status: Draft, Sent, Partially Verified, Verified or Cancelled. Imported LPOs are recorded as history only — they do not change stock or create purchases. Existing LPO numbers are skipped. Press OK to start.
+          <br />Dates can be in the past (YYYY-MM-DD or DD/MM/YYYY). Status: Draft, Sent, Partially Verified, Verified or Cancelled. Imported LPOs are recorded as history only — they do not change stock or create purchases. Existing LPO numbers are skipped.
         </>}
         onImport={runImport}
         onDone={load}
@@ -397,28 +398,29 @@ export default function PurchaseOrdersPage() {
       {/* New / edit LPO: once a supplier is chosen, clicking into the search box lists that supplier's products */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
         <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>{editId ? 'Edit' : 'New'} Purchase Order</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>{editId ? 'Edit' : 'New'} Purchase Order</DialogTitle>
+            <DialogDescription>An LPO to send to a supplier. Stock changes only when the delivery is verified.</DialogDescription>
+          </DialogHeader>
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Supplier *</Label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="space-y-1.5">
+                <Label>Supplier<span className="text-destructive ml-0.5">*</span></Label>
                 <Select value={supplierId} onValueChange={setSupplierId}>
                   <SelectTrigger><SelectValue placeholder="Select supplier" /></SelectTrigger>
                   <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.supplierName}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
-              <div>
-                <Label>Order Date</Label>
+              <Field label="Order Date">
                 <DatePicker value={orderDate} onChange={setOrderDate} />
-              </div>
-            </div>
-            <div>
-              <Label>Expected Delivery Date</Label>
-              <DatePicker value={expectedDate} onChange={setExpectedDate} />
+              </Field>
+              <Field label="Expected Delivery Date"
+                error={expectedDate && orderDate && expectedDate < orderDate ? 'Before the order date' : ''}>
+                <DatePicker value={expectedDate} onChange={setExpectedDate} />
+              </Field>
             </div>
 
-            <div className="space-y-1.5">
-              <Label>Products</Label>
+            <FormSection title="SKUs" description={supplierId ? "Click the search box to list this supplier's SKUs, then set quantity and unit price." : 'Select a supplier first.'}>
               <ProductMultiSearch
                 key={supplierId || 'none'}
                 items={supplierProducts}
@@ -429,12 +431,11 @@ export default function PurchaseOrdersPage() {
                 showOnFocus
                 placeholder={supplierId ? 'Search products...' : 'Select a supplier first'}
               />
-            </div>
 
             {items.length > 0 && (
               <div className="space-y-2">
                 {items.map((item, i) => (
-                  <div key={item.productId} className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
+                  <div key={item.productId} className="flex items-center gap-3 bg-background/60 border border-border rounded-lg p-3">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-foreground break-words whitespace-normal">{item.productName}</p>
                       <p className="text-xs text-muted-foreground break-all">{item.sku}</p>
@@ -446,26 +447,29 @@ export default function PurchaseOrdersPage() {
                     <button onClick={() => setItems(items.filter((_, j) => j !== i))}><Trash2 className="w-3.5 h-3.5 text-destructive" /></button>
                   </div>
                 ))}
-                <div className="flex justify-end text-lg font-bold text-primary">Total: {fmt(itemsTotal)}</div>
               </div>
             )}
+            </FormSection>
 
-            <div>
-              <Label>Notes</Label>
-              <Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional notes" />
-            </div>
+            <Field label="Notes">
+              <Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional" />
+            </Field>
           </div>
-          <DialogFooter>
+          <DialogFooter className="items-center">
+            <span className="sm:mr-auto text-lg font-bold text-primary">Total {fmt(itemsTotal)}</span>
             <Button variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>{saving ? 'Saving...' : editId ? 'Update LPO' : 'Create LPO'}</Button>
+            <SubmitButton onClick={handleSave} busy={saving} disabled={!supplierId || items.length === 0}>{editId ? 'Save LPO' : 'Create LPO'}</SubmitButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={!!showVerify} onOpenChange={() => setShowVerify(null)}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>Verify Delivery — {showVerify?.lpoNumber}</DialogTitle></DialogHeader>
-          <div className="space-y-2 mt-2">
+          <DialogHeader>
+            <DialogTitle>Verify Delivery — {showVerify?.lpoNumber}</DialogTitle>
+            <DialogDescription>Tick each SKU that arrived and enter the quantity received. Verified quantities are added to stock.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
             {verifyItems.map((item, i) => (
               <div key={item.productId} className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
                 <Checkbox
@@ -491,14 +495,17 @@ export default function PurchaseOrdersPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowVerify(null)}>Cancel</Button>
-            <Button onClick={handleVerify} disabled={verifying}>{verifying ? 'Verifying...' : 'Confirm Verification'}</Button>
+            <SubmitButton onClick={handleVerify} busy={verifying} disabled={!verifyItems.some(it => it.verified)}>Confirm Verification</SubmitButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={!!showDetail} onOpenChange={() => setShowDetail(null)}>
         <DialogContent className="max-w-xl">
-          <DialogHeader><DialogTitle>{showDetail?.lpoNumber}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>{showDetail?.lpoNumber}</DialogTitle>
+            <DialogDescription>Purchase order details. Download it as a PDF or Excel file to send to the supplier.</DialogDescription>
+          </DialogHeader>
           {showDetail && (() => {
             let parsed: LPOItem[] = [];
             try { parsed = JSON.parse(showDetail.itemsJson || '[]'); } catch {}
@@ -528,12 +535,12 @@ export default function PurchaseOrdersPage() {
                     </tbody>
                   </table>
                 </div>
-                <div className="text-right text-lg font-bold text-primary">{fmt(showDetail.totalAmount)}</div>
                 {showDetail.notes && <p className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-lg break-words">{showDetail.notes}</p>}
-                <div className="flex gap-2 justify-end">
-                  <Button variant="outline" size="sm" onClick={() => handleDownloadPdf(showDetail)}><FileText className="w-4 h-4 mr-1" /> PDF</Button>
-                  <Button variant="outline" size="sm" onClick={() => handleDownloadExcel(showDetail)}><FileSpreadsheet className="w-4 h-4 mr-1" /> Excel</Button>
-                </div>
+                <DialogFooter className="items-center">
+                  <span className="sm:mr-auto text-lg font-bold text-primary">Total {fmt(showDetail.totalAmount)}</span>
+                  <Button variant="outline" onClick={() => handleDownloadPdf(showDetail)}><FileText className="w-4 h-4 mr-1" /> PDF</Button>
+                  <Button variant="outline" onClick={() => handleDownloadExcel(showDetail)}><FileSpreadsheet className="w-4 h-4 mr-1" /> Excel</Button>
+                </DialogFooter>
               </div>
             );
           })()}

@@ -5,7 +5,7 @@ import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@project/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
 import { Plus, Pencil, Trash2, ArrowRightLeft, ArrowLeft, Search, Eye, PackagePlus, CheckSquare, Download, Upload, X } from 'lucide-react';
@@ -17,6 +17,7 @@ import ProductMultiSearch from '../components/ProductMultiSearch';
 import ImportDialog from '../components/ImportDialog';
 import { peek, remember } from '../lib/listCache';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
+import { Field, FormSection, SubmitButton, DESTRUCTIVE } from '../components/DialogKit';
 
 interface Product { id: string; productName?: string; sku?: string; stockQuantity?: number; status?: string; }
 interface Line { productId: string; quantity: string; }
@@ -328,7 +329,7 @@ export default function StoragesPage() {
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={() => handleDelete(s)} className="bg-destructive">Delete</AlertDialogAction>
+                <AlertDialogAction onClick={() => handleDelete(s)} className={DESTRUCTIVE}>Delete</AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
@@ -488,11 +489,12 @@ export default function StoragesPage() {
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>{nameDialog?.id ? 'Rename Storage' : 'Add Storage'}</DialogTitle>
+            <DialogDescription>A place where stock is kept, e.g. a shelf or a store room.</DialogDescription>
           </DialogHeader>
-          <div><Label>Name *</Label><Input value={nameValue} onChange={e => setNameValue(e.target.value)} placeholder="e.g. Westlands Shelf" /></div>
+          <Field label="Name" required><Input value={nameValue} onChange={e => setNameValue(e.target.value)} placeholder="e.g. Westlands Shelf" /></Field>
           <DialogFooter>
             <Button variant="outline" onClick={() => setNameDialog(null)}>Cancel</Button>
-            <Button onClick={handleSaveName} disabled={savingName}>{savingName ? 'Saving...' : nameDialog?.id ? 'Rename' : 'Create'}</Button>
+            <SubmitButton onClick={handleSaveName} busy={savingName} disabled={!nameValue.trim()}>{nameDialog?.id ? 'Rename' : 'Create'}</SubmitButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -502,18 +504,19 @@ export default function StoragesPage() {
         <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><ArrowRightLeft className="w-5 h-5 text-pink-400" /> Transfer Stock</DialogTitle>
+            <DialogDescription>Move stock from one storage to another. Choose both storages, then the SKUs and quantities.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>From</Label>
+              <div className="space-y-1.5">
+                <Label>From<span className="text-destructive ml-0.5">*</span></Label>
                 <Select value={fromId} onValueChange={changeFrom}>
                   <SelectTrigger><SelectValue placeholder="Select storage" /></SelectTrigger>
                   <SelectContent>{storages.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
-              <div>
-                <Label>To</Label>
+              <div className="space-y-1.5">
+                <Label>To<span className="text-destructive ml-0.5">*</span></Label>
                 <Select value={toId} onValueChange={setToId}>
                   <SelectTrigger><SelectValue placeholder="Select storage" /></SelectTrigger>
                   <SelectContent>{storages.filter(s => s.id !== fromId).map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
@@ -521,8 +524,7 @@ export default function StoragesPage() {
               </div>
             </div>
 
-            <div className="space-y-1.5">
-              <Label>Products in {nameOf(fromId) || 'the source storage'}</Label>
+            <FormSection title={`SKUs in ${nameOf(fromId) || 'the source storage'}`} description={fromId ? 'Click the search box to list what this storage holds.' : 'Choose the storage to move from first.'}>
               <ProductMultiSearch
                 key={`${fromId}|${toId}`}
                 items={sourceProducts}
@@ -534,18 +536,18 @@ export default function StoragesPage() {
                 showOnFocus
                 placeholder="Search products to move..."
               />
-            </div>
 
             {lines.length > 0 && (
               <div className="space-y-2">
                 {lines.map((l, i) => {
                   const p = products.find(x => x.id === l.productId);
                   const avail = p ? qty(fromId, p) : 0;
+                  const over = Number(l.quantity) > avail;
                   return (
-                    <div key={l.productId} className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
+                    <div key={l.productId} className="flex items-center gap-3 bg-background/60 border border-border rounded-lg p-3">
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-foreground break-words whitespace-normal">{p?.productName}</p>
-                        <p className="text-xs text-muted-foreground">{avail} available</p>
+                        <p className={`text-xs ${over ? 'text-destructive' : 'text-muted-foreground'}`}>{avail} available{over ? ' — quantity is more than this' : ''}</p>
                       </div>
                       <Input
                         type="number"
@@ -561,10 +563,11 @@ export default function StoragesPage() {
                 })}
               </div>
             )}
+            </FormSection>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setTransferOpen(false)}>Cancel</Button>
-            <Button onClick={handleTransfer} disabled={transferring || lines.length === 0 || !toId}>{transferring ? 'Transferring...' : 'Transfer'}</Button>
+            <SubmitButton onClick={handleTransfer} busy={transferring} disabled={lines.length === 0 || !toId}>Transfer</SubmitButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -575,17 +578,18 @@ export default function StoragesPage() {
           <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><PackagePlus className="w-5 h-5 text-amber-400" /> Add Stock</DialogTitle>
+              <DialogDescription>Add to a storage's stock, or set new stock levels after a count.</DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3 max-w-xl">
-                <div>
-                  <Label>Storage</Label>
+                <div className="space-y-1.5">
+                  <Label>Storage<span className="text-destructive ml-0.5">*</span></Label>
                   <Select value={adjId} onValueChange={changeAdjStorage}>
                     <SelectTrigger><SelectValue placeholder="Select storage" /></SelectTrigger>
                     <SelectContent>{storages.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
-                <div>
+                <div className="space-y-1.5">
                   <Label>Quantity entered is</Label>
                   <Select value={adjMode} onValueChange={v => changeAdjMode(v as AdjMode)}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
@@ -597,8 +601,7 @@ export default function StoragesPage() {
                 </div>
               </div>
 
-              <div className="space-y-1.5">
-                <Label>Products</Label>
+              <FormSection title="SKUs" description={adjId ? 'Search to add SKUs, then enter the quantity of each.' : 'Choose the storage first.'}>
                 <ProductMultiSearch
                   key={`${adjId}|${adjMode}`}
                   items={products}
@@ -609,7 +612,6 @@ export default function StoragesPage() {
                   showOnFocus
                   placeholder="Search products..."
                 />
-              </div>
 
               {adjLines.length > 0 && (
                 <div className="space-y-2">
@@ -617,7 +619,7 @@ export default function StoragesPage() {
                     const p = products.find(x => x.id === l.productId);
                     const current = p ? qty(adjId, p) : 0;
                     return (
-                      <div key={l.productId} className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
+                      <div key={l.productId} className="flex items-center gap-3 bg-background/60 border border-border rounded-lg p-3">
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-foreground break-words whitespace-normal">{p?.productName}</p>
                           <p className="text-xs text-muted-foreground">Now: {current}</p>
@@ -635,10 +637,11 @@ export default function StoragesPage() {
                   })}
                 </div>
               )}
+              </FormSection>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setAdjOpen(false)}>Cancel</Button>
-              <Button onClick={handleAdjust} disabled={adjusting || adjLines.length === 0}>{adjusting ? 'Saving...' : 'Save'}</Button>
+              <SubmitButton onClick={handleAdjust} busy={adjusting} disabled={adjLines.length === 0}>Save</SubmitButton>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -648,9 +651,12 @@ export default function StoragesPage() {
       {canBackdate && (
         <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
           <DialogContent className="max-w-sm">
-            <DialogHeader><DialogTitle>Bulk Actions ({picked.size} products in {viewing?.name})</DialogTitle></DialogHeader>
+            <DialogHeader>
+              <DialogTitle>Bulk Actions ({picked.size} products in {viewing?.name})</DialogTitle>
+              <DialogDescription>Change the stock of all the ticked SKUs in this storage.</DialogDescription>
+            </DialogHeader>
             <div className="space-y-4">
-              <div>
+              <div className="space-y-1.5">
                 <Label>Action</Label>
                 <Select value={bulkAction} onValueChange={v => setBulkAction(v as BulkAction)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
@@ -663,12 +669,14 @@ export default function StoragesPage() {
                 </Select>
               </div>
               {bulkAction !== 'clear' && (
-                <div><Label>Quantity</Label><Input type="number" min={0} value={bulkQty} onChange={e => setBulkQty(e.target.value)} /></div>
+                <Field label="Quantity" required error={bulkQty !== '' && Number(bulkQty) < 0 ? 'Cannot be negative' : ''}>
+                  <Input type="number" min={0} value={bulkQty} onChange={e => setBulkQty(e.target.value)} />
+                </Field>
               )}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setBulkOpen(false)}>Cancel</Button>
-              <Button onClick={handleBulk} disabled={bulking}>{bulking ? 'Applying...' : 'Apply'}</Button>
+              <SubmitButton onClick={handleBulk} busy={bulking} disabled={bulkAction !== 'clear' && (bulkQty === '' || Number(bulkQty) < 0)}>Apply</SubmitButton>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -680,7 +688,7 @@ export default function StoragesPage() {
         title="Import Storage Stock"
         template="storageStock"
         chunkSize={100}
-        description={<>CSV columns: <span className="font-medium text-foreground">Storage, SKU, Product Name, Quantity</span> (the same as the export).</>}
+        description={<>Columns: <span className="font-medium text-foreground">Storage, SKU, Product Name, Quantity</span> (the same as the export).</>}
         onImport={runImport}
         onDone={load}
       />

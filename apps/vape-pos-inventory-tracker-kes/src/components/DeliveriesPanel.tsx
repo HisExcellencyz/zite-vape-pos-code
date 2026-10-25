@@ -6,6 +6,7 @@ import { Switch } from '@project/components/ui/switch';
 import { Label } from '@project/components/ui/label';
 import { MapPin, Users, UserCheck, BookmarkPlus, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useConfirm } from './DialogKit';
 import { useBranch } from '../hooks/useBranch';
 import DateRangeFilter, { Range, inRange } from './DateRangeFilter';
 import DeliveryHeatMap, { HeatMetric, HeatPoint } from './DeliveryHeatMap';
@@ -199,9 +200,14 @@ export default function DeliveriesPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drops, customerMap]);
 
+  const confirm = useConfirm();
   const handleBulk = async () => {
     if (pendingSaves.length === 0) return;
-    if (!window.confirm(`Save each customer's latest drop-off pin as their address? This updates ${pendingSaves.length} customer(s) and replaces their current address and coordinates.`)) return;
+    if (!(await confirm({
+      title: `Save ${pendingSaves.length} customer address${pendingSaves.length === 1 ? '' : 'es'}?`,
+      description: "Each customer's latest drop-off pin becomes their address, replacing their current address and coordinates.",
+      confirmLabel: 'Save addresses',
+    }))) return;
     setBulkSaving(true);
     let ok = 0;
     for (const [id, d] of pendingSaves) {

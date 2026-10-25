@@ -5,7 +5,7 @@ import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@project/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@project/components/ui/tabs';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
@@ -16,6 +16,7 @@ import LocationTabs, { PinStatus } from '../components/LocationTabs';
 import DeliveriesPanel from '../components/DeliveriesPanel';
 import { parseCoordinates } from '../lib/geocode';
 import { ADDR_TYPES, AddrType, addrPinColor, normalizeAddrType } from '../lib/addressTypes';
+import { Field, FormSection, SubmitButton, DESTRUCTIVE } from '../components/DialogKit';
 
 // Every map on this page uses red teardrop pins at 70% of the standard size.
 const PIN_COLOR = '#ef4444';
@@ -177,7 +178,7 @@ export default function AddressesPage() {
         </AlertDialogTrigger>
         <AlertDialogContent>
           <AlertDialogHeader><AlertDialogTitle>Delete this location?</AlertDialogTitle><AlertDialogDescription>This cannot be undone.</AlertDialogDescription></AlertDialogHeader>
-          <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleDelete(a.id)}>Delete</AlertDialogAction></AlertDialogFooter>
+          <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction className={DESTRUCTIVE} onClick={() => handleDelete(a.id)}>Delete</AlertDialogAction></AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>}
     </div>
@@ -262,19 +263,17 @@ export default function AddressesPage() {
       {/* Add/Edit Dialog */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>{editId ? 'Edit' : 'Add'} Location</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>{editId ? 'Edit' : 'Add'} Location</DialogTitle>
+            <DialogDescription>A saved address you can use as a delivery stop, pick-up point or route start.</DialogDescription>
+          </DialogHeader>
           <div className="space-y-4">
-            <div>
-              <Label>Name *</Label>
+            <Field label="Name" required hint={(type === 'supplier' || type === 'storage')
+              ? `This name is independent of the ${type} name: renaming it here does not rename the ${type}.` : undefined}>
               <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Westlands Pick-up Point" />
-              {(type === 'supplier' || type === 'storage') && (
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  This name is independent of the {type === 'supplier' ? 'supplier' : 'storage'} name: renaming it here does not rename the {type === 'supplier' ? 'supplier' : 'storage'}.
-                </p>
-              )}
-            </div>
+            </Field>
             <div className="grid grid-cols-2 gap-4">
-              <div>
+              <div className="space-y-1.5">
                 <Label>Location type</Label>
                 <Select value={type} onValueChange={v => setType(v as AddrType)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
@@ -284,8 +283,8 @@ export default function AddressesPage() {
                 </Select>
               </div>
               {type === 'supplier' && (
-                <div>
-                  <Label>Supplier *</Label>
+                <div className="space-y-1.5">
+                  <Label>Supplier<span className="text-destructive ml-0.5">*</span></Label>
                   <Select value={supplierId} onValueChange={setSupplierId}>
                     <SelectTrigger><SelectValue placeholder="Select supplier" /></SelectTrigger>
                     <SelectContent>
@@ -295,8 +294,8 @@ export default function AddressesPage() {
                 </div>
               )}
               {type === 'storage' && (
-                <div>
-                  <Label>Storage *</Label>
+                <div className="space-y-1.5">
+                  <Label>Storage<span className="text-destructive ml-0.5">*</span></Label>
                   <Select value={storageId} onValueChange={setStorageId}>
                     <SelectTrigger><SelectValue placeholder="Select storage" /></SelectTrigger>
                     <SelectContent>
@@ -306,12 +305,12 @@ export default function AddressesPage() {
                 </div>
               )}
             </div>
-            <div>
-              <Label>Full Address</Label>
+            <Field label="Full Address">
               <Input value={fullAddress} onChange={e => setFullAddress(e.target.value)} placeholder="Full street address" />
-            </div>
+            </Field>
 
             {/* Search / Coordinates / Plus code ribbon */}
+            <FormSection title="Pin on the map" description="Search, paste coordinates or a plus code, or click the map.">
             <LocationTabs onPick={handlePick} />
 
             <MapView
@@ -327,25 +326,26 @@ export default function AddressesPage() {
               text={selectedPin ? (fullAddress || coordinates) : null}
               extra={selectedPin && fullAddress ? coordinates : null}
             />
+            </FormSection>
 
             <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Plus Code</Label>
+              <Field label="Plus Code">
                 <Input value={plusCode} onChange={e => setPlusCode(e.target.value)} placeholder="e.g. 6GCRMQFG+R8" />
-              </div>
-              <div>
-                <Label>Coordinates</Label>
+              </Field>
+              <Field label="Coordinates">
                 <Input value={coordinates} onChange={e => handleCoordsChange(e.target.value)} placeholder="-1.2921,36.8219" />
-              </div>
+              </Field>
             </div>
-            <div>
-              <Label>Notes</Label>
-              <Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional notes" />
-            </div>
+            <Field label="Notes">
+              <Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional" />
+            </Field>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>{saving ? 'Saving...' : editId ? 'Update' : 'Add Location'}</Button>
+            <SubmitButton onClick={handleSave} busy={saving}
+              disabled={!name.trim() || (type === 'supplier' && !supplierId) || (type === 'storage' && !storageId)}>
+              {editId ? 'Save changes' : 'Add Location'}
+            </SubmitButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>

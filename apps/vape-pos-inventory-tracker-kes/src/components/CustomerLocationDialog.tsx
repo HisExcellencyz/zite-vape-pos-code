@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { getCustomerDetails, saveCustomerLocation } from 'zitejs/api';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@project/components/ui/dialog';
 import { Button } from '@project/components/ui/button';
 import { MapPin } from 'lucide-react';
 import { toast } from 'sonner';
+import { SubmitButton } from './DialogKit';
 import MapView from './MapView';
 import LocationPickerDialog from './LocationPickerDialog';
 import { parseCoordinates } from '../lib/geocode';
@@ -67,6 +68,7 @@ export default function CustomerLocationDialog({ open, onOpenChange, customer, o
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 break-words pr-6"><MapPin className="w-5 h-5 text-amber-400 shrink-0" /> {customer?.customerName || 'Customer'} — saved location</DialogTitle>
+            <DialogDescription>Keep the saved drop-off location, or update it to a new one.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             {loading ? (
@@ -83,15 +85,15 @@ export default function CustomerLocationDialog({ open, onOpenChange, customer, o
             {archived > 0 && <p className="text-[11px] text-muted-foreground">{archived} previous location{archived === 1 ? '' : 's'} archived (visible under Customers).</p>}
           </div>
           <DialogFooter>
-            <Button className="bg-blue-500 hover:bg-blue-600 text-white" disabled={!pin && !address} onClick={() => onOpenChange(false)}>Retain</Button>
-            <Button
-              className="bg-pink-500 hover:bg-pink-600 text-white"
-              disabled={saving || !can('customers', 'edit')}
+            <Button variant="outline" disabled={!pin && !address} onClick={() => onOpenChange(false)}>Keep this location</Button>
+            <SubmitButton
+              busy={saving}
+              disabled={!can('customers', 'edit')}
               title={can('customers', 'edit') ? 'Choose a new location' : 'You do not have permission to edit customers'}
               onClick={() => setPicker(true)}
             >
-              {saving ? 'Saving...' : 'Update'}
-            </Button>
+              Update location
+            </SubmitButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>

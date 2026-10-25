@@ -4,7 +4,7 @@ import { addDays, format, startOfDay } from 'date-fns';
 import { Calendar as CalendarIcon, X } from 'lucide-react';
 import { Calendar } from '@project/components/ui/calendar';
 import { Button } from '@project/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@project/components/ui/dialog';
 import { cn } from '@project/components/lib/utils';
 
 export type Range = { start?: Date; end?: Date };
@@ -85,6 +85,7 @@ export default function DateRangeFilter({ value, onChange }: { value: Range; onC
             <DialogTitle className="flex items-center gap-2">
               <CalendarIcon className="size-5 text-blue-500" /> Filter by date
             </DialogTitle>
+            <DialogDescription>Pick a period, or choose Custom to select a start and end date.</DialogDescription>
           </DialogHeader>
 
           <div className="grid grid-cols-2 gap-2">
@@ -124,7 +125,7 @@ export default function DateRangeFilter({ value, onChange }: { value: Range; onC
 
           <DialogFooter>
             {active && (
-              <Button type="button" variant="ghost" onClick={() => apply(undefined, undefined)}>Clear</Button>
+              <Button type="button" variant="outline" onClick={() => apply(undefined, undefined)}>Clear dates</Button>
             )}
             {custom && (
               <Button type="button" disabled={!draft?.from} onClick={() => apply(draft!.from, draft!.to ?? draft!.from)}>

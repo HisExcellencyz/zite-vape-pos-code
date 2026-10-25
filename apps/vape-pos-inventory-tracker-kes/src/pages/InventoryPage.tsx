@@ -7,7 +7,7 @@ import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
 import { Badge } from '@project/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@project/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { Search, Plus, Download, Upload, Package, Pencil, Trash2, CheckSquare, ArrowUp, ArrowDown, FolderTree, Warehouse } from 'lucide-react';
@@ -25,6 +25,7 @@ import SummaryTiles from '../components/SummaryTiles';
 import CategoryRibbon, { CategoryLite, flattenCategories, matchesCategory, productCategoryId } from '../components/CategoryRibbon';
 import { usePermissions } from '../hooks/usePermissions';
 import HistoryDialog, { HistoryTarget, rowTap } from '../components/HistoryDialog';
+import { Field, SubmitButton, DESTRUCTIVE } from '../components/DialogKit';
 
 interface Product {
   id: string;
@@ -295,7 +296,7 @@ export default function InventoryPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => handleDelete(p.id)} className="bg-destructive">Delete</AlertDialogAction>
+            <AlertDialogAction onClick={() => handleDelete(p.id)} className={DESTRUCTIVE}>Delete</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>}
@@ -488,9 +489,9 @@ export default function InventoryPage() {
         template="products"
         chunkSize={100}
         description={<>
-          Upload a CSV with columns: <span className="font-medium text-foreground">Product Name, SKU, Cost Price, Selling Price, Stock Quantity, Category (optional), Subcategory (optional), Image URL (optional)</span>. Products matched by SKU are updated. <span className="font-medium text-foreground">Category</span> is the main category and <span className="font-medium text-foreground">Subcategory</span> the one under it (e.g. E-Liquids / Salt Nic); put the Category in the same row as the Subcategory. Unknown categories and subcategories are created automatically.
+          Columns: <span className="font-medium text-foreground">Product Name, SKU, Cost Price, Selling Price, Stock Quantity, Category (optional), Subcategory (optional), Image URL (optional)</span>. Products matched by SKU are updated. <span className="font-medium text-foreground">Category</span> is the main category and <span className="font-medium text-foreground">Subcategory</span> the one under it (e.g. E-Liquids / Salt Nic); put the Category in the same row as the Subcategory. Unknown categories and subcategories are created automatically.
           <br /><br />
-          <span className="font-medium text-foreground">Image URL</span> must be a direct link to a photo already hosted online — Google Drive and Dropbox share links are converted automatically. For other sites, use the direct image address (right-click the photo → "Copy Image Address"), not a viewer page link. Free options: imgur.com, ImgBB, or Cloudinary. A blank Image URL leaves an existing product's photo unchanged. Press OK to start the import. (In Excel: File → Save As → CSV.)
+          <span className="font-medium text-foreground">Image URL</span> must be a direct link to a photo already hosted online — Google Drive and Dropbox share links are converted automatically. For other sites, use the direct image address (right-click the photo → "Copy Image Address"), not a viewer page link. Free options: imgur.com, ImgBB, or Cloudinary. A blank Image URL leaves an existing product's photo unchanged.
         </>}
         onImport={runImport}
         onDone={load}
@@ -501,12 +502,13 @@ export default function InventoryPage() {
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>{editing ? 'Edit Product' : 'New Product'}</DialogTitle>
+            <DialogDescription>Products are matched by SKU. A product with a 0 cost or selling price is saved as Inactive.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             {/* Photo */}
-            <div className="flex items-start gap-4">
+            <div className="flex items-start gap-4 rounded-lg border border-border bg-muted/40 p-3">
               <ProductImage src={normalizedFormUrl || null} alt="Product photo" className="w-24 h-24" />
-              <div className="space-y-2 flex-1 min-w-0">
+              <div className="space-y-1.5 flex-1 min-w-0">
                 <Label className="block">Product photo link</Label>
                 <Input
                   value={formImageUrl}
@@ -525,31 +527,24 @@ export default function InventoryPage() {
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Product Name *</Label>
+              <Field label="Product Name" required>
                 <Input value={formName} onChange={e => setFormName(e.target.value)} placeholder="e.g. IGET Bar 3500" />
-              </div>
-              <div>
-                <Label>SKU *</Label>
+              </Field>
+              <Field label="SKU" required>
                 <Input value={formSku} onChange={e => setFormSku(e.target.value)} placeholder="e.g. IGET-3500-MAN" />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Cost Price (KES) *</Label>
-                <Input type="number" value={formCost} onChange={e => setFormCost(e.target.value)} placeholder="0.00" />
-              </div>
-              <div>
-                <Label>Selling Price (KES) *</Label>
-                <Input type="number" value={formSelling} onChange={e => setFormSelling(e.target.value)} placeholder="0.00" />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Stock Quantity</Label>
+              </Field>
+              <Field label="Cost Price (KES)" required error={formCost !== '' && Number(formCost) < 0 ? 'Cannot be negative' : ''}>
+                <Input type="number" min={0} value={formCost} onChange={e => setFormCost(e.target.value)} placeholder="0.00" />
+              </Field>
+              <Field label="Selling Price (KES)" required
+                error={formSelling !== '' && Number(formSelling) < 0 ? 'Cannot be negative'
+                  : formSelling !== '' && formCost !== '' && Number(formSelling) > 0 && Number(formSelling) < Number(formCost) ? 'Lower than the cost price' : ''}>
+                <Input type="number" min={0} value={formSelling} onChange={e => setFormSelling(e.target.value)} placeholder="0.00" />
+              </Field>
+              <Field label="Stock Quantity">
                 <Input type="number" value={formStock} onChange={e => setFormStock(e.target.value)} />
-              </div>
-              <div>
+              </Field>
+              <div className="space-y-1.5">
                 <Label>Category</Label>
                 <Select value={formCategory} onValueChange={setFormCategory}>
                   <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
@@ -562,12 +557,13 @@ export default function InventoryPage() {
               </div>
             </div>
             {(Number(formCost) === 0 || Number(formSelling) === 0) && formCost !== '' && formSelling !== '' && (
-              <p className="text-xs text-amber-400">⚠ Products with 0 cost or selling price will be set as Inactive.</p>
+              <p className="text-xs text-amber-400">A product with a 0 cost or selling price is saved as Inactive.</p>
             )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>{saving ? 'Saving...' : 'Save'}</Button>
+            <SubmitButton onClick={handleSave} busy={saving}
+              disabled={!formName.trim() || !formSku.trim() || formCost === '' || formSelling === '' || Number(formCost) < 0 || Number(formSelling) < 0}>Save</SubmitButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -575,9 +571,12 @@ export default function InventoryPage() {
       {/* Bulk Actions Dialog */}
       <Dialog open={showBulk} onOpenChange={setShowBulk}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Bulk Actions ({selectedIds.size} products)</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Bulk Actions ({selectedIds.size} products)</DialogTitle>
+            <DialogDescription>Choose what to change on all the selected products.</DialogDescription>
+          </DialogHeader>
           <div className="space-y-4">
-            <div>
+            <div className="space-y-1.5">
               <Label>Action</Label>
               <Select value={bulkAction} onValueChange={setBulkAction}>
                 <SelectTrigger><SelectValue placeholder="Select action" /></SelectTrigger>
@@ -592,17 +591,17 @@ export default function InventoryPage() {
               </Select>
             </div>
             {bulkAction === 'updateStock' && (
-              <div><Label>New Stock Quantity</Label><Input type="number" value={bulkStock} onChange={e => setBulkStock(e.target.value)} /></div>
+              <Field label="New Stock Quantity" required><Input type="number" value={bulkStock} onChange={e => setBulkStock(e.target.value)} /></Field>
             )}
             {bulkAction === 'updatePrices' && (
               <div className="grid grid-cols-2 gap-4">
-                <div><Label>Cost Price</Label><Input type="number" value={bulkCost} onChange={e => setBulkCost(e.target.value)} placeholder="Leave empty to skip" /></div>
-                <div><Label>Selling Price</Label><Input type="number" value={bulkSelling} onChange={e => setBulkSelling(e.target.value)} placeholder="Leave empty to skip" /></div>
+                <Field label="Cost Price (KES)" hint="Leave empty to keep"><Input type="number" min={0} value={bulkCost} onChange={e => setBulkCost(e.target.value)} /></Field>
+                <Field label="Selling Price (KES)" hint="Leave empty to keep"><Input type="number" min={0} value={bulkSelling} onChange={e => setBulkSelling(e.target.value)} /></Field>
               </div>
             )}
             {bulkAction === 'assignCategory' && (
-              <div>
-                <Label>Category</Label>
+              <div className="space-y-1.5">
+                <Label>Category<span className="text-destructive ml-0.5">*</span></Label>
                 <Select value={bulkCategory} onValueChange={setBulkCategory}>
                   <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
                   <SelectContent>{categoryOptions.map(c => <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>)}</SelectContent>
@@ -610,7 +609,7 @@ export default function InventoryPage() {
               </div>
             )}
             {bulkAction === 'delete' && (
-              <p className="text-xs text-destructive">⚠ This will permanently delete {selectedIds.size} product(s). This cannot be undone.</p>
+              <p className="text-xs text-destructive rounded-lg border border-destructive/40 bg-destructive/5 p-3">This permanently deletes {selectedIds.size} product(s). It cannot be undone.</p>
             )}
           </div>
           <DialogFooter>
@@ -625,12 +624,13 @@ export default function InventoryPage() {
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={handleBulkAction} className="bg-destructive">Delete</AlertDialogAction>
+                    <AlertDialogAction onClick={handleBulkAction} className={DESTRUCTIVE}>Delete</AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
               </AlertDialog>
             ) : (
-              <Button onClick={handleBulkAction}>Apply</Button>
+              <SubmitButton onClick={handleBulkAction}
+                disabled={!bulkAction || (bulkAction === 'assignCategory' && !bulkCategory) || (bulkAction === 'updateStock' && bulkStock === '') || (bulkAction === 'updatePrices' && bulkCost === '' && bulkSelling === '')}>Apply</SubmitButton>
             )}
           </DialogFooter>
         </DialogContent>

@@ -4,7 +4,7 @@ import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@project/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { Search, Plus, Download, Upload, Users, Pencil, Trash2, Phone, Eye, MapPin, CheckSquare, Mail, ArrowUp, ArrowDown, UserCheck } from 'lucide-react';
@@ -42,6 +42,7 @@ const fmt = (n?: number) => `KES ${(n || 0).toLocaleString()}`;
 
 import { useTableControls, TableControls, SortTh, FieldDef } from '../components/TableControls';
 import HistoryDialog, { HistoryTarget, rowTap } from '../components/HistoryDialog';
+import { Field, SubmitButton, DESTRUCTIVE } from '../components/DialogKit';
 
 const FIELDS: FieldDef<Customer>[] = [{ key: 'customerName', label: 'Name' }, { key: 'phoneNumber', label: 'Phone' }, { key: 'email', label: 'Email' }, { key: 'address', label: 'Address' }, { key: 'notes', label: 'Notes' }, { key: 'orderCount', label: 'Orders' }, { key: 'totalSpent', label: 'Total Spent' }];
 
@@ -214,7 +215,7 @@ export default function CustomersPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => handleDelete(c.id)} className="bg-destructive">Delete</AlertDialogAction>
+            <AlertDialogAction onClick={() => handleDelete(c.id)} className={DESTRUCTIVE}>Delete</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>}
@@ -245,7 +246,7 @@ export default function CustomersPage() {
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleBulkDelete} className="bg-destructive">Delete</AlertDialogAction>
+                  <AlertDialogAction onClick={handleBulkDelete} className={DESTRUCTIVE}>Delete</AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
@@ -363,25 +364,27 @@ export default function CustomersPage() {
         title="Import Customers"
         template="customers"
         chunkSize={100}
-        description={<>Upload a CSV with columns: <span className="font-medium text-foreground">Customer Name, Phone Number, Email, Address</span>. Customers matched by phone number are updated. Press OK to start the import.</>}
+        description={<>Columns: <span className="font-medium text-foreground">Customer Name, Phone Number, Email, Address</span>. Customers matched by phone number are updated.</>}
         onImport={runImport}
         onDone={load}
       />
 
       <Dialog open={showForm} onOpenChange={setShowForm}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>{editing ? 'Edit Customer' : 'New Customer'}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>{editing ? 'Edit Customer' : 'New Customer'}</DialogTitle>
+            <DialogDescription>Customers are matched by phone number, so each number belongs to one customer.</DialogDescription>
+          </DialogHeader>
           <div className="space-y-3">
-            <div><Label>Name *</Label><Input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Customer name" /></div>
-            <div>
-              <Label>Phone Number * (with +)</Label>
+            <Field label="Name" required><Input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Customer name" /></Field>
+            <Field label="Phone Number" required hint="Include the country code, e.g. +254712345678. Numbers starting 07 are converted.">
               <Input
                 value={formPhone}
                 onChange={e => { setFormPhone(e.target.value); setDuplicateMatch(null); }}
                 onBlur={e => checkExistingByPhone(e.target.value)}
                 placeholder="+254712345678"
               />
-            </div>
+            </Field>
             {duplicateMatch && (
               <div className="rounded-lg border border-primary/40 bg-primary/5 p-3 space-y-2">
                 <p className="text-xs text-muted-foreground flex items-center gap-1.5"><UserCheck className="w-3.5 h-3.5" /> A customer with this number already exists:</p>
@@ -395,17 +398,20 @@ export default function CustomersPage() {
                 </Button>
               </div>
             )}
-            <div><Label>Email</Label><Input value={formEmail} onChange={e => setFormEmail(e.target.value)} placeholder="email@example.com" /></div>
-            <div><Label>Address</Label>
+            <Field label="Email"
+              error={formEmail.trim() && !/^\S+@\S+\.\S+$/.test(formEmail.trim()) ? 'Enter a valid email address' : ''}>
+              <Input type="email" value={formEmail} onChange={e => setFormEmail(e.target.value)} placeholder="email@example.com" />
+            </Field>
+            <Field label="Address" hint="Type it, or use the pin button to pick it on the map.">
               <div className="flex gap-2">
                 <Input value={formAddress} onChange={e => setFormAddress(e.target.value)} placeholder="Address" className="flex-1" />
-                <Button type="button" variant="outline" size="icon" className="shrink-0" onClick={() => setShowLocationPicker(true)}><MapPin className="w-4 h-4" /></Button>
+                <Button type="button" variant="outline" size="icon" className="shrink-0" title="Pick on the map" onClick={() => setShowLocationPicker(true)}><MapPin className="w-4 h-4" /></Button>
               </div>
-            </div>
+            </Field>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>{saving ? 'Saving...' : 'Save'}</Button>
+            <SubmitButton onClick={handleSave} busy={saving} disabled={!formName.trim() || !formPhone.trim()}>Save</SubmitButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -420,7 +426,10 @@ export default function CustomersPage() {
 
       <Dialog open={showDetails} onOpenChange={setShowDetails}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
-          <DialogHeader><DialogTitle className="break-words">{detailCustomer?.customerName}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="break-words pr-6">{detailCustomer?.customerName}</DialogTitle>
+            <DialogDescription>Orders, spend and saved location of this customer.</DialogDescription>
+          </DialogHeader>
           {detailCustomer && (
             <div className="space-y-4">
               <div className="flex items-center gap-4 text-sm text-muted-foreground flex-wrap">

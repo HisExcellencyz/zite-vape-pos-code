@@ -1,3 +1,4 @@
+import * as XLSX from 'xlsx';
 import { TEMPLATE_HEADERS } from './exportFormat';
 
 export type TemplateKey = 'products' | 'customers' | 'suppliers' | 'sales' | 'purchases' | 'lpos' | 'income' | 'expenses' | 'storageStock';
@@ -96,8 +97,13 @@ export function downloadTemplate(entity: TemplateKey) {
   // Sample rows that exist only to change a date make no sense without the date columns.
   const samples = canBackdateTemplates ? t.samples : t.samples.filter(r => !/change the date/.test(r.join(' ')));
   const pick = (row: string[]) => keep.map(i => row[i] ?? '');
-  const lines = [t.headers, ...samples].map(row => pick(row).map(csvCell).join(','));
-  downloadCsv(lines.join('\n') + '\n', `${entity}_import_template.csv`);
+  // One Excel template per import; the same columns can also be saved and uploaded as .csv.
+  const aoa = [t.headers, ...samples].map(pick);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = aoa[0].map((h, i) => ({ wch: Math.max(12, ...aoa.map(r => (r[i] || '').length + 2)) }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Template');
+  XLSX.writeFile(wb, `${entity}_import_template.xlsx`);
 }
 
 export function downloadCsv(csv: string, filename: string) {

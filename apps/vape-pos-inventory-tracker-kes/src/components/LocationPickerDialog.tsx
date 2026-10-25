@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { plainPin } from '../lib/pinIcon';
 import { Loader } from '@googlemaps/js-api-loader';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@project/components/ui/dialog';
 import { Button } from '@project/components/ui/button';
 import { MapPin } from 'lucide-react';
 import LocationTabs, { PinStatus } from './LocationTabs';
@@ -100,7 +100,10 @@ export default function LocationPickerDialog({ open, onOpenChange, title = 'Set 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader><DialogTitle className="flex items-center gap-2"><MapPin className="w-5 h-5 text-amber-400" />{title}</DialogTitle></DialogHeader>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><MapPin className="w-5 h-5 text-amber-400" />{title}</DialogTitle>
+          <DialogDescription>Search for a place, paste coordinates or a plus code, or click the map to drop the pin.</DialogDescription>
+        </DialogHeader>
         <div className="space-y-3">
           {/* Search / Coordinates / Plus code ribbon */}
           <LocationTabs onPick={(lat, lng, address) => placePin(lat, lng, address)} />

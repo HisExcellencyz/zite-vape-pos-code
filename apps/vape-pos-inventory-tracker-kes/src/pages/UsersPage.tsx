@@ -5,7 +5,7 @@ import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
 import { Badge } from '@project/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@project/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@project/components/ui/tabs';
 import { Switch } from '@project/components/ui/switch';
@@ -16,6 +16,7 @@ import { downloadCsv } from '../lib/exportHelper';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
 
 import { AREAS, ACTIONS, AREA_LABELS, Area, Action, PermMatrix, emptyPermissions, fullPermissions, normalizePerms, isAdminRoleName, canBackdateSalesRole } from '../lib/permissionAreas';
+import { Field, SubmitButton, DESTRUCTIVE } from '../components/DialogKit';
 
 const emptyPerms = (): PermMatrix => emptyPermissions();
 
@@ -233,7 +234,7 @@ export default function UsersPage() {
         <AlertDialogTrigger asChild><Button variant="ghost" size="sm" className="text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button></AlertDialogTrigger>
         <AlertDialogContent>
           <AlertDialogHeader><AlertDialogTitle>Delete role?</AlertDialogTitle><AlertDialogDescription>This will remove "{r.roleName}". Users with this role will lose access until reassigned.</AlertDialogDescription></AlertDialogHeader>
-          <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleDeleteRole(r.id)}>Delete</AlertDialogAction></AlertDialogFooter>
+          <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction className={DESTRUCTIVE} onClick={() => handleDeleteRole(r.id)}>Delete</AlertDialogAction></AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </div>
@@ -395,27 +396,30 @@ export default function UsersPage() {
       {/* Invite Dialog */}
       <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Invite User</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Invite User</DialogTitle>
+            <DialogDescription>
+              An email is sent with a sign-in link. The person signs in with this email address (magic link or Google) and gets the role automatically. Until then they show as "Invited".
+            </DialogDescription>
+          </DialogHeader>
           <div className="space-y-4">
-            <div><Label>Email *</Label><Input value={invEmail} onChange={e => setInvEmail(e.target.value)} placeholder="user@example.com" type="email" /></div>
+            <Field label="Email" required error={invEmail.trim() && !/^\S+@\S+\.\S+$/.test(invEmail.trim()) ? 'Enter a valid email address' : ''}>
+              <Input value={invEmail} onChange={e => setInvEmail(e.target.value)} placeholder="user@example.com" type="email" />
+            </Field>
             <div className="grid grid-cols-2 gap-3">
-              <div><Label>First Name</Label><Input value={invFirst} onChange={e => setInvFirst(e.target.value)} /></div>
-              <div><Label>Last Name</Label><Input value={invLast} onChange={e => setInvLast(e.target.value)} /></div>
+              <Field label="First Name"><Input value={invFirst} onChange={e => setInvFirst(e.target.value)} /></Field>
+              <Field label="Last Name"><Input value={invLast} onChange={e => setInvLast(e.target.value)} /></Field>
             </div>
-            <div>
-              <Label>Role</Label>
+            <Field label="Role" hint="Leave empty to use the default role.">
               <Select value={invRole} onValueChange={setInvRole}>
-                <SelectTrigger><SelectValue placeholder="Select a role (default role if empty)" /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Select a role" /></SelectTrigger>
                 <SelectContent>{roles.map(r => <SelectItem key={r.id} value={r.id}>{r.roleName}</SelectItem>)}</SelectContent>
               </Select>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              An email is sent with a sign-in link. The person signs in with this email address (magic link or Google) and gets the role automatically. Until then they show as "Invited".
-            </p>
+            </Field>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setInviteOpen(false)}>Cancel</Button>
-            <Button onClick={handleInvite} disabled={inviting}><Mail className="w-4 h-4 mr-1" />{inviting ? 'Sending...' : 'Send Invite'}</Button>
+            <SubmitButton onClick={handleInvite} busy={inviting} disabled={!/^\S+@\S+\.\S+$/.test(invEmail.trim())}>{!inviting && <Mail className="w-4 h-4 mr-1" />}Send Invite</SubmitButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -423,19 +427,24 @@ export default function UsersPage() {
       {/* Role Editor Dialog */}
       <Dialog open={roleOpen} onOpenChange={setRoleOpen}>
         <DialogContent className="sm:max-w-3xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>{editRole ? 'Edit Role' : 'Create Role'}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>{editRole ? 'Edit Role' : 'Create Role'}</DialogTitle>
+            <DialogDescription>A role sets which pages a user sees and what they can add, change, delete, export and import.</DialogDescription>
+          </DialogHeader>
           <div className="space-y-5">
             <div className="grid grid-cols-2 gap-3">
-              <div><Label>Role Name *</Label><Input value={roleName} onChange={e => setRoleName(e.target.value)} placeholder="e.g. Cashier" /></div>
-              <div><Label>Description</Label><Input value={roleDesc} onChange={e => setRoleDesc(e.target.value)} placeholder="Brief description" /></div>
+              <Field label="Role Name" required><Input value={roleName} onChange={e => setRoleName(e.target.value)} placeholder="e.g. Cashier" /></Field>
+              <Field label="Description"><Input value={roleDesc} onChange={e => setRoleDesc(e.target.value)} placeholder="Optional" /></Field>
             </div>
-            <div className="flex items-center gap-3">
-              <Switch checked={roleDefault} onCheckedChange={setRoleDefault} />
-              <Label className="text-sm">Use as the default role when inviting users without picking one</Label>
-            </div>
-            <div className="flex items-center gap-3">
-              <Switch checked={adminRole || roleBackdateSales} disabled={adminRole} onCheckedChange={setRoleBackdateSales} />
-              <Label className="text-sm">Can backdate POS sales (pick an earlier date when completing a sale)</Label>
+            <div className="rounded-lg border border-border p-3 space-y-3">
+              <div className="flex items-center gap-3">
+                <Switch id="role-default" checked={roleDefault} onCheckedChange={setRoleDefault} />
+                <Label htmlFor="role-default" className="text-sm font-normal">Use as the default role when inviting users without picking one</Label>
+              </div>
+              <div className="flex items-center gap-3">
+                <Switch id="role-backdate" checked={adminRole || roleBackdateSales} disabled={adminRole} onCheckedChange={setRoleBackdateSales} />
+                <Label htmlFor="role-backdate" className="text-sm font-normal">Can backdate POS sales (pick an earlier date when completing a sale)</Label>
+              </div>
             </div>
             <div>
               <Label className="mb-2 block">Permissions Matrix</Label>
@@ -475,7 +484,7 @@ export default function UsersPage() {
                 </table>
               </div>
               <div className="text-xs text-muted-foreground mt-2 space-y-1">
-                <p>"view" controls whether the menu item and page are visible. "create", "edit" and "delete" control adding, changing (including bulk deductions / revenues and customer locations) and removing entries; "export" and "import" control the CSV buttons.</p>
+                <p>"view" controls whether the menu item and page are visible. "create", "edit" and "delete" control adding, changing (including bulk deductions / revenues and customer locations) and removing entries; "export" and "import" control the Export and Import buttons.</p>
                 <p>Changing an entry's date (backdate) and importing dated or backdated entries are not in this matrix: they are reserved for the Owner and Admin. The one exception is the "Can backdate POS sales" switch above, which lets a role record new POS sales on an earlier date.</p>
                 <p>Areas added since a role was created start with the rights of the older area they came from (for example Income from POS) until the role is saved again.</p>
               </div>
@@ -483,7 +492,7 @@ export default function UsersPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setRoleOpen(false)}>Cancel</Button>
-            <Button onClick={handleSaveRole}>{editRole ? 'Update Role' : 'Create Role'}</Button>
+            <SubmitButton onClick={handleSaveRole} disabled={!roleName.trim()}>{editRole ? 'Save Role' : 'Create Role'}</SubmitButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>

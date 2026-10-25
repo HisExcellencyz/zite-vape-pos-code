@@ -6,6 +6,7 @@ import { Checkbox } from '@project/components/ui/checkbox';
 import { Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { buildCategoryTree, flattenCategories, productCategoryId, CategoryLite } from './CategoryRibbon';
+import { SubmitButton } from './DialogKit';
 
 interface Product { id: string; productName?: string; sku?: string; category?: string | string[]; }
 
@@ -128,7 +129,7 @@ export default function SupplierSuppliesEditor({ supplierId, canEdit }: { suppli
 
       {canEdit && (
         <div className="flex justify-end">
-          <Button size="sm" onClick={save} disabled={saving}>{saving ? 'Saving...' : 'Save'}</Button>
+          <SubmitButton size="sm" onClick={save} busy={saving}>Save</SubmitButton>
         </div>
       )}
     </div>

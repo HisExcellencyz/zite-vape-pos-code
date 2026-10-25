@@ -5,7 +5,7 @@ import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
 import { Badge } from '@project/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@project/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { Switch } from '@project/components/ui/switch';
@@ -15,6 +15,7 @@ import { toast } from 'sonner';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
 import { buildCategoryTree } from '../components/CategoryRibbon';
 import { usePermissions } from '../hooks/usePermissions';
+import { Field, SubmitButton, DESTRUCTIVE } from '../components/DialogKit';
 
 interface Category {
   id: string;
@@ -222,7 +223,7 @@ export default function CategoriesPage() {
             {!isSub && kidCount(c.id) > 0 && <> Its {kidCount(c.id)} subcategor{kidCount(c.id) === 1 ? 'y' : 'ies'} will be kept and shown as main categories.</>}
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleDelete(c.id)}>Delete</AlertDialogAction></AlertDialogFooter>
+        <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction className={DESTRUCTIVE} onClick={() => handleDelete(c.id)}>Delete</AlertDialogAction></AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
   );
@@ -355,6 +356,7 @@ export default function CategoriesPage() {
         <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 break-words pr-6"><FolderOpen className="w-5 h-5 text-sky-400 shrink-0" /> Subcategories of {subsFor?.categoryName}</DialogTitle>
+            <DialogDescription>The categories listed under this main category.</DialogDescription>
           </DialogHeader>
           {subsFor && (
             <div className="space-y-2">
@@ -388,11 +390,15 @@ export default function CategoriesPage() {
       {/* Add/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>{editing ? (editing.parentId ? 'Edit Subcategory' : 'Edit Category') : parentId !== NO_PARENT ? 'Add Subcategory' : 'Add Category'}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>{editing ? (editing.parentId ? 'Edit Subcategory' : 'Edit Category') : parentId !== NO_PARENT ? 'Add Subcategory' : 'Add Category'}</DialogTitle>
+            <DialogDescription>Categories group SKUs on the POS and in reports. A subcategory sits under one main category.</DialogDescription>
+          </DialogHeader>
           <div className="space-y-4">
-            <div><Label>Name</Label><Input value={name} onChange={e => setName(e.target.value)} placeholder={parentId !== NO_PARENT ? 'e.g. Salt Nic' : 'e.g. E-Liquids'} /></div>
-            <div>
-              <Label>Parent category</Label>
+            <Field label="Name" required><Input value={name} onChange={e => setName(e.target.value)} placeholder={parentId !== NO_PARENT ? 'e.g. Salt Nic' : 'e.g. E-Liquids'} /></Field>
+            <Field label="Parent category" hint={editingHasKids
+              ? 'This category has subcategories, so it stays a main category. Move or delete its subcategories first.'
+              : 'Pick a parent to make this a subcategory. Only two levels are allowed.'}>
               <Select value={parentId} onValueChange={setParentId} disabled={editingHasKids}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -402,21 +408,16 @@ export default function CategoriesPage() {
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-[11px] text-muted-foreground mt-1">
-                {editingHasKids
-                  ? 'This category has subcategories, so it stays a main category. Move or delete its subcategories first.'
-                  : 'Pick a parent to make this a subcategory. Only two levels are allowed.'}
-              </p>
-            </div>
-            <div><Label>Description</Label><Textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Optional description..." rows={3} /></div>
-            <div className="flex items-center gap-3">
-              <Switch checked={active} onCheckedChange={setActive} />
-              <Label>Active</Label>
+            </Field>
+            <Field label="Description"><Textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Optional" rows={3} /></Field>
+            <div className="flex items-center gap-3 rounded-lg border border-border p-3">
+              <Switch id="cat-active" checked={active} onCheckedChange={setActive} />
+              <Label htmlFor="cat-active" className="font-normal">Active (shown on the POS)</Label>
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave}>{editing ? 'Update' : 'Create'}</Button>
+            <SubmitButton onClick={handleSave} disabled={!name.trim()}>{editing ? 'Save changes' : 'Create'}</SubmitButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -424,17 +425,19 @@ export default function CategoriesPage() {
       {/* Bulk Create Dialog */}
       <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Bulk Create Categories</DialogTitle></DialogHeader>
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
+          <DialogHeader>
+            <DialogTitle>Bulk Create Categories</DialogTitle>
+            <DialogDescription>
               Enter one category per line. For a subcategory write <span className="font-medium text-foreground">Category &gt; Subcategory</span>.
               The main category is created automatically if it does not exist, and names that already exist are skipped.
-            </p>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
             <Textarea value={bulkText} onChange={e => setBulkText(e.target.value)} placeholder={"E-Liquids\nE-Liquids > Salt Nic\nE-Liquids > Freebase\nDisposables\nAccessories > Coils"} rows={8} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setBulkOpen(false)}>Cancel</Button>
-            <Button onClick={handleBulkCreate}>Create All</Button>
+            <SubmitButton onClick={handleBulkCreate} disabled={!bulkText.trim()}>Create All</SubmitButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -442,8 +445,12 @@ export default function CategoriesPage() {
       {/* Bulk Category Actions Dialog */}
       <Dialog open={showBulkCat} onOpenChange={setShowBulkCat}>
         <DialogContent className="sm:max-w-sm">
-          <DialogHeader><DialogTitle>Bulk Actions ({selectedIds.size} categories)</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Bulk Actions ({selectedIds.size} categories)</DialogTitle>
+            <DialogDescription>Choose what to do with the selected categories.</DialogDescription>
+          </DialogHeader>
           <div className="space-y-4">
+            <Field label="Action" error={bulkCatAction === 'delete' ? `This will permanently delete ${selectedIds.size} categor${selectedIds.size === 1 ? 'y' : 'ies'}.` : undefined}>
             <Select value={bulkCatAction} onValueChange={setBulkCatAction}>
               <SelectTrigger><SelectValue placeholder="Select action" /></SelectTrigger>
               <SelectContent>
@@ -452,9 +459,7 @@ export default function CategoriesPage() {
                 <SelectItem value="delete">Delete Selected</SelectItem>
               </SelectContent>
             </Select>
-            {bulkCatAction === 'delete' && (
-              <p className="text-xs text-destructive">⚠ This will permanently delete {selectedIds.size} categor{selectedIds.size === 1 ? 'y' : 'ies'}.</p>
-            )}
+            </Field>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowBulkCat(false)}>Cancel</Button>
@@ -468,12 +473,12 @@ export default function CategoriesPage() {
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={handleBulkCatAction} className="bg-destructive">Delete</AlertDialogAction>
+                    <AlertDialogAction onClick={handleBulkCatAction} className={DESTRUCTIVE}>Delete</AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
               </AlertDialog>
             ) : (
-              <Button onClick={handleBulkCatAction}>Apply</Button>
+              <SubmitButton onClick={handleBulkCatAction} disabled={!bulkCatAction}>Apply</SubmitButton>
             )}
           </DialogFooter>
         </DialogContent>

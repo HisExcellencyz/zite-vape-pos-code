@@ -11,6 +11,7 @@ import { Plus, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { usePermissions } from '../hooks/usePermissions';
+import { Field, FormSection, SubmitButton } from './DialogKit';
 
 export type EntryKind = 'sale' | 'income' | 'purchase' | 'expense' | 'deduction';
 
@@ -110,6 +111,9 @@ export function EditEntryDialog({ open, onOpenChange, kind, entry, onSaved }: {
   };
 
   const number = entry[NUMBER_FIELD[kind]];
+  const plain = kind === 'income' || kind === 'expense';
+  const amountError = plain && amount !== '' && !(Number(amount) > 0) ? 'Amount must be more than 0' : '';
+  const valid = !plain || (!!description.trim() && Number(amount) > 0);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -117,31 +121,29 @@ export function EditEntryDialog({ open, onOpenChange, kind, entry, onSaved }: {
         <DialogHeader>
           <DialogTitle>Edit {KIND_LABEL[kind]}{number != null ? ` #${number}` : ''}</DialogTitle>
           {kind === 'purchase' && (
-            <DialogDescription className="text-xs">Items and totals can't be changed. To correct them, delete the purchase and record it again.</DialogDescription>
+            <DialogDescription>Items and totals can't be changed. To correct them, delete the purchase and record it again.</DialogDescription>
           )}
           {kind === 'sale' && (
-            <DialogDescription className="text-xs">Items can't be changed, but the sale's revenues and deductions can. Changing the date also moves the sale's delivery fee and revenues to that date.</DialogDescription>
+            <DialogDescription>Items can't be changed, but the sale's revenues and deductions can. Changing the date also moves the sale's delivery fee and revenues to that date.</DialogDescription>
           )}
         </DialogHeader>
-        <div className="space-y-3">
-          {(kind === 'income' || kind === 'expense') && (
+        <div className="space-y-4">
+          {plain && (
             <>
-              <div><Label>Description *</Label><Input value={description} onChange={e => setDescription(e.target.value)} /></div>
-              <div><Label>Amount (KES) *</Label><Input type="number" value={amount} onChange={e => setAmount(e.target.value)} /></div>
+              <Field label="Description" required><Input value={description} onChange={e => setDescription(e.target.value)} /></Field>
+              <Field label="Amount (KES)" required error={amountError}><Input type="number" min={0} value={amount} onChange={e => setAmount(e.target.value)} /></Field>
             </>
           )}
           {kind === 'sale' && (
-            <div>
-              <Label>Payment</Label>
+            <Field label="Payment">
               <Select value={payment} onValueChange={setPayment}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>{PAYMENTS.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
               </Select>
-            </div>
+            </Field>
           )}
           {kind === 'sale' && (
-            <div className="space-y-2">
-              <Label className="text-emerald-400">Revenues on this sale</Label>
+            <FormSection title={<span className="text-emerald-400">Revenues on this sale</span>}>
               {revRows.map((r, i) => (
                 <div key={r.id || `new-${i}`} className="flex gap-1.5">
                   <Input value={r.name} onChange={e => setRevRows(revRows.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} placeholder="Name e.g. Delivery fee" className="h-8 text-xs flex-1 border-emerald-500/40" />
@@ -151,11 +153,10 @@ export function EditEntryDialog({ open, onOpenChange, kind, entry, onSaved }: {
               ))}
               <Button type="button" variant="outline" size="sm" className="h-8 text-xs border-emerald-500 text-emerald-400 hover:bg-emerald-500/10" onClick={() => setRevRows([...revRows, { name: '', amount: '' }])}><Plus className="w-3 h-3 mr-1" /> Add revenue</Button>
               <p className="text-[11px] text-emerald-400">Total: KES {revRows.reduce((s, r) => s + (Number(r.amount) || 0), 0).toLocaleString()}</p>
-            </div>
+            </FormSection>
           )}
           {(kind === 'deduction' || kind === 'sale') && (
-            <div className="space-y-2">
-              <Label className={kind === 'sale' ? 'text-pink-400' : undefined}>Deductions on this sale</Label>
+            <FormSection title={<span className={kind === 'sale' ? 'text-pink-400' : undefined}>Deductions on this sale</span>}>
               {rows.map((r, i) => (
                 <div key={i} className="flex gap-1.5">
                   <Input value={r.name} onChange={e => setRows(rows.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} placeholder="Name" className="h-8 text-xs flex-1" />
@@ -165,23 +166,22 @@ export function EditEntryDialog({ open, onOpenChange, kind, entry, onSaved }: {
               ))}
               <Button type="button" variant="outline" size="sm" className={kind === 'sale' ? 'h-8 text-xs border-pink-500 text-pink-400 hover:bg-pink-500/10' : 'h-8 text-xs'} onClick={() => setRows([...rows, { name: '', amount: '' }])}><Plus className="w-3 h-3 mr-1" /> Add deduction</Button>
               <p className={kind === 'sale' ? 'text-[11px] text-pink-400' : 'text-[11px] text-muted-foreground'}>Total: KES {rows.reduce((s, r) => s + (Number(r.amount) || 0), 0).toLocaleString()}</p>
-            </div>
+            </FormSection>
           )}
           {kind !== 'deduction' && (
-            <div><Label>Notes</Label><Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional notes" /></div>
+            <Field label="Notes"><Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional" /></Field>
           )}
-          <div>
-            <Label>Date</Label>
+          <Field label="Date" hint={canBackdate ? undefined : 'Only the Owner and Admin can change dates.'}>
             {canBackdate ? (
               <DatePicker value={date} onChange={d => d && setDate(d)} placeholder="Backdate this entry" />
             ) : (
               <p className="text-sm text-muted-foreground">{originalDate ? format(originalDate, 'dd MMM yyyy HH:mm') : '-'}</p>
             )}
-          </div>
+          </Field>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={save} disabled={saving}>{saving ? 'Saving...' : 'Save'}</Button>
+          <SubmitButton onClick={save} busy={saving} disabled={!valid}>Save</SubmitButton>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -228,19 +228,19 @@ export function DeleteEntryDialog({ open, onOpenChange, kind, entry, onDone }: {
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle>{kind === 'deduction' ? 'Clear deductions?' : `Delete ${KIND_LABEL[kind].toLowerCase()}?`}</DialogTitle>
-          <DialogDescription className="text-xs">This will {kind === 'deduction' ? 'clear' : 'permanently delete'} {what}. {extra} This cannot be undone.</DialogDescription>
+          <DialogDescription>This will {kind === 'deduction' ? 'clear' : 'permanently delete'} {what}. {extra} This cannot be undone.</DialogDescription>
         </DialogHeader>
         {(kind === 'sale' || kind === 'purchase') && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 rounded-lg border border-border p-3">
             <Switch id="adj-stock" checked={adjust} onCheckedChange={setAdjust} />
-            <Label htmlFor="adj-stock" className="text-xs">
+            <Label htmlFor="adj-stock" className="text-sm font-normal">
               {kind === 'sale' ? 'Put the sold items back in stock' : 'Take the purchased items out of stock'}
             </Label>
           </div>
         )}
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button variant="destructive" onClick={confirm} disabled={busy}>{busy ? 'Working...' : kind === 'deduction' ? 'Clear' : 'Delete'}</Button>
+          <SubmitButton variant="destructive" onClick={confirm} busy={busy}>{kind === 'deduction' ? 'Clear' : 'Delete'}</SubmitButton>
         </DialogFooter>
       </DialogContent>
     </Dialog>

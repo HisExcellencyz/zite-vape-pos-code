@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { applySaleRevenues } from 'zitejs/api';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@project/components/ui/dialog';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
 import { Switch } from '@project/components/ui/switch';
@@ -9,6 +9,7 @@ import { Plus, X, Percent } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@project/components/lib/utils';
 import { Commission } from '../hooks/useBranch';
+import { Field, SubmitButton } from './DialogKit';
 
 const label = (c: Commission) => `${c.name} · ${c.type === 'percent' ? `${c.value}%` : `KES ${c.value}`}`;
 
@@ -57,10 +58,13 @@ export default function BulkRevenuesDialog({ open, onOpenChange, saleIds, preset
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
-        <DialogHeader><DialogTitle>Apply revenues to {saleIds.length} sale(s)</DialogTitle></DialogHeader>
-        <p className="text-xs text-muted-foreground">
-          Revenues such as the Delivery Fee are added as income against each sale. Percentages are calculated on each sale's total. If a sale already has the same revenue, its amount is updated instead of duplicated.
-        </p>
+        <DialogHeader>
+          <DialogTitle>Apply revenues to {saleIds.length} sale(s)</DialogTitle>
+          <DialogDescription>
+            Revenues such as the Delivery Fee are added as income against each sale. Percentages are calculated on each sale's total. If a sale already has the same revenue, its amount is updated instead of duplicated.
+          </DialogDescription>
+        </DialogHeader>
+        <Field label="Revenues" hint={selected.length > 0 ? `Selected: ${selected.map(s => s.name).join(', ')}` : 'Pick one or more revenues, or add your own.'}>
         <div className="space-y-2">
           {presets.length > 0 ? (
             <div className="flex flex-wrap gap-1.5">
@@ -89,17 +93,15 @@ export default function BulkRevenuesDialog({ open, onOpenChange, saleIds, preset
             </Button>
             <Button type="button" size="sm" className="h-8 px-2" onClick={addCustom}><Plus className="w-3 h-3" /></Button>
           </div>
-          {selected.length > 0 && (
-            <p className="text-[11px] text-muted-foreground">Selected: {selected.map(s => s.name).join(', ')}</p>
-          )}
         </div>
-        <div className="flex items-center gap-2">
+        </Field>
+        <div className="flex items-center gap-2 rounded-lg border border-border p-3">
           <Switch id="replace-rev" checked={replace} onCheckedChange={setReplace} />
-          <Label htmlFor="replace-rev" className="text-xs">Replace the sales' existing revenues (otherwise add to them)</Label>
+          <Label htmlFor="replace-rev" className="text-sm font-normal">Replace the sales' existing revenues (otherwise add to them)</Label>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={apply} disabled={saving || (!replace && selected.length === 0)}>{saving ? 'Applying...' : 'Apply'}</Button>
+          <SubmitButton onClick={apply} busy={saving} disabled={!replace && selected.length === 0}>Apply</SubmitButton>
         </DialogFooter>
       </DialogContent>
     </Dialog>

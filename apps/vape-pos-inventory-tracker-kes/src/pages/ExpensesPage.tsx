@@ -6,7 +6,7 @@ import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
 import { Badge } from '@project/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@project/components/ui/tabs';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@project/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { Plus, Download, Upload, ShoppingBag, Trash2, Search, FileText, BadgePercent, Wallet, Pencil } from 'lucide-react';
 import { DatePicker } from '@project/components/ui/date-picker';
@@ -23,6 +23,7 @@ import { useTableControls, TableControls, SortTh, FieldDef } from '../components
 import DateRangeFilter, { Range, inRange } from '../components/DateRangeFilter';
 import SummaryTiles from '../components/SummaryTiles';
 import PettyCashPanel from '../components/PettyCashPanel';
+import { Field, FormSection, SubmitButton } from '../components/DialogKit';
 
 interface Expense { id: string; expenseNumber?: number; expenseDate?: string; description?: string; amount?: number; notes?: string; }
 interface Purchase { id: string; purchaseNumber?: number; purchaseDate?: string; total?: number; paymentType?: string; notes?: string; }
@@ -547,16 +548,16 @@ export default function ExpensesPage() {
         template={tab === 'other' ? 'expenses' : 'purchases'}
         optionLabel={tab === 'other' ? undefined : 'Also add the imported quantities to current stock (leave off for old purchases already reflected in your stock counts)'}
         description={tab === 'other' ? <>
-          Upload a CSV with one row per expense. Columns: <span className="font-medium text-foreground">Description, Amount, Notes</span>
+          One row per expense. Columns: <span className="font-medium text-foreground">Description, Amount, Notes</span>
           {canBackdate && <>, plus <span className="font-medium text-foreground">Date</span> (YYYY-MM-DD or DD/MM/YYYY) for backdated entries, and <span className="font-medium text-foreground">Entry Number</span> to change the date (or details) of an existing expense</>}.
-          {!canBackdate && <> Entries are dated today. Only the Owner and Admin can import backdated or re-dated entries.</>} Press OK to start.
+          {!canBackdate && <> Entries are dated today. Only the Owner and Admin can import backdated or re-dated entries.</>}
         </> : <>
-          Upload a CSV with one row per product line. Rows sharing the same <span className="font-medium text-foreground">Purchase Ref</span> become one purchase.
+          One row per product (SKU). Rows sharing the same <span className="font-medium text-foreground">Purchase Ref</span> become one purchase.
           Columns: <span className="font-medium text-foreground">Purchase Ref, Date, Supplier Name, Payment Type, Product SKU, Quantity, Unit Price, Notes</span>.
           <br />The <span className="font-medium text-foreground">Date</span> can be in the past (YYYY-MM-DD or DD/MM/YYYY). Payment Type is <span className="font-medium text-foreground">Cash</span> or <span className="font-medium text-foreground">From Deposit</span> (deducts the supplier deposit, needs enough balance). Unknown suppliers are created. Refs already imported are skipped.
           {canBackdate
             ? <> To change the date of an existing purchase, add a row with its <span className="font-medium text-foreground">Purchase Number</span> and the new Date.</>
-            : <> Only the Owner and Admin can import backdated purchases or change purchase dates; your file must be dated today (leave Date empty).</>} Press OK to start.
+            : <> Only the Owner and Admin can import backdated purchases or change purchase dates; your file must be dated today (leave Date empty).</>}
         </>}
         onImport={runImport}
         onDone={load}
@@ -565,10 +566,13 @@ export default function ExpensesPage() {
       {/* New purchase */}
       <Dialog open={showPurchaseForm} onOpenChange={setShowPurchaseForm}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>New Purchase</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>New Purchase</DialogTitle>
+            <DialogDescription>Stock bought from a supplier. The quantities are added to stock when you record it.</DialogDescription>
+          </DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
-              <div>
+              <div className="space-y-1.5">
                 <Label>Supplier</Label>
                 <Select value={selectedSupplier} onValueChange={setSelectedSupplier}>
                   <SelectTrigger><SelectValue placeholder="Select supplier" /></SelectTrigger>
@@ -579,7 +583,7 @@ export default function ExpensesPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div>
+              <div className="space-y-1.5">
                 <Label>Payment Type</Label>
                 <Select value={paymentType} onValueChange={v => setPaymentType(v as 'cash' | 'deposit')}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
@@ -589,14 +593,15 @@ export default function ExpensesPage() {
                   </SelectContent>
                 </Select>
                 {paymentType === 'deposit' && selectedSup && (
-                  <p className="text-xs text-muted-foreground mt-1">Available balance: {fmt(selectedSup.depositBalance)}</p>
+                  <p className={`text-xs ${cartTotal > (selectedSup.depositBalance || 0) ? 'text-destructive' : 'text-muted-foreground'}`}>
+                    Available balance: {fmt(selectedSup.depositBalance)}{cartTotal > (selectedSup.depositBalance || 0) ? ' — not enough for this purchase' : ''}
+                  </p>
                 )}
               </div>
             </div>
 
-            <div>
-              <Label>Add Products</Label>
-              <div className="relative mb-2">
+            <FormSection title="SKUs" description="Search to add SKUs, then set the quantity and unit cost of each.">
+              <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Input placeholder="Search products..." value={productSearch} onChange={e => setProductSearch(e.target.value)} className="pl-9" />
               </div>
@@ -610,12 +615,13 @@ export default function ExpensesPage() {
                   ))}
                 </div>
               )}
-            </div>
 
-            {cart.length > 0 && (
+            {cart.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-2">No SKUs added yet.</p>
+            ) : (
               <div className="space-y-2">
                 {cart.map((item, i) => (
-                  <div key={item.product.id} className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
+                  <div key={item.product.id} className="flex items-center gap-3 bg-background/60 border border-border rounded-lg p-3">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-foreground break-words whitespace-normal">{item.product.productName}</p>
                     </div>
@@ -626,18 +632,18 @@ export default function ExpensesPage() {
                     <button onClick={() => setCart(cart.filter((_, j) => j !== i))}><Trash2 className="w-3.5 h-3.5 text-destructive" /></button>
                   </div>
                 ))}
-                <div className="flex justify-end text-lg font-bold text-primary">Total: {fmt(cartTotal)}</div>
               </div>
             )}
+            </FormSection>
 
-            <div>
-              <Label>Notes</Label>
-              <Input value={pNotes} onChange={e => setPNotes(e.target.value)} placeholder="Optional notes" />
-            </div>
+            <Field label="Notes">
+              <Input value={pNotes} onChange={e => setPNotes(e.target.value)} placeholder="Optional" />
+            </Field>
           </div>
-          <DialogFooter>
+          <DialogFooter className="items-center">
+            <span className="sm:mr-auto text-lg font-bold text-primary">Total {fmt(cartTotal)}</span>
             <Button variant="outline" onClick={() => setShowPurchaseForm(false)}>Cancel</Button>
-            <Button onClick={handleSavePurchase} disabled={savingPurchase}>{savingPurchase ? 'Saving...' : 'Record Purchase'}</Button>
+            <SubmitButton onClick={handleSavePurchase} busy={savingPurchase} disabled={cart.length === 0}>Record Purchase</SubmitButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -648,16 +654,22 @@ export default function ExpensesPage() {
       {/* New other expense */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>New Other Expense</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div><Label>Description *</Label><Input value={formDesc} onChange={e => setFormDesc(e.target.value)} placeholder="e.g. Rent, Electricity, Transport" /></div>
-            <div><Label>Amount (KES) *</Label><Input type="number" value={formAmount} onChange={e => setFormAmount(e.target.value)} placeholder="0.00" /></div>
-            <div><Label>Notes</Label><Input value={formNotes} onChange={e => setFormNotes(e.target.value)} placeholder="Optional notes" /></div>
-            {canBackdate && <div><Label>Date</Label><DatePicker value={formDate} onChange={d => d && setFormDate(d)} /></div>}
+          <DialogHeader>
+            <DialogTitle>New Other Expense</DialogTitle>
+            <DialogDescription>Money spent that is not a stock purchase, e.g. rent, electricity or transport.</DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Description" required className="col-span-2"><Input value={formDesc} onChange={e => setFormDesc(e.target.value)} placeholder="e.g. Rent, Electricity, Transport" /></Field>
+            <Field label="Amount (KES)" required className={canBackdate ? '' : 'col-span-2'}
+              error={formAmount !== '' && !(Number(formAmount) > 0) ? 'Amount must be more than 0' : ''}>
+              <Input type="number" min={0} value={formAmount} onChange={e => setFormAmount(e.target.value)} placeholder="0.00" />
+            </Field>
+            {canBackdate && <Field label="Date"><DatePicker value={formDate} onChange={d => d && setFormDate(d)} /></Field>}
+            <Field label="Notes" className="col-span-2"><Input value={formNotes} onChange={e => setFormNotes(e.target.value)} placeholder="Optional" /></Field>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>{saving ? 'Saving...' : 'Save'}</Button>
+            <SubmitButton onClick={handleSave} busy={saving} disabled={!formDesc.trim() || !(Number(formAmount) > 0)}>Save</SubmitButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -7,7 +7,7 @@ import { Badge } from '@project/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@project/components/ui/tabs';
 import { Checkbox } from '@project/components/ui/checkbox';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@project/components/ui/dialog';
 import { Download, Upload, Receipt, BadgePercent, TrendingUp, Truck, Coins, Pencil, Trash2, Eye } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
@@ -476,7 +476,10 @@ export default function IncomePage() {
       {/* Notes recorded for a sale (opened with the eye icon) */}
       <Dialog open={!!notesT} onOpenChange={o => { if (!o) setNotesT(null); }}>
         <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>Sale #{notesT?.saleNumber} notes</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Sale #{notesT?.saleNumber} notes</DialogTitle>
+            <DialogDescription>Notes recorded with this sale.</DialogDescription>
+          </DialogHeader>
           <div className="space-y-1.5">
             {String(notesT?.notes || '').split(' | ').map(s => s.trim()).filter(Boolean).map((line, i) => (
               <p key={i} className="rounded-md bg-muted/50 px-3 py-2 text-sm text-foreground break-words whitespace-normal">{line}</p>
@@ -495,16 +498,16 @@ export default function IncomePage() {
         template={tab === 'other' ? 'income' : 'sales'}
         optionLabel={tab === 'other' ? undefined : 'Also deduct the imported quantities from current stock (leave off for old sales already reflected in your stock counts)'}
         description={tab === 'other' ? <>
-          Upload a CSV with one row per income entry. Columns: <span className="font-medium text-foreground">Description, Amount, Notes</span>
+          One row per income entry. Columns: <span className="font-medium text-foreground">Description, Amount, Notes</span>
           {canBackdate && <>, plus <span className="font-medium text-foreground">Date</span> (YYYY-MM-DD or DD/MM/YYYY) for backdated entries, and <span className="font-medium text-foreground">Entry Number</span> to change the date (or details) of an existing entry</>}.
-          {!canBackdate && <> Entries are dated today. Only the Owner and Admin can import backdated or re-dated entries.</>} Press OK to start.
+          {!canBackdate && <> Entries are dated today. Only the Owner and Admin can import backdated or re-dated entries.</>}
         </> : <>
-          Upload a CSV with one row per product line. Rows sharing the same <span className="font-medium text-foreground">Sale Ref</span> become one sale.
+          One row per product (SKU). Rows sharing the same <span className="font-medium text-foreground">Sale Ref</span> become one sale.
           Columns: <span className="font-medium text-foreground">Sale Ref, Date, Customer Name, Customer Phone, Payment Method, Product SKU, Quantity, Unit Price, Discount, Notes</span>.
           <br />The <span className="font-medium text-foreground">Date</span> can be in the past (YYYY-MM-DD or DD/MM/YYYY, optionally with a time like 14:30); leave it empty to use today. Products are matched by SKU. Sale Refs already imported are skipped.
           {canBackdate
             ? <> To change the date of an existing sale, add a row with its <span className="font-medium text-foreground">Sale Number</span> and the new Date (its delivery fee / revenues move too).</>
-            : <> Only the Owner and Admin can import backdated sales or change sale dates; your file must be dated today (leave Date empty).</>} Press OK to start.
+            : <> Only the Owner and Admin can import backdated sales or change sale dates; your file must be dated today (leave Date empty).</>}
         </>}
         onImport={runImport}
         onDone={load}

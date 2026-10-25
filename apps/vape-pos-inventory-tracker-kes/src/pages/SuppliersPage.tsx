@@ -7,7 +7,7 @@ import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
 import { Badge } from '@project/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@project/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@project/components/ui/tabs';
 import { DatePicker } from '@project/components/ui/date-picker';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
@@ -46,6 +46,7 @@ interface Bill {
 
 import { useTableControls, TableControls, SortTh, FieldDef } from '../components/TableControls';
 import HistoryDialog, { HistoryTarget, rowTap } from '../components/HistoryDialog';
+import { Field, SubmitButton, DESTRUCTIVE, useConfirm } from '../components/DialogKit';
 
 const FIELDS: FieldDef<Supplier>[] = [{ key: 'supplierName', label: 'Name' }, { key: 'phone', label: 'Phone' }, { key: 'email', label: 'Email' }, { key: 'address', label: 'Address' }, { key: 'depositBalance', label: 'Deposit Balance' }, { key: 'billsPending', label: 'Bills Pending' }];
 
@@ -216,7 +217,9 @@ export default function SuppliersPage() {
     } catch (e: any) { toast.error(e.message || 'Failed'); } finally { setBusy(false); }
   };
 
+  const confirm = useConfirm();
   const handleDeleteLocation = async (id: string) => {
+    if (!(await confirm({ title: 'Delete this location?', description: 'It is also removed from the Addresses page and POS saved addresses.', confirmLabel: 'Delete', destructive: true }))) return;
     try {
       await deleteRecord({ table: 'addresses', id });
       toast.success('Location deleted');
@@ -313,7 +316,7 @@ export default function SuppliersPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => handleDelete(s.id)} className="bg-destructive">Delete</AlertDialogAction>
+            <AlertDialogAction onClick={() => handleDelete(s.id)} className={DESTRUCTIVE}>Delete</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>}
@@ -346,7 +349,7 @@ export default function SuppliersPage() {
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleBulkDelete} className="bg-destructive">Delete</AlertDialogAction>
+                  <AlertDialogAction onClick={handleBulkDelete} className={DESTRUCTIVE}>Delete</AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
@@ -466,7 +469,7 @@ export default function SuppliersPage() {
         title="Import Suppliers"
         template="suppliers"
         chunkSize={100}
-        description={<>Upload a CSV with columns: <span className="font-medium text-foreground">Supplier Name, Phone, Email, Address</span>. Each row creates a new supplier. Press OK to start the import.</>}
+        description={<>Columns: <span className="font-medium text-foreground">Supplier Name, Phone, Email, Address</span>. Each row creates a new supplier.</>}
         onImport={runImport}
         onDone={load}
       />
@@ -474,21 +477,28 @@ export default function SuppliersPage() {
       {/* Add / edit supplier */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>{editing ? 'Edit Supplier' : 'New Supplier'}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>{editing ? 'Edit Supplier' : 'New Supplier'}</DialogTitle>
+            <DialogDescription>Deposits, bills, locations and supplies are managed from the supplier's account (wallet icon).</DialogDescription>
+          </DialogHeader>
           <div className="space-y-3">
-            <div><Label>Name *</Label><Input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Supplier name" /></div>
-            <div><Label>Phone</Label><Input value={formPhone} onChange={e => setFormPhone(e.target.value)} placeholder="+254..." /></div>
-            <div><Label>Email</Label><Input value={formEmail} onChange={e => setFormEmail(e.target.value)} /></div>
-            <div><Label>Address</Label>
+            <Field label="Name" required><Input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Supplier name" /></Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Phone"><Input value={formPhone} onChange={e => setFormPhone(e.target.value)} placeholder="+254..." /></Field>
+              <Field label="Email" error={formEmail.trim() && !/^\S+@\S+\.\S+$/.test(formEmail.trim()) ? 'Enter a valid email address' : ''}>
+                <Input type="email" value={formEmail} onChange={e => setFormEmail(e.target.value)} placeholder="email@example.com" />
+              </Field>
+            </div>
+            <Field label="Address" hint="Type it, or use the pin button to pick it on the map.">
               <div className="flex gap-2">
                 <Input value={formAddress} onChange={e => setFormAddress(e.target.value)} className="flex-1" />
-                <Button type="button" variant="outline" size="icon" className="shrink-0" onClick={() => setShowLocationPicker(true)}><MapPin className="w-4 h-4" /></Button>
+                <Button type="button" variant="outline" size="icon" className="shrink-0" title="Pick on the map" onClick={() => setShowLocationPicker(true)}><MapPin className="w-4 h-4" /></Button>
               </div>
-            </div>
+            </Field>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>{saving ? 'Saving...' : 'Save'}</Button>
+            <SubmitButton onClick={handleSave} busy={saving} disabled={!formName.trim()}>Save</SubmitButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -504,7 +514,10 @@ export default function SuppliersPage() {
       {/* Supplier account: transactions, bills, locations, supplies */}
       <Dialog open={!!acct} onOpenChange={o => { if (!o) setAcct(null); }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle className="break-words pr-6">{acct?.supplierName}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="break-words pr-6">{acct?.supplierName}</DialogTitle>
+            <DialogDescription>Supplier account: deposits, bills, pick-up locations and the SKUs they supply.</DialogDescription>
+          </DialogHeader>
           {acct && (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
@@ -581,7 +594,7 @@ export default function SuppliersPage() {
                             <AlertDialogTrigger asChild><Button size="sm" variant="ghost" className="h-6 px-1.5 text-destructive"><Trash2 className="w-3 h-3" /></Button></AlertDialogTrigger>
                             <AlertDialogContent>
                               <AlertDialogHeader><AlertDialogTitle>Delete this bill?</AlertDialogTitle><AlertDialogDescription>This cannot be undone. A bill already paid from the deposit will not be refunded; one paid from petty cash goes back to petty cash.</AlertDialogDescription></AlertDialogHeader>
-                              <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleDeleteBill(b)} className="bg-destructive">Delete</AlertDialogAction></AlertDialogFooter>
+                              <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleDeleteBill(b)} className={DESTRUCTIVE}>Delete</AlertDialogAction></AlertDialogFooter>
                             </AlertDialogContent>
                           </AlertDialog>
                         </div>
@@ -616,14 +629,19 @@ export default function SuppliersPage() {
       {/* Add deposit */}
       <Dialog open={depositOpen} onOpenChange={setDepositOpen}>
         <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>Add Deposit — {acct?.supplierName}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Add Deposit — {acct?.supplierName}</DialogTitle>
+            <DialogDescription>Money paid to the supplier in advance. Purchases and bills can be paid from it.</DialogDescription>
+          </DialogHeader>
           <div className="space-y-3">
-            <div><Label>Amount (KES) *</Label><Input type="number" value={depAmount} onChange={e => setDepAmount(e.target.value)} placeholder="0.00" /></div>
-            <div><Label>Notes</Label><Input value={depNotes} onChange={e => setDepNotes(e.target.value)} placeholder="Optional" /></div>
+            <Field label="Amount (KES)" required error={depAmount !== '' && !(Number(depAmount) > 0) ? 'Amount must be more than 0' : ''}>
+              <Input type="number" min={0} value={depAmount} onChange={e => setDepAmount(e.target.value)} placeholder="0.00" />
+            </Field>
+            <Field label="Notes"><Input value={depNotes} onChange={e => setDepNotes(e.target.value)} placeholder="Optional" /></Field>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDepositOpen(false)}>Cancel</Button>
-            <Button onClick={handleDeposit} disabled={busy}>{busy ? 'Saving...' : 'Record Deposit'}</Button>
+            <SubmitButton onClick={handleDeposit} busy={busy} disabled={!(Number(depAmount) > 0)}>Record Deposit</SubmitButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -631,17 +649,22 @@ export default function SuppliersPage() {
       {/* Add bill */}
       <Dialog open={billOpen} onOpenChange={setBillOpen}>
         <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>Add Bill — {acct?.supplierName}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Add Bill — {acct?.supplierName}</DialogTitle>
+            <DialogDescription>An amount owed to the supplier, e.g. stock taken on credit. It stays pending until paid.</DialogDescription>
+          </DialogHeader>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
-              <div><Label>Amount (KES) *</Label><Input type="number" value={billAmount} onChange={e => setBillAmount(e.target.value)} placeholder="0.00" /></div>
-              <div><Label>Date</Label><DatePicker value={billDate} onChange={setBillDate} /></div>
+              <Field label="Amount (KES)" required error={billAmount !== '' && !(Number(billAmount) > 0) ? 'Amount must be more than 0' : ''}>
+                <Input type="number" min={0} value={billAmount} onChange={e => setBillAmount(e.target.value)} placeholder="0.00" />
+              </Field>
+              <Field label="Date"><DatePicker value={billDate} onChange={setBillDate} /></Field>
             </div>
-            <div><Label>Description / notes</Label><Input value={billNotes} onChange={e => setBillNotes(e.target.value)} placeholder="e.g. 20 disposables on credit" /></div>
+            <Field label="Description / notes"><Input value={billNotes} onChange={e => setBillNotes(e.target.value)} placeholder="e.g. 20 disposables on credit" /></Field>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setBillOpen(false)}>Cancel</Button>
-            <Button onClick={handleAddBill} disabled={busy}>{busy ? 'Saving...' : 'Record Bill'}</Button>
+            <SubmitButton onClick={handleAddBill} busy={busy} disabled={!(Number(billAmount) > 0)}>Record Bill</SubmitButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -649,20 +672,22 @@ export default function SuppliersPage() {
       {/* Add supplier location (also shows on the Addresses page and in POS saved addresses) */}
       <Dialog open={locOpen} onOpenChange={setLocOpen}>
         <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>Add Location — {acct?.supplierName}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Add Location — {acct?.supplierName}</DialogTitle>
+            <DialogDescription>A pick-up point of this supplier. It also shows on the Addresses page and in POS saved addresses.</DialogDescription>
+          </DialogHeader>
           <div className="space-y-3">
-            <div><Label>Location name *</Label><Input value={locName} onChange={e => setLocName(e.target.value)} placeholder="e.g. Godown, Industrial Area" /></div>
-            <div><Label>Address</Label>
+            <Field label="Location name" required><Input value={locName} onChange={e => setLocName(e.target.value)} placeholder="e.g. Godown, Industrial Area" /></Field>
+            <Field label="Address" hint={locCoords ? <span className="font-mono">{locCoords}</span> : 'Type it, or use the pin button to pick it on the map.'}>
               <div className="flex gap-2">
                 <Input value={locAddress} onChange={e => setLocAddress(e.target.value)} className="flex-1" />
-                <Button type="button" variant="outline" size="icon" className="shrink-0" onClick={() => setShowLocPicker2(true)}><MapPin className="w-4 h-4" /></Button>
+                <Button type="button" variant="outline" size="icon" className="shrink-0" title="Pick on the map" onClick={() => setShowLocPicker2(true)}><MapPin className="w-4 h-4" /></Button>
               </div>
-              {locCoords && <p className="text-[10px] font-mono text-muted-foreground mt-1">{locCoords}</p>}
-            </div>
+            </Field>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setLocOpen(false)}>Cancel</Button>
-            <Button onClick={handleAddLocation} disabled={busy}>{busy ? 'Saving...' : 'Add Location'}</Button>
+            <SubmitButton onClick={handleAddLocation} busy={busy} disabled={!locName.trim()}>Add Location</SubmitButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>

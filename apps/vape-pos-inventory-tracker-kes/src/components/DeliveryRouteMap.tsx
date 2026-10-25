@@ -7,7 +7,7 @@ import { Label } from '@project/components/ui/label';
 import { Switch } from '@project/components/ui/switch';
 import { Button } from '@project/components/ui/button';
 import { Checkbox } from '@project/components/ui/checkbox';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@project/components/ui/dialog';
 import { cn } from '@project/components/lib/utils';
 import { Trash2, BookMarked, Loader2, Clock, Flag, RefreshCw, PackageCheck, Search, ChevronUp, ChevronDown, GripVertical, Route as RouteIcon } from 'lucide-react';
 import { toast } from 'sonner';
@@ -808,11 +808,9 @@ export default function DeliveryRouteMap({
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><BookMarked className="w-5 h-5 text-amber-400" /> Saved Addresses</DialogTitle>
+            <DialogDescription>Tap an address to add it to the route ({target === 'start' ? 'as the start' : target === 'end' ? 'as the end' : 'as a stop'}).</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            <p className="text-xs text-muted-foreground">
-              Tap an address to add it to the route ({target === 'start' ? 'as the start' : target === 'end' ? 'as the end' : 'as a stop'}).
-            </p>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <Input value={savedQuery} onChange={e => setSavedQuery(e.target.value)} placeholder="Search saved addresses..." className="pl-8 h-9 text-xs" />
@@ -846,13 +844,13 @@ export default function DeliveryRouteMap({
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="break-words pr-6">Items picked up — {pickupFor?.supplierName || pickupFor?.storageName || pickupFor?.label}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <p className="text-xs text-muted-foreground">
+            <DialogDescription>
               {pickupIsStorage
                 ? 'Optional. Tick the items collected from this storage. They are taken out of this storage when you check out (anything it does not hold comes out of the Office), and are not taken from a rider\'s storage.'
                 : 'Optional. Tick the items collected from this supplier. A bill for their cost price is added to the supplier\'s pending bills when you check out, and they are not taken out of any storage.'}
-            </p>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
             {pickupItems.length === 0 ? (
               <p className="text-sm text-muted-foreground py-4 text-center">No items in the cart yet. Add items to the POS cart first.</p>
             ) : (
@@ -879,7 +877,7 @@ export default function DeliveryRouteMap({
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogSel([])} disabled={dialogSel.length === 0}>Clear</Button>
+            <Button variant="outline" onClick={() => setDialogSel([])} disabled={dialogSel.length === 0}>Clear selection</Button>
             <Button onClick={() => setPickupFor(null)}>Done</Button>
           </DialogFooter>
         </DialogContent>

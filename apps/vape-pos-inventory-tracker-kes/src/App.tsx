@@ -22,6 +22,7 @@ import { PermissionsProvider, usePermissions } from './hooks/usePermissions';
 import { BranchProvider } from './hooks/useBranch';
 import { applyStoredTheme } from './hooks/useTheme';
 import LandingBackdrop from './components/LandingBackdrop';
+import { ConfirmProvider } from './components/DialogKit';
 import { LANDING_BG } from './lib/brand';
 
 // Each screen belongs to a permission "area" (see the roles matrix on the Users page).
@@ -133,7 +134,9 @@ export default function App() {
     <BrowserRouter>
       <BranchProvider>
         <PermissionsProvider>
-          <AppRoutes />
+          <ConfirmProvider>
+            <AppRoutes />
+          </ConfirmProvider>
         </PermissionsProvider>
       </BranchProvider>
       <Toaster />

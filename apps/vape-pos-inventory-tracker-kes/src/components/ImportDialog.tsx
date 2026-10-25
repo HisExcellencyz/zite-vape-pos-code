@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef, ReactNode } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@project/components/ui/dialog';
 import { Button } from '@project/components/ui/button';
-import { Input } from '@project/components/ui/input';
-import { Label } from '@project/components/ui/label';
 import { Progress } from '@project/components/ui/progress';
-import { FileDown, CheckCircle2, AlertTriangle, Clock } from 'lucide-react';
+import { FileSpreadsheet, CheckCircle2, AlertTriangle, Clock, Upload } from 'lucide-react';
 import { toast } from 'sonner';
-import { parseCsv, downloadTemplate, TemplateKey } from '../lib/exportHelper';
+import { downloadTemplate, TemplateKey } from '../lib/exportHelper';
+import { readSpreadsheet, IMPORT_ACCEPT } from '../lib/spreadsheet';
+import { FormSection, SubmitButton } from './DialogKit';
 
 export interface ImportSummary {
   imported: number;
@@ -76,16 +76,16 @@ export default function ImportDialog({
     setResult(null);
     if (!file) { setRows([]); setFileName(''); return; }
     try {
-      const parsed = parseCsv(await file.text());
+      const parsed = await readSpreadsheet(file);
       if (parsed.length === 0) {
-        toast.error('No data rows found. Make sure the file is a CSV with a header row.');
+        toast.error('No data rows found. The first row must hold the column names, with your data below it.');
         setRows([]); setFileName('');
         return;
       }
       setRows(parsed);
       setFileName(file.name);
-    } catch {
-      toast.error('Could not read that file');
+    } catch (err: any) {
+      toast.error(err?.message || 'Could not read that file');
       setRows([]); setFileName('');
     }
   };
@@ -170,35 +170,36 @@ export default function ImportDialog({
   return (
     <Dialog open={open} onOpenChange={v => { if (!running) onOpenChange(v); }}>
       <DialogContent className="sm:max-w-lg">
-        <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>Upload an Excel (.xlsx) or CSV (.csv) file. Both work with the same template.</DialogDescription>
+        </DialogHeader>
         <div className="space-y-4">
-          <div className="text-sm text-muted-foreground break-words">{description}</div>
+          <FormSection title="1. Download the template" description={description}>
+            <Button type="button" variant="outline" size="sm" onClick={() => downloadTemplate(template)} disabled={running}>
+              <FileSpreadsheet className="w-4 h-4 mr-2" /> Download template (.xlsx)
+            </Button>
+          </FormSection>
 
-          <Button
-            type="button" variant="outline" size="sm"
-            className="border-yellow-500 text-yellow-400 hover:bg-yellow-500/10"
-            onClick={() => downloadTemplate(template)}
-            disabled={running}
-          >
-            <FileDown className="w-4 h-4 mr-1" /> Download Template
-          </Button>
-
-          <div>
-            <Label className="text-sm mb-1 block">Select CSV file</Label>
-            <Input ref={inputRef} type="file" accept=".csv,.txt" onChange={handleFile} disabled={running} />
-            {fileName && !running && !result && (
-              <p className="text-xs text-muted-foreground mt-1 break-all">
-                {fileName} — {rows.length} row{rows.length === 1 ? '' : 's'} ready
-              </p>
+          <FormSection dashed title="2. Upload your filled-in file" description="Excel (.xlsx) or CSV (.csv), with the template's column names in the first row.">
+            <input ref={inputRef} type="file" accept={IMPORT_ACCEPT} className="hidden" onChange={handleFile} disabled={running} />
+            <div className="flex flex-wrap items-center gap-3">
+              <Button type="button" variant="outline" size="sm" onClick={() => inputRef.current?.click()} disabled={running}>
+                <Upload className="w-4 h-4 mr-2" /> {fileName ? 'Choose another file' : 'Choose file'}
+              </Button>
+              {fileName && !running && (
+                <span className="text-xs text-muted-foreground break-all min-w-0">
+                  {fileName} — {rows.length} row{rows.length === 1 ? '' : 's'} ready
+                </span>
+              )}
+            </div>
+            {optionLabel && (
+              <label className="flex items-start gap-2 text-sm cursor-pointer select-none">
+                <input type="checkbox" checked={option} onChange={e => setOption(e.target.checked)} className="mt-1 rounded" disabled={running} />
+                <span className="break-words">{optionLabel}</span>
+              </label>
             )}
-          </div>
-
-          {optionLabel && (
-            <label className="flex items-start gap-2 text-sm cursor-pointer select-none">
-              <input type="checkbox" checked={option} onChange={e => setOption(e.target.checked)} className="mt-1 rounded" disabled={running} />
-              <span className="break-words">{optionLabel}</span>
-            </label>
-          )}
+          </FormSection>
 
           {running && (
             <div className="space-y-2 rounded-lg border border-border p-3">
@@ -241,9 +242,9 @@ export default function ImportDialog({
             {result ? 'Close' : 'Cancel'}
           </Button>
           {!result && (
-            <Button onClick={handleOk} disabled={rows.length === 0 || running}>
-              {running ? 'Importing...' : rows.length > 0 ? `OK — Import ${rows.length} row${rows.length === 1 ? '' : 's'}` : 'OK'}
-            </Button>
+            <SubmitButton onClick={handleOk} busy={running} disabled={rows.length === 0}>
+              {running ? 'Importing...' : rows.length > 0 ? `Import ${rows.length} row${rows.length === 1 ? '' : 's'}` : 'Import'}
+            </SubmitButton>
           )}
         </DialogFooter>
       </DialogContent>

@@ -5,7 +5,7 @@ import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
 import { Badge } from '@project/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@project/components/ui/dialog';
 import { DatePicker } from '@project/components/ui/date-picker';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@project/components/ui/alert-dialog';
 import { ArrowDownCircle, ArrowUpCircle, FileText, PiggyBank, Trash2 } from 'lucide-react';
@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { format } from 'date-fns';
 import SummaryTiles from './SummaryTiles';
 import { usePermissions } from '../hooks/usePermissions';
+import { Field, SubmitButton, DESTRUCTIVE } from './DialogKit';
 
 interface Entry { id: string; entryNumber?: number; entryDate?: string; type?: string; amount?: number; description?: string; notes?: string; runningBalance: number }
 interface Bill { id: string; supplierId: string; amount: number; notes?: string | null; date: string; status: 'pending' | 'paid'; source: 'manual' | 'pickup'; items?: { name: string; quantity: number }[] }
@@ -173,7 +174,7 @@ export default function PettyCashPanel({ branchId, branchName, suppliers }: { br
                           <AlertDialogTrigger asChild><Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive" title="Delete"><Trash2 className="w-3.5 h-3.5" /></Button></AlertDialogTrigger>
                           <AlertDialogContent>
                             <AlertDialogHeader><AlertDialogTitle>Delete this entry?</AlertDialogTitle><AlertDialogDescription>The petty cash balance will be recalculated without it.</AlertDialogDescription></AlertDialogHeader>
-                            <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction className="bg-destructive" onClick={() => remove(e)}>Delete</AlertDialogAction></AlertDialogFooter>
+                            <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction className={DESTRUCTIVE} onClick={() => remove(e)}>Delete</AlertDialogAction></AlertDialogFooter>
                           </AlertDialogContent>
                         </AlertDialog>
                       )}
@@ -188,17 +189,24 @@ export default function PettyCashPanel({ branchId, branchName, suppliers }: { br
 
       <Dialog open={mode !== null} onOpenChange={o => !o && setMode(null)}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>{mode === 'topup' ? 'Top up petty cash' : 'Withdraw from petty cash'}</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <p className="text-xs text-muted-foreground">{branchName || 'This outlet'} · current balance {fmt(balance)}</p>
-            <div><Label>Amount (KES)</Label><Input type="number" min="0" value={amount} onChange={e => setAmount(e.target.value)} autoFocus /></div>
-            <div><Label>Description</Label><Input value={desc} onChange={e => setDesc(e.target.value)} placeholder={mode === 'topup' ? 'e.g. Cash from till' : 'e.g. Returned to owner'} /></div>
-            <div><Label>Notes</Label><Input value={notes} onChange={e => setNotes(e.target.value)} /></div>
-            {canBackdate && <div><Label>Date</Label><DatePicker value={date} onChange={d => d && setDate(d)} /></div>}
+          <DialogHeader>
+            <DialogTitle>{mode === 'topup' ? 'Top up petty cash' : 'Withdraw from petty cash'}</DialogTitle>
+            <DialogDescription>{branchName || 'This outlet'} · current balance {fmt(balance)}</DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Amount (KES)" required className={canBackdate ? '' : 'col-span-2'}
+              error={amount !== '' && !(Number(amount) > 0) ? 'Amount must be more than 0' : ''}>
+              <Input type="number" min="0" value={amount} onChange={e => setAmount(e.target.value)} autoFocus />
+            </Field>
+            {canBackdate && <Field label="Date"><DatePicker value={date} onChange={d => d && setDate(d)} /></Field>}
+            <Field label="Description" className="col-span-2">
+              <Input value={desc} onChange={e => setDesc(e.target.value)} placeholder={mode === 'topup' ? 'e.g. Cash from till' : 'e.g. Returned to owner'} />
+            </Field>
+            <Field label="Notes" className="col-span-2"><Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional" /></Field>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setMode(null)}>Cancel</Button>
-            <Button disabled={busy} onClick={save}>{mode === 'topup' ? 'Top Up' : 'Withdraw'}</Button>
+            <SubmitButton busy={busy} disabled={!(Number(amount) > 0)} onClick={save}>{mode === 'topup' ? 'Top Up' : 'Withdraw'}</SubmitButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>

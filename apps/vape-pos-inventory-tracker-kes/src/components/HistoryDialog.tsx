@@ -3,7 +3,7 @@ import { format } from 'date-fns';
 import { Loader2, History } from 'lucide-react';
 import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { getHistory, GetHistoryOutputType } from 'zitejs/api';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@project/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@project/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@project/components/ui/tabs';
 import SummaryTiles from './SummaryTiles';
 
@@ -45,7 +45,7 @@ export default function HistoryDialog({ target, onClose }: { target: HistoryTarg
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><History className="w-4 h-4 text-primary shrink-0" /> {target?.title}</DialogTitle>
-          {target?.subtitle && <p className="text-xs text-muted-foreground">{target.subtitle}</p>}
+          {target?.subtitle && <DialogDescription>{target.subtitle}</DialogDescription>}
         </DialogHeader>
 
         {error ? <p className="text-sm text-destructive py-6 text-center">{error}</p>

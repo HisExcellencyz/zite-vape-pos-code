@@ -8,7 +8,7 @@ import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@project/components/ui/tabs';
 import { Switch } from '@project/components/ui/switch';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@project/components/ui/dialog';
 import { Store, Plus, Pencil, Trash2, Check, Shield, Truck, Bike, Phone } from 'lucide-react';
 import { toast } from 'sonner';
 import { useBranch, Branch, autoOn } from '../hooks/useBranch';
@@ -21,6 +21,7 @@ const DEFAULT_LOGO = 'https://images.fillout.com/orgid-811092/flowpublicid-6heps
 import CommissionEditor from '../components/CommissionEditor';
 import type { Commission } from '../hooks/useBranch';
 import { usePermissions } from '../hooks/usePermissions';
+import { Field, FormSection, SubmitButton, useConfirm } from '../components/DialogKit';
 
 const defaultIncomes = (): Commission[] => [{ name: 'Delivery Fee', type: 'fixed', value: DEFAULT_DELIVERY_FEE, enabled: true }];
 
@@ -213,8 +214,9 @@ export default function SettingsPage() {
     if (ok) setRiderDialog(null);
   };
 
+  const confirm = useConfirm();
   const handleDeleteRider = async (type: RiderType, r: Rider) => {
-    if (!window.confirm(`Remove ${r.name}? Past sales keep their rider name.`)) return;
+    if (!(await confirm({ title: `Remove ${r.name}?`, description: 'Past sales keep their rider name.', confirmLabel: 'Remove', destructive: true }))) return;
     await saveRiders({ ...riders, [type]: riders[type].filter(x => x.id !== r.id) }, 'Rider removed');
   };
 
@@ -362,42 +364,43 @@ export default function SettingsPage() {
 
           <Dialog open={outletDialogOpen} onOpenChange={setOutletDialogOpen}>
             <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
-              <DialogHeader><DialogTitle>{editingOutlet ? 'Edit Outlet' : 'Add Outlet'}</DialogTitle></DialogHeader>
+              <DialogHeader>
+                <DialogTitle>{editingOutlet ? 'Edit Outlet' : 'Add Outlet'}</DialogTitle>
+                <DialogDescription>Outlet details, branding, and the revenues and deductions added to its POS orders.</DialogDescription>
+              </DialogHeader>
               <div className="space-y-4">
-                <div>
-                  <Label>Outlet Name *</Label>
-                  <Input value={outletName} onChange={e => setOutletName(e.target.value)} placeholder="e.g. Westlands Branch" />
-                </div>
-                <div>
-                  <Label>Address</Label>
-                  <Input value={outletAddress} onChange={e => setOutletAddress(e.target.value)} placeholder="Physical address" />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label>Phone</Label>
-                    <Input value={outletPhone} onChange={e => setOutletPhone(e.target.value)} placeholder="+254..." />
+                <FormSection title="Details">
+                  <Field label="Outlet Name" required>
+                    <Input value={outletName} onChange={e => setOutletName(e.target.value)} placeholder="e.g. Westlands" />
+                  </Field>
+                  <Field label="Address">
+                    <Input value={outletAddress} onChange={e => setOutletAddress(e.target.value)} placeholder="Physical address" />
+                  </Field>
+                  <div className="grid grid-cols-2 gap-4">
+                    <Field label="Phone">
+                      <Input value={outletPhone} onChange={e => setOutletPhone(e.target.value)} placeholder="+254..." />
+                    </Field>
+                    <Field label="Tax ID">
+                      <Input value={outletTaxId} onChange={e => setOutletTaxId(e.target.value)} />
+                    </Field>
                   </div>
-                  <div>
-                    <Label>Tax ID</Label>
-                    <Input value={outletTaxId} onChange={e => setOutletTaxId(e.target.value)} />
+                </FormSection>
+                <FormSection title="Branding" description="Links to images already hosted online.">
+                  <div className="flex items-start gap-4">
+                    {outletLogoUrl && (
+                      <img src={outletLogoUrl} alt="Logo preview" className="w-14 h-14 rounded-lg object-cover border border-border shrink-0" onError={e => (e.currentTarget.style.display = 'none')} />
+                    )}
+                    <Field label="Logo URL" className="flex-1">
+                      <Input value={outletLogoUrl} onChange={e => setOutletLogoUrl(e.target.value)} placeholder="https://example.com/logo.png" />
+                    </Field>
                   </div>
-                </div>
-                <div className="flex items-start gap-4">
-                  {outletLogoUrl && (
-                    <img src={outletLogoUrl} alt="Logo preview" className="w-14 h-14 rounded-lg object-cover border border-border shrink-0" onError={e => (e.currentTarget.style.display = 'none')} />
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <Label>Logo URL</Label>
-                    <Input value={outletLogoUrl} onChange={e => setOutletLogoUrl(e.target.value)} placeholder="https://example.com/logo.png" />
-                  </div>
-                </div>
-                <div>
-                  <Label>Cover Photo URL</Label>
-                  <Input value={outletCoverUrl} onChange={e => setOutletCoverUrl(e.target.value)} placeholder="https://example.com/cover.jpg" />
-                  {outletCoverUrl && (
-                    <img src={outletCoverUrl} alt="Cover preview" className="mt-2 w-full h-24 rounded-lg object-cover border border-border" onError={e => (e.currentTarget.style.display = 'none')} />
-                  )}
-                </div>
+                  <Field label="Cover Photo URL">
+                    <Input value={outletCoverUrl} onChange={e => setOutletCoverUrl(e.target.value)} placeholder="https://example.com/cover.jpg" />
+                    {outletCoverUrl && (
+                      <img src={outletCoverUrl} alt="Cover preview" className="mt-2 w-full h-24 rounded-lg object-cover border border-border" onError={e => (e.currentTarget.style.display = 'none')} />
+                    )}
+                  </Field>
+                </FormSection>
                 <CommissionEditor
                   title="Incomes & Revenues"
                   namePlaceholder="e.g. Delivery Fee"
@@ -412,18 +415,20 @@ export default function SettingsPage() {
                   value={outletCommissions}
                   onChange={setOutletCommissions}
                 />
-                <div className="flex items-center gap-3">
-                  <Switch checked={outletIsMain} onCheckedChange={setOutletIsMain} />
-                  <Label className="text-sm">Set as the main outlet (default view)</Label>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Switch checked={outletActive} onCheckedChange={setOutletActive} />
-                  <Label className="text-sm">Active</Label>
+                <div className="rounded-lg border border-border p-3 space-y-3">
+                  <div className="flex items-center gap-3">
+                    <Switch id="outlet-main" checked={outletIsMain} onCheckedChange={setOutletIsMain} />
+                    <Label htmlFor="outlet-main" className="text-sm font-normal">Set as the main outlet (default view)</Label>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Switch id="outlet-active" checked={outletActive} onCheckedChange={setOutletActive} />
+                    <Label htmlFor="outlet-active" className="text-sm font-normal">Active</Label>
+                  </div>
                 </div>
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setOutletDialogOpen(false)}>Cancel</Button>
-                <Button onClick={handleSaveOutlet} disabled={savingOutlet}>{savingOutlet ? 'Saving...' : editingOutlet ? 'Update Outlet' : 'Create Outlet'}</Button>
+                <SubmitButton onClick={handleSaveOutlet} busy={savingOutlet} disabled={!outletName.trim()}>{editingOutlet ? 'Save changes' : 'Create Outlet'}</SubmitButton>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -452,15 +457,16 @@ export default function SettingsPage() {
             <DialogContent className="sm:max-w-sm">
               <DialogHeader>
                 <DialogTitle>{riderDialog?.id ? 'Edit' : 'Add'} {riderDialog?.type === 'threePl' ? '3PL Rider' : 'Own Rider'}</DialogTitle>
+                <DialogDescription>Riders are shared by every outlet and picked per order on the POS.</DialogDescription>
               </DialogHeader>
               <div className="space-y-3">
-                <div><Label>Name *</Label><Input value={rName} onChange={e => setRName(e.target.value)} placeholder={riderDialog?.type === 'threePl' ? 'e.g. Sendy, Glovo or rider name' : 'Rider name'} /></div>
-                <div><Label>Phone</Label><Input value={rPhone} onChange={e => setRPhone(e.target.value)} placeholder="+254..." /></div>
-                <div><Label>Notes</Label><Input value={rNotes} onChange={e => setRNotes(e.target.value)} placeholder="Optional" /></div>
+                <Field label="Name" required><Input value={rName} onChange={e => setRName(e.target.value)} placeholder={riderDialog?.type === 'threePl' ? 'e.g. Sendy, Glovo or rider name' : 'Rider name'} /></Field>
+                <Field label="Phone"><Input value={rPhone} onChange={e => setRPhone(e.target.value)} placeholder="+254..." /></Field>
+                <Field label="Notes"><Input value={rNotes} onChange={e => setRNotes(e.target.value)} placeholder="Optional" /></Field>
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setRiderDialog(null)}>Cancel</Button>
-                <Button onClick={handleSaveRider} disabled={savingRider}>{savingRider ? 'Saving...' : riderDialog?.id ? 'Update' : 'Add'}</Button>
+                <SubmitButton onClick={handleSaveRider} busy={savingRider} disabled={!rName.trim()}>{riderDialog?.id ? 'Save changes' : 'Add rider'}</SubmitButton>
               </DialogFooter>
             </DialogContent>
           </Dialog>

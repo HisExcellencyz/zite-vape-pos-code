@@ -6,7 +6,7 @@ import { Input } from '@project/components/ui/input';
 import { Label } from '@project/components/ui/label';
 import { Badge } from '@project/components/ui/badge';
 import { Checkbox } from '@project/components/ui/checkbox';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@project/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@project/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator, DropdownMenuLabel } from '@project/components/ui/dropdown-menu';
 import { Search, Plus, Minus, ShoppingCart, Trash2, UserPlus, X, Receipt, DollarSign, MapPin, Route, UserCheck, Pause, Play, Clock, Layers, Truck, Bike, ChevronDown, Check } from 'lucide-react';
 import { toast } from 'sonner';
@@ -28,6 +28,7 @@ import { normalizePhone } from '../lib/phone';
 import { keyOf, peek, remember, forget } from '../lib/listCache';
 import { parseCoordinates, geocode } from '../lib/geocode';
 import { RiderType, Riders, RIDER_LABELS, DEFAULT_DELIVERY_FEE, DEFAULT_RIDER_FEE, loadRiders } from '../lib/delivery';
+import { Field, SubmitButton, useConfirm } from '../components/DialogKit';
 
 interface Product {
   id: string;
@@ -612,8 +613,9 @@ export default function POSPage() {
     }
   };
 
+  const confirm = useConfirm();
   const deleteHeld = async (h: HeldOrder) => {
-    if (!window.confirm('Delete this pending order? This cannot be undone.')) return;
+    if (!(await confirm({ title: 'Delete this pending order?', description: 'This cannot be undone.', confirmLabel: 'Delete', destructive: true }))) return;
     try {
       const res = await manageHeldOrders({ action: 'remove', id: h.id, branchId: currentBranch?.id });
       setHeldOrders(res.orders as HeldOrder[]);
@@ -1393,18 +1395,20 @@ export default function POSPage() {
       {/* New Customer Dialog */}
       <Dialog open={showCustomerDialog} onOpenChange={(open) => { setShowCustomerDialog(open); if (!open) setDuplicateMatch(null); }}>
         <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>New Customer</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>New Customer</DialogTitle>
+            <DialogDescription>Added to this order and saved under Customers.</DialogDescription>
+          </DialogHeader>
           <div className="space-y-3">
-            <div><Label>Name *</Label><Input value={newCustName} onChange={e => setNewCustName(e.target.value)} placeholder="Customer name" /></div>
-            <div>
-              <Label>Phone Number *</Label>
+            <Field label="Name" required><Input value={newCustName} onChange={e => setNewCustName(e.target.value)} placeholder="Customer name" /></Field>
+            <Field label="Phone Number" required hint="e.g. +254712345678. Numbers starting 07 are converted.">
               <Input
                 value={newCustPhone}
                 onChange={e => { setNewCustPhone(e.target.value); setDuplicateMatch(null); }}
                 onBlur={e => checkExistingByPhone(e.target.value)}
                 placeholder="+254..."
               />
-            </div>
+            </Field>
             {duplicateMatch && (
               <div className="rounded-lg border border-primary/40 bg-primary/5 p-3 space-y-2">
                 <p className="text-xs text-muted-foreground flex items-center gap-1.5"><UserCheck className="w-3.5 h-3.5" /> A customer with this number already exists:</p>
@@ -1412,18 +1416,16 @@ export default function POSPage() {
                 <Button type="button" size="sm" onClick={useDuplicateMatch}>Use this customer</Button>
               </div>
             )}
-            <div>
-              <Label>Location</Label>
+            <Field label="Location" hint={newCustCoords ? <span className="font-mono">Pin saved: {newCustCoords}</span> : 'Optional. Type the address or use the pin button.'}>
               <div className="flex gap-2">
-                <Input value={newCustAddress} onChange={e => { setNewCustAddress(e.target.value); setNewCustCoords(''); }} placeholder="Address (optional)" className="flex-1" />
-                <Button type="button" variant="outline" size="icon" className="shrink-0" onClick={() => setShowCustLocationPicker(true)}><MapPin className="w-4 h-4" /></Button>
+                <Input value={newCustAddress} onChange={e => { setNewCustAddress(e.target.value); setNewCustCoords(''); }} placeholder="Address" className="flex-1" />
+                <Button type="button" variant="outline" size="icon" className="shrink-0" title="Pick on the map" onClick={() => setShowCustLocationPicker(true)}><MapPin className="w-4 h-4" /></Button>
               </div>
-              {newCustCoords && <p className="text-[10px] font-mono text-muted-foreground mt-1">Pin saved: {newCustCoords}</p>}
-            </div>
+            </Field>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCustomerDialog(false)}>Cancel</Button>
-            <Button onClick={handleCreateCustomer}>Add Customer</Button>
+            <SubmitButton onClick={handleCreateCustomer} disabled={!newCustName.trim() || !newCustPhone.trim()}>Add Customer</SubmitButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1440,6 +1442,7 @@ export default function POSPage() {
         <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><Route className="w-5 h-5 text-primary" /> Plan Delivery Route</DialogTitle>
+            <DialogDescription>Add the start, pick-ups and drop-offs. The distance is used for the rider fee.</DialogDescription>
           </DialogHeader>
 
           <DeliveryRouteMap
@@ -1463,7 +1466,7 @@ export default function POSPage() {
             }
           />
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setRoutePoints([]); setDistanceKm(0); setMergedIds([]); setPickupSelections({}); }}>Clear All</Button>
+            <Button variant="outline" className="sm:mr-auto text-destructive" onClick={() => { setRoutePoints([]); setDistanceKm(0); setMergedIds([]); setPickupSelections({}); }}>Clear route</Button>
             <Button onClick={() => setShowDeliveryMap(false)}>Done</Button>
           </DialogFooter>
         </DialogContent>
@@ -1474,6 +1477,7 @@ export default function POSPage() {
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><Layers className="w-5 h-5 text-emerald-400" /> Merge pending orders</DialogTitle>
+            <DialogDescription>Tick pending orders to deliver on the same route. Their drop-off pins are added to it.</DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
             {heldOrders.length === 0 ? (
