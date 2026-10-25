@@ -448,7 +448,10 @@ export default function InventoryPage() {
               <Card onClick={rowTap(() => setHistory({ kind: 'product', id: p.id, title: p.productName || 'Product', subtitle: p.sku ? `SKU ${p.sku}` : undefined }))} key={p.id} className={`cursor-pointer bg-card flex flex-col ${selectedIds.has(p.id) ? 'border-primary' : 'border-border'}`}>
                 <CardContent className="p-2 space-y-1.5 flex flex-col flex-1">
                   <div className="relative">
-                    <ProductImage src={photoOf(p)} alt={p.productName} className="w-full !aspect-[2/1]" />
+                    {/* Same 2:1 frame as before; the photo sits in it as a square, shown whole. */}
+                    <div className="w-full aspect-[2/1] rounded-lg bg-muted/50 flex items-center justify-center overflow-hidden">
+                      <ProductImage src={photoOf(p)} alt={p.productName} fit="contain" className="h-full !w-auto" />
+                    </div>
                     <input type="checkbox" checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} className="absolute top-1.5 left-1.5 rounded" />
                     <div className="absolute top-1.5 right-1.5 scale-90 origin-top-right">{statusBadge(p)}</div>
                   </div>

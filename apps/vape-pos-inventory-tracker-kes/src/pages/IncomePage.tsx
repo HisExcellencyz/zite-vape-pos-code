@@ -22,6 +22,7 @@ import OtherIncomeDialog from '../components/OtherIncomeDialog';
 import { useTableControls, TableControls, SortTh, FieldDef } from '../components/TableControls';
 import DateRangeFilter, { Range, inRange } from '../components/DateRangeFilter';
 import SummaryTiles from '../components/SummaryTiles';
+import { TEMPLATE_HEADERS, exportDate, toCsv } from '../lib/exportFormat';
 import { isCashPayment, paymentLabel } from '../lib/payments';
 import { isDeliveryFeeIncome, parseRider } from '../lib/delivery';
 
@@ -155,11 +156,16 @@ export default function IncomePage() {
         const res = await exportCsv({ table: 'sales' });
         downloadCsv(res.csv, res.filename);
       } else {
+        // Same columns as the Other Income import template (the rider is kept in Notes).
         const list = tab === 'delivery' ? tcF.view : tcO.view;
-        const lines = [['#', 'Date', 'Description', 'Rider', 'Amount', 'Notes'].join(',')].concat(
-          list.map(i => [i.incomeNumber, i.incomeDate, i.description, parseRider(i.notes), i.amount, i.notes].map(q).join(',')),
-        );
-        downloadCsv(lines.join('\n'), tab === 'delivery' ? 'delivery_fees_export.csv' : 'other_income_export.csv');
+        const csv = toCsv(TEMPLATE_HEADERS.income, list.map(i => ({
+          'Entry Number': i.incomeNumber ?? '',
+          'Date': exportDate(i.incomeDate),
+          'Description': i.description || '',
+          'Amount': i.amount || 0,
+          'Notes': i.notes || '',
+        })));
+        downloadCsv(csv, tab === 'delivery' ? 'delivery_fees_export.csv' : 'other_income_export.csv');
       }
       toast.success('Exported');
     } catch { toast.error('Export failed'); }

@@ -10,7 +10,7 @@ export interface Tile { label: string; value: string; sub?: string }
  */
 export default function SummaryTiles({ items }: { items: Tile[]; small?: boolean }) {
   return (
-    <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(9.5rem,1fr))]">
+    <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))]">
       {items.map((it, i) => (
         <div key={it.label} data-tone={TONES[i % 4]} className="stat-tile tile">
           <p className="stat-label">{it.label}</p>

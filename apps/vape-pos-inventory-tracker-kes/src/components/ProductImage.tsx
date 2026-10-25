@@ -6,13 +6,15 @@ interface Props {
   alt?: string;
   /** Size / layout classes, e.g. "w-full" or "w-10 h-10". Always renders as a square. */
   className?: string;
+  /** 'cover' fills the square (may crop); 'contain' shows the whole photo inside the square. */
+  fit?: 'cover' | 'contain';
 }
 
 /**
  * Every product photo is shown in a square frame, cropped to fill (object-cover),
  * so all items look uniform whatever size the original photo was.
  */
-export default function ProductImage({ src, alt = '', className = 'w-full' }: Props) {
+export default function ProductImage({ src, alt = '', className = 'w-full', fit = 'cover' }: Props) {
   const [failed, setFailed] = useState(false);
   return (
     <div className={`aspect-square bg-muted rounded-lg overflow-hidden flex items-center justify-center shrink-0 ${className}`}>
@@ -23,7 +25,7 @@ export default function ProductImage({ src, alt = '', className = 'w-full' }: Pr
           alt={alt}
           loading="lazy" decoding="async"
           onError={() => setFailed(true)}
-          className="w-full h-full object-cover"
+          className={`w-full h-full ${fit === 'contain' ? 'object-contain' : 'object-cover'}`}
         />
       ) : (
         <Package className="w-1/3 h-1/3 text-muted-foreground/30" />

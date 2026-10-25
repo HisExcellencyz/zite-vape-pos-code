@@ -1,3 +1,5 @@
+import { TEMPLATE_HEADERS } from './exportFormat';
+
 export type TemplateKey = 'products' | 'customers' | 'suppliers' | 'sales' | 'purchases' | 'lpos' | 'income' | 'expenses' | 'storageStock';
 
 // Set by the permissions provider. Only the Owner and Admin get template columns that
@@ -8,27 +10,27 @@ export const setTemplateBackdate = (v: boolean) => { canBackdateTemplates = v; }
 const IMPORT_TEMPLATES: Record<TemplateKey, { headers: string[]; samples: string[][] }> = {
   products: {
     // Category = top-level category; Subcategory (optional) = the category under it. Both are created if they do not exist yet.
-    headers: ['Product Name', 'SKU', 'Cost Price', 'Selling Price', 'Stock Quantity', 'Category', 'Subcategory', 'Image URL'],
+    headers: TEMPLATE_HEADERS.products,
     samples: [], // no sample rows: a sample SKU could overwrite a real product if the template were imported as is
   },
   customers: {
-    headers: ['Customer Name', 'Phone Number', 'Email', 'Address'],
+    headers: TEMPLATE_HEADERS.customers,
     samples: [],
   },
   suppliers: {
-    headers: ['Supplier Name', 'Phone', 'Email', 'Address'],
+    headers: TEMPLATE_HEADERS.suppliers,
     samples: [],
   },
   // Stock held in each storage. One row per storage + product; the Quantity becomes that storage's stock level.
   // Same columns as the Storages export. Products are matched by SKU (Product Name is for reference).
   storageStock: {
-    headers: ['Storage', 'SKU', 'Product Name', 'Quantity'],
+    headers: TEMPLATE_HEADERS.storageStock,
     samples: [], // no sample rows: they could overwrite real stock levels if the template were imported as is
   },
   // One row per product line. Rows sharing the same Sale Ref become ONE sale.
   // Owner/Admin only: Date (backdate) and Sale Number (change the date of an existing sale).
   sales: {
-    headers: ['Sale Ref', 'Date', 'Customer Name', 'Customer Phone', 'Payment Method', 'Product SKU', 'Quantity', 'Unit Price', 'Discount', 'Notes', 'Sale Number'],
+    headers: TEMPLATE_HEADERS.sales,
     samples: [
       ['S-001', '2025-01-15', 'Jane Doe', '+254712345678', 'M-Pesa', 'SKU-001', '2', '1500', '0', '', ''],
       ['S-001', '2025-01-15', 'Jane Doe', '+254712345678', 'M-Pesa', 'SKU-002', '1', '800', '0', '', ''],
@@ -39,7 +41,7 @@ const IMPORT_TEMPLATES: Record<TemplateKey, { headers: string[]; samples: string
   // One row per product line. Rows sharing the same Purchase Ref become ONE purchase.
   // Owner/Admin only: Date (backdate) and Purchase Number (change the date of an existing purchase).
   purchases: {
-    headers: ['Purchase Ref', 'Date', 'Supplier Name', 'Payment Type', 'Product SKU', 'Quantity', 'Unit Price', 'Notes', 'Purchase Number'],
+    headers: TEMPLATE_HEADERS.purchases,
     samples: [
       ['P-001', '2025-01-10', 'Vape Wholesale Ltd', 'Cash', 'SKU-001', '20', '900', '', ''],
       ['P-001', '2025-01-10', 'Vape Wholesale Ltd', 'Cash', 'SKU-002', '10', '450', '', ''],
@@ -50,7 +52,7 @@ const IMPORT_TEMPLATES: Record<TemplateKey, { headers: string[]; samples: string
   // One row per product line. Rows sharing the same LPO Number become ONE purchase order.
   // Owner/Admin only: Order Date other than today; re-importing an existing LPO Number updates its dates.
   lpos: {
-    headers: ['LPO Number', 'Supplier Name', 'Order Date', 'Expected Delivery Date', 'Status', 'Product SKU', 'Quantity', 'Unit Price', 'Notes'],
+    headers: TEMPLATE_HEADERS.lpos,
     samples: [
       ['LPO-0101', 'Vape Wholesale Ltd', '2025-01-05', '2025-01-12', 'Verified', 'SKU-001', '20', '900', ''],
       ['LPO-0101', 'Vape Wholesale Ltd', '2025-01-05', '2025-01-12', 'Verified', 'SKU-002', '10', '450', ''],
@@ -58,7 +60,7 @@ const IMPORT_TEMPLATES: Record<TemplateKey, { headers: string[]; samples: string
   },
   // Other Income entries. Owner/Admin only: Date and Entry Number (change an existing entry).
   income: {
-    headers: ['Entry Number', 'Date', 'Description', 'Amount', 'Notes'],
+    headers: TEMPLATE_HEADERS.income,
     samples: [
       ['', '2025-01-20', 'Supplier refund', '1500', ''],
       ['', '', 'Commission received', '800', 'Dated today'],
@@ -67,7 +69,7 @@ const IMPORT_TEMPLATES: Record<TemplateKey, { headers: string[]; samples: string
   },
   // Other Expense entries. Owner/Admin only: Date and Entry Number (change an existing entry).
   expenses: {
-    headers: ['Entry Number', 'Date', 'Description', 'Amount', 'Notes'],
+    headers: TEMPLATE_HEADERS.expenses,
     samples: [
       ['', '2025-01-20', 'Rent', '25000', ''],
       ['', '', 'Electricity', '3200', 'Dated today'],

@@ -41,6 +41,9 @@ function parseDate(s: string): { iso: string; day: string } | null {
 
 function paymentMethod(s: string) {
   const v = norm(s);
+  // The two methods the POS uses today, kept exactly as they are.
+  if (v.includes('platform')) return 'Platform Pay';
+  if (v === 'cashmpesa') return 'Cash/M-PESA';
   if (v.includes('mpesa')) return 'M-Pesa';
   if (v.includes('card')) return 'Card';
   if (v.includes('bank')) return 'Bank Transfer';
