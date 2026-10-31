@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { getCustomers, saveCustomer, deleteRecord, exportCsv, importCsv, getCustomerDetails, bulkDeleteRecords } from 'zitejs/api';
 import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
@@ -16,6 +16,7 @@ import ViewToggle, { useViewMode } from '../components/ViewToggle';
 import ImportDialog from '../components/ImportDialog';
 import { usePermissions } from '../hooks/usePermissions';
 import { normalizePhone } from '../lib/phone';
+import { phoneDigits } from '@project/components/search';
 
 interface Customer {
   id: string;
@@ -116,18 +117,24 @@ export default function CustomersPage() {
     const normalized = normalizePhone(phone);
     try {
       const res = await getCustomers({ search: normalized });
-      const match = (res.customers as Customer[]).find(c => (c.phoneNumber || '') === normalized);
+      const key = phoneDigits(normalized);
+      // Same number whatever format it was saved in (0712…, +254 712…, +UDP712…).
+      const match = (res.customers as Customer[]).find(c => phoneDigits(c.phoneNumber) === key);
       setDuplicateMatch(match || null);
     } catch {
       setDuplicateMatch(null);
     }
   };
 
+  const savingRef = useRef(false);
   const handleSave = async () => {
     if (!formName || !formPhone) return toast.error('Name and phone number are required');
+    // Ignore extra taps while a save is running (a double tap used to try to add the customer twice).
+    if (savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     try {
-      await saveCustomer({
+      const res = await saveCustomer({
         id: editing?.id,
         customerName: formName,
         phoneNumber: formPhone,
@@ -135,18 +142,19 @@ export default function CustomersPage() {
         address: formAddress || undefined,
         coordinates: formCoords || undefined,
       });
-      toast.success(editing ? 'Customer updated' : 'Customer created');
+      toast.success(editing ? 'Customer updated' : res.existing ? 'This customer was already saved' : 'Customer created');
       setShowForm(false);
       load();
     } catch (e: any) {
       const msg = e.message || 'Failed';
       if (!editing && msg.toLowerCase().includes('already exists')) {
         await checkExistingByPhone(formPhone);
-        toast.error('That number is already registered — use the existing customer below, or pick a different number.');
+        toast.error(msg);
       } else {
         toast.error(msg);
       }
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };

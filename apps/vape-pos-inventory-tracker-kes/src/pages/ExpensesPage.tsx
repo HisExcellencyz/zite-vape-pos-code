@@ -24,6 +24,7 @@ import DateRangeFilter, { Range, inRange } from '../components/DateRangeFilter';
 import SummaryTiles from '../components/SummaryTiles';
 import PettyCashPanel from '../components/PettyCashPanel';
 import { Field, FormSection, SubmitButton } from '../components/DialogKit';
+import { SearchInput, matchesQuery } from '@project/components/search';
 
 interface Expense { id: string; expenseNumber?: number; expenseDate?: string; description?: string; amount?: number; notes?: string; }
 interface Purchase { id: string; purchaseNumber?: number; purchaseDate?: string; total?: number; paymentType?: string; notes?: string; }
@@ -178,10 +179,7 @@ export default function ExpensesPage() {
   };
 
   // ── Purchases ──
-  const filteredProducts = products.filter(p =>
-    (p.productName || '').toLowerCase().includes(productSearch.toLowerCase()) ||
-    (p.sku || '').toLowerCase().includes(productSearch.toLowerCase())
-  );
+  const filteredProducts = products.filter(p => matchesQuery([p.productName, p.sku], productSearch));
 
   const addToCart = (product: Product) => {
     const existing = cart.find(c => c.product.id === product.id);
@@ -601,10 +599,7 @@ export default function ExpensesPage() {
             </div>
 
             <FormSection title="SKUs" description="Search to add SKUs, then set the quantity and unit cost of each.">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input placeholder="Search products..." value={productSearch} onChange={e => setProductSearch(e.target.value)} className="pl-9" />
-              </div>
+              <SearchInput placeholder="Search products..." value={productSearch} onChange={setProductSearch} className="" />
               {productSearch && (
                 <div className="max-h-32 overflow-y-auto border border-border rounded-lg">
                   {filteredProducts.slice(0, 10).map(p => (

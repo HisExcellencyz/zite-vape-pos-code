@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
 import { branchFilter } from '../lib/branchScope';
+import { matchesQuery } from '@project/components/search/match';
 
 export default createEndpoint({
   description: 'List products with optional search, category filter and sorting',
@@ -42,11 +43,8 @@ export default createEndpoint({
 
     let filtered = records.filter(keep);
     if (input.search) {
-      const s = input.search.toLowerCase();
-      filtered = filtered.filter(p =>
-        (p.productName || '').toLowerCase().includes(s) ||
-        (p.sku || '').toLowerCase().includes(s)
-      );
+      const q = input.search;
+      filtered = filtered.filter(p => matchesQuery([p.productName, p.sku], q));
     }
 
     const dir = input.sortDir === 'desc' ? -1 : 1;

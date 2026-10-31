@@ -7,6 +7,7 @@ import { Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { buildCategoryTree, flattenCategories, productCategoryId, CategoryLite } from './CategoryRibbon';
 import { SubmitButton } from './DialogKit';
+import { SearchInput, matchesQuery } from '@project/components/search';
 
 interface Product { id: string; productName?: string; sku?: string; category?: string | string[]; }
 
@@ -49,7 +50,7 @@ export default function SupplierSuppliesEditor({ supplierId, canEdit }: { suppli
 
   const q = query.trim().toLowerCase();
   const shown = products
-    .filter(p => !q || (p.productName || '').toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q))
+    .filter(p => matchesQuery([p.productName, p.sku], q))
     .sort((a, b) => (a.productName || '').localeCompare(b.productName || ''));
   const allShownTicked = shown.length > 0 && shown.every(p => prodIds.has(p.id));
 
@@ -100,10 +101,7 @@ export default function SupplierSuppliesEditor({ supplierId, canEdit }: { suppli
       <div>
         <div className="flex items-center justify-between gap-2 mb-1.5">
           <p className="text-xs font-medium text-foreground">Products ({prodIds.size})</p>
-          <div className="relative w-48">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-            <Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search products..." className="pl-8 h-8 text-xs" />
-          </div>
+          <SearchInput placeholder="Search products..." value={query} onChange={setQuery} className="w-48" inputClassName="h-8 text-xs" />
         </div>
         <div className="rounded-md border border-border">
           <label className="flex items-center gap-2 px-3 py-1.5 border-b border-border text-xs text-muted-foreground cursor-pointer select-none">

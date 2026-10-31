@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
 import { normalizePhone } from '../lib/phone';
+import { phoneKey } from '../lib/customerContacts';
 import { getAccess } from '../lib/permissions';
 import { todayEAT, resolveDateChange, moveSaleDate } from '../lib/entryDates';
 
@@ -72,7 +73,8 @@ export default createEndpoint({
     const { records: products } = await zite.products.findAll({ limit: 2000 });
     const skuMap = new Map(products.map(p => [(p.sku || '').toLowerCase(), p]));
     const { records: customers } = await zite.customers.findAll({ limit: 2000 });
-    const phoneMap = new Map(customers.map(c => [(c.phoneNumber || '').replace(/\D/g, ''), c]));
+    // Keyed by the comparable phone number, so 0712…, +254 712… and +UDP712… find the same customer.
+    const phoneMap = new Map(customers.filter(c => phoneKey(c.phoneNumber)).map(c => [phoneKey(c.phoneNumber), c]));
 
     // Refs already imported earlier are skipped so a file can't be imported twice.
     const existing = await zite.sql({
@@ -158,11 +160,11 @@ export default createEndpoint({
         const phoneDigits = (first['customerphone'] || first['phone'] || '').replace(/\D/g, '');
         let customerId: string | null = null;
         if (phoneDigits) {
-          let cust = phoneMap.get(phoneDigits);
+          let cust = phoneMap.get(phoneKey(phoneDigits));
           const custName = first['customername'] || '';
           if (!cust && custName) {
             cust = await zite.customers.create({ record: { customerName: custName, phoneNumber: normalizePhone(phoneDigits), email: null, address: null, notes: null } });
-            phoneMap.set(phoneDigits, cust);
+            phoneMap.set(phoneKey(phoneDigits), cust);
           }
           if (cust) customerId = cust.id;
         }

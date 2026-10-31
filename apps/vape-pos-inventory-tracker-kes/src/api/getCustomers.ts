@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
+import { matchesQuery } from '@project/components/search/match';
 
 export default createEndpoint({
   description: 'List customers with search, sorting, and order/spend stats',
@@ -21,11 +22,9 @@ export default createEndpoint({
 
     let filtered = records;
     if (input.search) {
-      const s = input.search.toLowerCase();
-      filtered = records.filter(c =>
-        (c.customerName || '').toLowerCase().includes(s) ||
-        (c.phoneNumber || '').toLowerCase().includes(s)
-      );
+      // Every word must match the name, phone (any format), email or address.
+      const q = input.search;
+      filtered = records.filter(c => matchesQuery([c.customerName, c.phoneNumber, c.email, c.address], q));
     }
 
     // Order count + total spent per customer, used both for display and for sorting.

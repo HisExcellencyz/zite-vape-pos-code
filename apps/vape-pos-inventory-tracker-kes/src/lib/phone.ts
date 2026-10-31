@@ -10,6 +10,10 @@ export function normalizePhone(raw: string): string {
   p = p.replace(/^\+?UDP/i, '+254');
   if (p.startsWith('+')) {
     if (p.startsWith('+2540')) p = '+254' + p.slice(5);
+    // A local number typed after a "+" (e.g. +0712345678 or +712345678)
+    const rest = p.slice(1);
+    if (/^0[17]\d{8}$/.test(rest)) return '+254' + rest.slice(1);
+    if (/^[17]\d{8}$/.test(rest)) return '+254' + rest;
     return p;
   }
   if (/^0[17]\d{8}$/.test(p)) return '+254' + p.slice(1);

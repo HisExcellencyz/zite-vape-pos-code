@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
 import { normalizePhone } from '../lib/phone';
+import { loadContacts, findContactOwnerIn } from '../lib/customerContacts';
 import { normalizeImageUrl, isHttpUrl } from '../lib/imageUrl';
 import { assertCan } from '../lib/permissions';
 import { syncSupplierAddress } from '../lib/supplierAddress';
@@ -115,6 +116,8 @@ export default createEndpoint({
         break;
       }
       case 'customers': {
+        // Matched to existing customers by phone number in any format (and by email), so a file never makes duplicates.
+        const contacts = await loadContacts();
         for (const row of input.rows) {
           try {
             const name = row['Customer Name'] || row['customerName'] || row['name'] || '';
@@ -122,27 +125,29 @@ export default createEndpoint({
             if (!name || !phone) { errors.push(`Row missing name or phone: ${JSON.stringify(row)}`); continue; }
             phone = normalizePhone(phone);
 
-            const existing = await zite.customers.findOne({ filters: { phoneNumber: phone } });
+            const email = String(row['Email'] || row['email'] || '').trim().toLowerCase();
+            const address = String(row['Address'] || row['address'] || '').trim();
+            const match = findContactOwnerIn(contacts, { phone });
+            const existing = match?.customer;
             if (existing) {
-              await zite.customers.update({
-                id: existing.id,
-                record: {
-                  customerName: name,
-                  email: row['Email'] || row['email'] || null,
-                  address: row['Address'] || row['address'] || null,
-                },
-              });
+              // Blank cells leave the saved details as they are.
+              const record: Record<string, unknown> = { customerName: name };
+              if (email) {
+                const emailOwner = findContactOwnerIn(contacts, { email, excludeId: existing.id });
+                if (emailOwner) { errors.push(`${name}: email ${email} already belongs to ${emailOwner.customer.customerName}, email not changed`); }
+                else record.email = email;
+              }
+              if (address) record.address = address;
+              await zite.customers.update({ id: existing.id, record });
+              Object.assign(existing, { customerName: name, email: (record.email as string) ?? existing.email });
               updated++;
             } else {
-              await zite.customers.create({
-                record: {
-                  phoneNumber: phone,
-                  customerName: name,
-                  email: row['Email'] || row['email'] || null,
-                  address: row['Address'] || row['address'] || null,
-                  notes: null,
-                },
+              const emailOwner = email ? findContactOwnerIn(contacts, { email }) : null;
+              if (emailOwner) { errors.push(`${name} (${phone}): email ${email} already belongs to ${emailOwner.customer.customerName}, row skipped`); continue; }
+              const created = await zite.customers.create({
+                record: { phoneNumber: phone, customerName: name, email: email || null, address: address || null, notes: null },
               });
+              contacts.push({ id: created.id, customerName: name, phoneNumber: phone, email });
               imported++;
             }
           } catch (e: any) {

@@ -16,6 +16,7 @@ import ViewToggle, { useViewMode } from '../components/ViewToggle';
 import { buildCategoryTree } from '../components/CategoryRibbon';
 import { usePermissions } from '../hooks/usePermissions';
 import { Field, SubmitButton, DESTRUCTIVE } from '../components/DialogKit';
+import { SearchInput, matchesQuery } from '@project/components/search';
 
 interface Category {
   id: string;
@@ -170,15 +171,10 @@ export default function CategoriesPage() {
 
   // Only main categories are listed here. Subcategories live behind each category's "Subcategories" button.
   // A search keeps a main category when its own name matches or when one of its subcategories matches.
-  const q = search.trim().toLowerCase();
-  const filtered: Category[] = tree.tops.filter(t =>
-    !q
-    || (t.categoryName || '').toLowerCase().includes(q)
-    || kidsOf(t.id).some(k => (k.categoryName || '').toLowerCase().includes(q)),
-  );
-  const subMatchOnly = (t: Category) =>
-    !!q && !(t.categoryName || '').toLowerCase().includes(q)
-    && kidsOf(t.id).some(k => (k.categoryName || '').toLowerCase().includes(q));
+  const q = search.trim();
+  const hit = (c: Category) => matchesQuery([c.categoryName], q);
+  const filtered: Category[] = tree.tops.filter(t => !q || hit(t) || kidsOf(t.id).some(hit));
+  const subMatchOnly = (t: Category) => !!q && !hit(t) && kidsOf(t.id).some(hit);
 
   const toggleSelect = (id: string) => {
     const next = new Set(selectedIds);
@@ -273,10 +269,7 @@ export default function CategoriesPage() {
         </div>
       </div>
 
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input placeholder="Search categories and subcategories..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
-      </div>
+      <SearchInput placeholder="Search categories and subcategories..." value={search} onChange={setSearch} className="max-w-sm" />
 
       {filtered.length > 0 && viewMode === 'grid' && (
         <label className="flex items-center gap-2 text-xs text-muted-foreground select-none w-fit cursor-pointer">

@@ -3,9 +3,10 @@ import { createEndpoint } from 'zitejs/backend';
 import { zite } from 'zitejs/db';
 import { normalizePhone } from '../lib/phone';
 import { archiveCustomerLocation } from '../lib/customerLocations';
+import { findContactOwner, sameName } from '../lib/customerContacts';
 
 export default createEndpoint({
-  description: 'Create or update a customer (optionally with a map location)',
+  description: 'Create or update a customer (optionally with a map location); one customer per phone number and email',
   authenticated: true,
   inputSchema: z.object({
     id: z.string().optional(),
@@ -16,24 +17,37 @@ export default createEndpoint({
     coordinates: z.string().optional(),
     notes: z.string().optional(),
   }),
-  outputSchema: z.object({ success: z.boolean(), customer: z.any() }),
+  outputSchema: z.object({
+    success: z.boolean(),
+    customer: z.any(),
+    /** True when no new customer was made because this exact customer already existed (e.g. Save tapped twice). */
+    existing: z.boolean().optional(),
+  }),
   execute: async ({ input }) => {
-    // Phone number must start with +
     const phone = normalizePhone(input.phoneNumber);
+    const name = input.customerName.trim();
+    const email = (input.email || '').trim().toLowerCase();
 
-    // Check phone uniqueness
-    const existing = await zite.customers.findOne({ filters: { phoneNumber: phone } });
-    if (existing && (!input.id || existing.id !== input.id)) {
-      throw new Error('A customer with this phone number already exists');
+    // One customer per phone number and per email, whatever format the number was typed in.
+    const owner = await findContactOwner({ phone, email, excludeId: input.id });
+    if (owner) {
+      // The same name and number again (a double tap on Save, or re-adding a known customer): use that customer.
+      if (!input.id && owner.by === 'phone' && sameName(owner.customer.customerName, name)) {
+        const customer = await zite.customers.findOne({ id: owner.customer.id });
+        return { success: true, customer, existing: true };
+      }
+      const what = owner.by === 'phone' ? `phone number ${owner.customer.phoneNumber || phone}` : `email ${email}`;
+      throw new Error(`A customer with this ${owner.by === 'phone' ? 'phone number' : 'email'} already exists: ${owner.customer.customerName || 'unnamed'} (${what})`);
     }
 
     const record: Record<string, unknown> = {
       phoneNumber: phone,
-      customerName: input.customerName,
-      email: input.email || null,
+      customerName: name,
+      email: email || null,
       address: input.address || null,
-      notes: input.notes || null,
     };
+    // Notes are only changed when sent (the edit forms don't send them, and must not wipe them).
+    if (input.notes !== undefined) record.notes = input.notes || null;
     if (input.coordinates) record.coordinates = input.coordinates;
 
     if (input.id) {
@@ -44,9 +58,8 @@ export default createEndpoint({
       }
       const updated = await zite.customers.update({ id: input.id, record });
       return { success: true, customer: updated };
-    } else {
-      const created = await zite.customers.create({ record });
-      return { success: true, customer: created };
     }
+    const created = await zite.customers.create({ record });
+    return { success: true, customer: created };
   },
 });

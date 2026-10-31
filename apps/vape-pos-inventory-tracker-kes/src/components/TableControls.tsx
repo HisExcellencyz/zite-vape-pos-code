@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { ArrowDownAZ, ArrowUpAZ } from 'lucide-react';
+import { SearchInput, matchesQuery } from '@project/components/search';
 
 export type FieldDef<T> = { key: string; label: string; get?: (row: T) => unknown };
 
@@ -14,9 +15,9 @@ export function useTableControls<T>(rows: T[], fields: FieldDef<T>[]) {
   const [dir, setDir] = useState<1 | -1>(1);
 
   const view = useMemo(() => {
-    const ql = q.toLowerCase();
     const fs = field === 'all' ? fields : fields.filter(f => f.key === field);
-    let out = q ? rows.filter(r => fs.some(f => txt(val(f, r)).toLowerCase().includes(ql))) : rows.slice();
+    // Every word must match one of the chosen fields; phone numbers match in any format.
+    let out = q.trim() ? rows.filter(r => matchesQuery(fs.map(f => txt(val(f, r))), q)) : rows.slice();
     const sf = fields.find(f => f.key === sortKey);
     if (sf) {
       out = out.sort((a, b) => {
@@ -42,8 +43,7 @@ const sel = 'h-9 rounded-md border border-input bg-background px-2 text-xs text-
 export function TableControls<T>({ c }: { c: ReturnType<typeof useTableControls<T>> }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {/* Search box is twice as long as the old Filter box (w-40 -> w-80) */}
-      <input value={c.q} onChange={e => c.setQ(e.target.value)} placeholder="Search..." className={`${sel} w-80 max-w-full`} />
+      <SearchInput value={c.q} onChange={c.setQ} placeholder={c.field === 'all' ? 'Search all fields…' : `Search ${c.fields.find(f => f.key === c.field)?.label || ''}…`} className="w-80 max-w-full" />
       <select value={c.field} onChange={e => c.setField(e.target.value)} className={sel} title="Search field">
         <option value="all">All fields</option>
         {c.fields.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}

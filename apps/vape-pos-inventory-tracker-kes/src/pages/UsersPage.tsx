@@ -17,6 +17,7 @@ import ViewToggle, { useViewMode } from '../components/ViewToggle';
 
 import { AREAS, ACTIONS, AREA_LABELS, Area, Action, PermMatrix, emptyPermissions, fullPermissions, normalizePerms, isAdminRoleName, canBackdateSalesRole } from '../lib/permissionAreas';
 import { Field, SubmitButton, DESTRUCTIVE } from '../components/DialogKit';
+import { SearchInput, matchesQuery } from '@project/components/search';
 
 const emptyPerms = (): PermMatrix => emptyPermissions();
 
@@ -193,7 +194,7 @@ export default function UsersPage() {
   };
 
   const filtered = users.filter(u =>
-    !search || u.email?.toLowerCase().includes(search.toLowerCase()) || u.name?.toLowerCase().includes(search.toLowerCase())
+    matchesQuery([u.email, u.name], search)
   );
 
   const statusBadge = (u: AppUser) => {
@@ -258,10 +259,7 @@ export default function UsersPage() {
 
         <TabsContent value="users" className="space-y-4">
           <div className="flex items-center gap-3 flex-wrap">
-            <div className="relative flex-1 min-w-[200px] max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input placeholder="Search users..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
-            </div>
+            <SearchInput placeholder="Search users..." value={search} onChange={setSearch} className="flex-1 min-w-[200px] max-w-sm" />
             <div className="flex gap-2 ml-auto">
               <Button variant="outline" size="sm" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={handleExportUsers}>
                 <Download className="w-4 h-4 mr-1" /> Export

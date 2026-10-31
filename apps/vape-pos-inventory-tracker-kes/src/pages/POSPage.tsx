@@ -29,6 +29,7 @@ import { keyOf, peek, remember, forget } from '../lib/listCache';
 import { parseCoordinates, geocode } from '../lib/geocode';
 import { RiderType, Riders, RIDER_LABELS, DEFAULT_DELIVERY_FEE, DEFAULT_RIDER_FEE, loadRiders } from '../lib/delivery';
 import { Field, SubmitButton, useConfirm } from '../components/DialogKit';
+import { SearchInput, matchesQuery, phoneDigits } from '@project/components/search';
 
 interface Product {
   id: string;
@@ -374,10 +375,7 @@ export default function POSPage() {
   }, []);
 
   const filtered = products.filter(p =>
-    matchesCategory(categoryFilter, productCategoryId(p), categories) && (
-      (p.productName || '').toLowerCase().includes(search.toLowerCase()) ||
-      (p.sku || '').toLowerCase().includes(search.toLowerCase())
-    )
+    matchesCategory(categoryFilter, productCategoryId(p), categories) && matchesQuery([p.productName, p.sku], search)
   );
 
   const qtyInCart = (productId: string) => cart.find(c => c.product.id === productId)?.quantity || 0;
@@ -826,7 +824,9 @@ export default function POSPage() {
     const normalized = normalizePhone(phone);
     try {
       const res = await getCustomers({ search: normalized });
-      const match = (res.customers as Customer[]).find(c => (c.phoneNumber || '') === normalized);
+      const key = phoneDigits(normalized);
+      // Same number whatever format it was saved in (0712…, +254 712…, +UDP712…).
+      const match = (res.customers as Customer[]).find(c => phoneDigits(c.phoneNumber) === key);
       setDuplicateMatch(match || null);
     } catch {
       setDuplicateMatch(null);
@@ -843,8 +843,14 @@ export default function POSPage() {
     clearNewCustomerForm();
   };
 
+  const [creatingCustomer, setCreatingCustomer] = useState(false);
+  const creatingRef = useRef(false);
   const handleCreateCustomer = async () => {
     if (!newCustName || !newCustPhone) return toast.error('Name and phone are required');
+    // Ignore extra taps while a save is running (a double tap used to try to add the customer twice).
+    if (creatingRef.current) return;
+    creatingRef.current = true;
+    setCreatingCustomer(true);
     try {
       const res = await saveCustomer({
         customerName: newCustName,
@@ -852,20 +858,24 @@ export default function POSPage() {
         address: newCustAddress || undefined,
         coordinates: newCustCoords || undefined,
       });
-      setCustomers(prev => [...prev, res.customer as Customer]);
-      setSelectedCustomer(res.customer as Customer);
+      const saved = res.customer as Customer;
+      setCustomers(prev => (prev.some(c => c.id === saved.id) ? prev : [...prev, saved]));
+      setSelectedCustomer(saved);
       setShowCustomerDialog(false);
       clearNewCustomerForm();
       setDuplicateMatch(null);
-      toast.success('Customer created');
+      toast.success(res.existing ? 'Customer already saved, selected' : 'Customer created');
     } catch (e: any) {
       const msg = e.message || 'Failed';
       if (msg.toLowerCase().includes('already exists')) {
         await checkExistingByPhone(newCustPhone);
-        toast.error('That number is already registered — use the existing customer below.');
+        toast.error(msg);
       } else {
         toast.error(msg);
       }
+    } finally {
+      creatingRef.current = false;
+      setCreatingCustomer(false);
     }
   };
 
@@ -916,10 +926,7 @@ export default function POSPage() {
           <CategoryRibbon categories={categories} selected={categoryFilter} onSelect={setCategoryFilter} />
         </div>
 
-        <div className="relative mb-4">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input placeholder="Search products by name or SKU..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
-        </div>
+        <SearchInput placeholder="Search products by name or SKU..." value={search} onChange={setSearch} className="mb-4" />
 
         <div className="flex-1 overflow-y-auto">
           {catalogView === 'grid' ? (
@@ -1425,7 +1432,7 @@ export default function POSPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCustomerDialog(false)}>Cancel</Button>
-            <SubmitButton onClick={handleCreateCustomer} disabled={!newCustName.trim() || !newCustPhone.trim()}>Add Customer</SubmitButton>
+            <SubmitButton onClick={handleCreateCustomer} busy={creatingCustomer} disabled={!newCustName.trim() || !newCustPhone.trim()}>Add Customer</SubmitButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
