@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { managePettyCash } from 'zitejs/api';
 import { useBranch } from '../hooks/useBranch';
-import { getSuppliers, saveSupplier, deleteRecord, exportCsv, importCsv, bulkDeleteRecords, getSupplierDetails, recordDeposit, manageSupplierBills, getAddresses, saveAddress, syncSupplierAddresses } from 'zitejs/api';
+import { getSuppliers, saveSupplier, deleteRecord, exportCsv, importCsv, bulkDeleteRecords, getSupplierDetails, recordDeposit, manageSupplierBills, getAddresses, saveAddress, syncSupplierAddresses, getProducts } from 'zitejs/api';
+import ProductMultiSearch from '../components/ProductMultiSearch';
+import { SurchargeRule, BillItem, priceBill, ruleIsActive } from '../lib/supplierSurcharge';
 import { Card, CardContent } from '@project/components/ui/card';
 import { Button } from '@project/components/ui/button';
 import { Input } from '@project/components/ui/input';
@@ -40,9 +42,14 @@ interface Bill {
   date: string;
   status: 'pending' | 'paid';
   source: 'manual' | 'pickup';
-  items?: { name: string; quantity: number; unitCost: number }[];
+  items?: BillItem[];
+  itemsTotal?: number | null;
+  surcharge?: number | null;
+  surchargeNote?: string | null;
   paidFrom?: 'cash' | 'deposit' | 'pettycash' | null;
 }
+
+interface CostProduct { id: string; productName?: string; sku?: string; costPrice?: number; stockQuantity?: number }
 
 import { useTableControls, TableControls, SortTh, FieldDef } from '../components/TableControls';
 import HistoryDialog, { HistoryTarget, rowTap } from '../components/HistoryDialog';
@@ -88,6 +95,14 @@ export default function SuppliersPage() {
   const [billAmount, setBillAmount] = useState('');
   const [billNotes, setBillNotes] = useState('');
   const [billDate, setBillDate] = useState<Date | undefined>(new Date());
+  // Itemised bills: products with quantity and cost price. A bill with items is priced from them.
+  const [billItems, setBillItems] = useState<BillItem[]>([]);
+  const [editingBill, setEditingBill] = useState<Bill | null>(null);
+  const [costProducts, setCostProducts] = useState<CostProduct[]>([]);
+  // The supplier's small-order charge: orders under ruleMin pieces pay rulePer extra for every piece.
+  const [rule, setRule] = useState<SurchargeRule | null>(null);
+  const [ruleMin, setRuleMin] = useState('');
+  const [rulePer, setRulePer] = useState('');
   const [locOpen, setLocOpen] = useState(false);
   const [locName, setLocName] = useState('');
   const [locAddress, setLocAddress] = useState('');
@@ -128,6 +143,9 @@ export default function SuppliersPage() {
       setAcct(prev => (prev ? { ...prev, ...(d.supplier as Supplier), billsPending: b.pending } : prev));
       setTxs(d.transactions);
       setBills(b.bills as Bill[]);
+      setRule((b.rule as SurchargeRule | null) ?? null);
+      setRuleMin(b.rule ? String(b.rule.minPieces) : '');
+      setRulePer(b.rule ? String(b.rule.perPiece) : '');
       setLocs(l.addresses);
     } catch (e: any) {
       toast.error(e.message || 'Failed to load supplier account');
@@ -139,7 +157,7 @@ export default function SuppliersPage() {
   const openAccount = (s: Supplier, tab = 'transactions') => {
     setAcct(s);
     setAcctTab(tab);
-    setTxs([]); setBills([]); setLocs([]);
+    setTxs([]); setBills([]); setLocs([]); setRule(null); setRuleMin(''); setRulePer('');
     refreshAcct(s.id);
   };
 
@@ -160,23 +178,73 @@ export default function SuppliersPage() {
     } catch (e: any) { toast.error(e.message || 'Failed'); } finally { setBusy(false); }
   };
 
-  const handleAddBill = async () => {
+  // Products with their cost prices, for adding items to a bill (loaded the first time a bill is opened).
+  const loadCostProducts = () => {
+    if (costProducts.length > 0) return;
+    getProducts({}).then(r => setCostProducts(r.products as CostProduct[])).catch(() => {});
+  };
+
+  const resetBillForm = () => {
+    setBillAmount(''); setBillNotes(''); setBillDate(new Date()); setBillItems([]); setEditingBill(null);
+  };
+  const openNewBill = () => { resetBillForm(); loadCostProducts(); setBillOpen(true); };
+  const openEditBill = (b: Bill) => {
+    setEditingBill(b);
+    setBillItems((b.items || []).map(i => ({ ...i, productId: i.productId || '' })));
+    setBillAmount(b.items && b.items.length > 0 ? '' : String(b.amount));
+    setBillNotes(b.notes || '');
+    setBillDate(b.date ? new Date(b.date) : new Date());
+    loadCostProducts();
+    setBillOpen(true);
+  };
+
+  // Live totals in the bill dialog: items (quantity × cost price) + small-order charge. The server works it out the same way.
+  const billPrice = priceBill(rule, billItems);
+  const billTotal = billItems.length > 0 ? billPrice.amount : Number(billAmount) || 0;
+
+  const addBillProducts = (picked: CostProduct[]) => {
+    setBillItems(prev => [
+      ...prev,
+      ...picked
+        .filter(p => !prev.some(i => i.productId === p.id))
+        .map(p => ({ productId: p.id, name: p.productName || p.sku || 'Item', quantity: 1, unitCost: Number(p.costPrice) || 0 })),
+    ]);
+  };
+  const setItem = (idx: number, patch: Partial<BillItem>) =>
+    setBillItems(prev => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
+
+  const handleSaveBill = async () => {
     if (!acct) return;
-    if (!(Number(billAmount) > 0)) return toast.error('Enter a bill amount greater than 0');
+    if (!(billTotal > 0)) return toast.error('Add items with cost prices, or enter a bill amount greater than 0');
     setBusy(true);
     try {
-      await manageSupplierBills({
-        action: 'add',
-        supplierId: acct.id,
-        amount: Number(billAmount),
+      const common = {
+        items: billItems.length > 0 ? billItems : undefined,
+        amount: billItems.length > 0 ? undefined : Number(billAmount),
         notes: billNotes || undefined,
         date: (billDate || new Date()).toISOString(),
-        source: 'manual',
-      });
-      toast.success('Bill recorded');
-      setBillOpen(false); setBillAmount(''); setBillNotes(''); setBillDate(new Date());
+      };
+      if (editingBill) {
+        // An empty item list on an itemised bill turns it back into a plain amount.
+        await manageSupplierBills({ action: 'update', billId: editingBill.id, ...common, items: billItems });
+        toast.success('Bill updated');
+      } else {
+        await manageSupplierBills({ action: 'add', supplierId: acct.id, ...common, source: 'manual' });
+        toast.success('Bill recorded');
+      }
+      setBillOpen(false); resetBillForm();
       setAcctTab('bills');
       await afterChange();
+    } catch (e: any) { toast.error(e.message || 'Failed'); } finally { setBusy(false); }
+  };
+
+  const handleSaveRule = async () => {
+    if (!acct) return;
+    setBusy(true);
+    try {
+      const r = await manageSupplierBills({ action: 'setRule', supplierId: acct.id, minPieces: Number(ruleMin) || 0, perPiece: Number(rulePer) || 0 });
+      setRule((r.rule as SurchargeRule | null) ?? null);
+      toast.success(r.rule ? 'Small-order charge saved' : 'Small-order charge turned off');
     } catch (e: any) { toast.error(e.message || 'Failed'); } finally { setBusy(false); }
   };
 
@@ -532,7 +600,7 @@ export default function SuppliersPage() {
               </div>
               {can('suppliers', 'edit') && <div className="flex flex-wrap gap-2">
                 <Button size="sm" onClick={() => setDepositOpen(true)}><Plus className="w-4 h-4 mr-1" /> Add Deposit</Button>
-                <Button size="sm" variant="outline" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={() => setBillOpen(true)}><Receipt className="w-4 h-4 mr-1" /> Add Bill</Button>
+                <Button size="sm" variant="outline" className="border-pink-500 text-pink-400 hover:bg-pink-500/10" onClick={openNewBill}><Receipt className="w-4 h-4 mr-1" /> Add Bill</Button>
                 <Button size="sm" variant="outline" onClick={() => setLocOpen(true)}><MapPin className="w-4 h-4 mr-1" /> Add Location</Button>
               </div>}
 
@@ -562,6 +630,26 @@ export default function SuppliersPage() {
                 </TabsContent>
 
                 <TabsContent value="bills" className="mt-3 space-y-1.5">
+                  {/* Small-order charge this supplier adds to orders with few pieces */}
+                  <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs space-y-1.5">
+                    <p className="font-medium text-foreground">
+                      Small-order charge:{' '}
+                      <span className="text-amber-500">
+                        {ruleIsActive(rule) ? `KES ${rule.perPiece.toLocaleString()} per piece when an order has fewer than ${rule.minPieces} pieces` : 'none'}
+                      </span>
+                    </p>
+                    {can('suppliers', 'edit') && (
+                      <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground">
+                        <span>KES</span>
+                        <Input type="number" min={0} value={rulePer} onChange={e => setRulePer(e.target.value)} placeholder="50" className="h-7 w-20 text-xs" />
+                        <span>per piece when fewer than</span>
+                        <Input type="number" min={0} value={ruleMin} onChange={e => setRuleMin(e.target.value)} placeholder="10" className="h-7 w-16 text-xs" />
+                        <span>pieces</span>
+                        <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" disabled={busy} onClick={handleSaveRule}>Save</Button>
+                      </div>
+                    )}
+                    <p className="text-[10px] text-muted-foreground">All pieces in an order count together, e.g. under 10 pcs at KES 50: 9 pcs adds KES 450. Applied to new bills with items, including POS pick-ups; leave a box at 0 to turn it off.</p>
+                  </div>
                   {acctLoading && bills.length === 0 ? <p className="text-sm text-muted-foreground py-4 text-center">Loading...</p>
                     : bills.length === 0 ? <p className="text-sm text-muted-foreground py-4 text-center">No bills yet. Add one, or select picked-up items on a POS route.</p>
                     : bills.map(b => (
@@ -577,7 +665,15 @@ export default function SuppliersPage() {
                             </p>
                             {b.notes && <p className="text-muted-foreground break-words mt-0.5">{b.notes}</p>}
                             {b.items && b.items.length > 0 && (
-                              <p className="text-muted-foreground break-words mt-0.5">{b.items.map(i => `${i.quantity}× ${i.name}`).join(', ')}</p>
+                              <div className="text-muted-foreground mt-0.5 space-y-0.5">
+                                {b.items.map((i, idx) => (
+                                  <p key={idx} className="break-words">
+                                    {i.quantity}× {i.name} @ {fmt(i.unitCost)}
+                                    {!(i.unitCost > 0) && <span className="text-amber-500"> (no cost price)</span>}
+                                  </p>
+                                ))}
+                                {(b.surcharge || 0) > 0 && <p className="text-amber-500 break-words">+ Small-order charge {fmt(b.surcharge || 0)}{b.surchargeNote ? ` · ${b.surchargeNote}` : ''}</p>}
+                              </div>
                             )}
                           </div>
                           <p className="font-bold text-foreground shrink-0">{fmt(b.amount)}</p>
@@ -585,6 +681,7 @@ export default function SuppliersPage() {
                         <div className="flex gap-1.5 justify-end">
                           {b.status === 'pending' && (
                             <>
+                              {can('suppliers', 'edit') && <Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" disabled={busy} onClick={() => openEditBill(b)} title="Change items, cost prices or amount"><Pencil className="w-3 h-3 mr-1" />Edit</Button>}
                               <Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" disabled={busy} onClick={() => handlePayBill(b, false)}>Mark paid</Button>
                               <Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" disabled={busy || (acct.depositBalance || 0) < b.amount} onClick={() => handlePayBill(b, true)} title={(acct.depositBalance || 0) < b.amount ? 'Deposit balance is too low' : 'Pay from deposit'}>Pay from deposit</Button>
                               <Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" disabled={busy || (pettyBalance ?? 0) < b.amount} onClick={() => handlePayBill(b, false, true)} title={(pettyBalance ?? 0) < b.amount ? `Petty cash is too low (${fmt(pettyBalance ?? 0)})` : `Pay from ${currentBranch?.branchName || 'outlet'} petty cash (${fmt(pettyBalance ?? 0)})`}>Pay from petty cash</Button>
@@ -647,24 +744,70 @@ export default function SuppliersPage() {
       </Dialog>
 
       {/* Add bill */}
-      <Dialog open={billOpen} onOpenChange={setBillOpen}>
-        <DialogContent className="max-w-sm">
+      <Dialog open={billOpen} onOpenChange={o => { setBillOpen(o); if (!o) resetBillForm(); }}>
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Add Bill — {acct?.supplierName}</DialogTitle>
-            <DialogDescription>An amount owed to the supplier, e.g. stock taken on credit. It stays pending until paid.</DialogDescription>
+            <DialogTitle>{editingBill ? 'Edit Bill' : 'Add Bill'} — {acct?.supplierName}</DialogTitle>
+            <DialogDescription>
+              Add the products with their cost prices and the total is worked out for you, including this supplier's small-order charge.
+              Or, with no products, just enter the amount owed. It stays pending until paid.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
+            <Field label="Products">
+              <ProductMultiSearch
+                items={costProducts}
+                stockOf={p => Number(p.stockQuantity) || 0}
+                addedIds={billItems.map(i => i.productId)}
+                onAdd={addBillProducts}
+                placeholder="Search products to add..."
+                showOnFocus
+              />
+            </Field>
+
+            {billItems.length > 0 && (
+              <div className="rounded-md border border-border overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/50 text-muted-foreground">
+                    <tr><th className="p-2 text-left">Product</th><th className="p-2 w-20">Pieces</th><th className="p-2 w-28">Cost price (KES)</th><th className="p-2 text-right w-24">Line</th><th className="w-8" /></tr>
+                  </thead>
+                  <tbody>
+                    {billItems.map((it, idx) => (
+                      <tr key={`${it.productId}-${idx}`} className="border-t border-border">
+                        <td className="p-2 break-words">{it.name}</td>
+                        <td className="p-1"><Input type="number" min={1} value={it.quantity || ''} onChange={e => setItem(idx, { quantity: Math.max(0, Math.round(Number(e.target.value) || 0)) })} className="h-7 text-xs" /></td>
+                        <td className="p-1"><Input type="number" min={0} value={it.unitCost || ''} onChange={e => setItem(idx, { unitCost: Math.max(0, Number(e.target.value) || 0) })} placeholder="0" className={`h-7 text-xs ${!(it.unitCost > 0) ? 'border-amber-500' : ''}`} /></td>
+                        <td className="p-2 text-right whitespace-nowrap">{fmt((it.quantity || 0) * (it.unitCost || 0))}</td>
+                        <td className="p-1"><Button size="sm" variant="ghost" className="h-6 px-1.5 text-destructive" onClick={() => setBillItems(prev => prev.filter((_, i) => i !== idx))}><Trash2 className="w-3 h-3" /></Button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="border-t border-border bg-muted/30 px-3 py-2 text-xs space-y-0.5">
+                  <div className="flex justify-between"><span className="text-muted-foreground">Items ({billPrice.pieces} pcs)</span><span>{fmt(billPrice.itemsTotal)}</span></div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Small-order charge{billPrice.surchargeNote ? ` (${billPrice.surchargeNote})` : ruleIsActive(rule) ? ` (none: ${rule.minPieces}+ pcs)` : ' (none set)'}</span>
+                    <span className={billPrice.surcharge > 0 ? 'text-amber-500' : ''}>{fmt(billPrice.surcharge)}</span>
+                  </div>
+                  <div className="flex justify-between font-semibold text-sm pt-1"><span>Bill total</span><span>{fmt(billPrice.amount)}</span></div>
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Amount (KES)" required error={billAmount !== '' && !(Number(billAmount) > 0) ? 'Amount must be more than 0' : ''}>
-                <Input type="number" min={0} value={billAmount} onChange={e => setBillAmount(e.target.value)} placeholder="0.00" />
-              </Field>
+              {billItems.length === 0 ? (
+                <Field label="Amount (KES)" required error={billAmount !== '' && !(Number(billAmount) > 0) ? 'Amount must be more than 0' : ''}>
+                  <Input type="number" min={0} value={billAmount} onChange={e => setBillAmount(e.target.value)} placeholder="0.00" />
+                </Field>
+              ) : <div />}
               <Field label="Date"><DatePicker value={billDate} onChange={setBillDate} /></Field>
             </div>
             <Field label="Description / notes"><Input value={billNotes} onChange={e => setBillNotes(e.target.value)} placeholder="e.g. 20 disposables on credit" /></Field>
+            {billItems.some(i => !(i.unitCost > 0)) && <p className="text-[11px] text-amber-500">Some products have no cost price yet: enter it so the bill is complete.</p>}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setBillOpen(false)}>Cancel</Button>
-            <SubmitButton onClick={handleAddBill} busy={busy} disabled={!(Number(billAmount) > 0)}>Record Bill</SubmitButton>
+            <Button variant="outline" onClick={() => { setBillOpen(false); resetBillForm(); }}>Cancel</Button>
+            <SubmitButton onClick={handleSaveBill} busy={busy} disabled={!(billTotal > 0)}>{editingBill ? 'Save Bill' : 'Record Bill'}</SubmitButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
