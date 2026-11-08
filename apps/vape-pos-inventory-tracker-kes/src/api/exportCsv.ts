@@ -26,22 +26,30 @@ export default createEndpoint({
     switch (input.table) {
       case 'products': {
         const [{ records }, catRows] = await Promise.all([zite.products.findAll({ limit: 2000 }), loadCategoryRows()]);
-        // Category = the top-level category; Subcategory = the one under it (blank when the product sits directly in a top-level category).
+        // Category = the top-level category; Subcategory = the path below it, levels joined by " > "
+        // (e.g. "Salt Nic > 20mg"; blank when the product sits directly in a top-level category). Import reads the same shape.
         const catById = new Map<string, { categoryName?: string; parentId: string | null }>(
           catRows.map((c: any) => [c.id, { categoryName: c.categoryName, parentId: c.parentId }]),
         );
         rows = records.map(r => {
           const catId = Array.isArray(r.category) ? r.category[0] : r.category;
-          const cat = catId ? catById.get(catId) : undefined;
-          const parent = cat?.parentId ? catById.get(cat.parentId) : undefined;
+          // Names from the top-level category down to the product's own category (stops on a missing parent or a loop).
+          const chain: string[] = [];
+          const seen = new Set<string>();
+          let cur = catId || '';
+          while (cur && catById.has(cur) && !seen.has(cur)) {
+            seen.add(cur);
+            chain.unshift(catById.get(cur)!.categoryName || '');
+            cur = catById.get(cur)!.parentId || '';
+          }
           return {
             'Product Name': r.productName || '',
             'SKU': r.sku || '',
             'Cost Price': r.costPrice || 0,
             'Selling Price': r.sellingPrice || 0,
             'Stock Quantity': r.stockQuantity || 0,
-            'Category': parent ? (parent.categoryName || '') : (cat?.categoryName || ''),
-            'Subcategory': parent ? (cat?.categoryName || '') : '',
+            'Category': chain[0] || '',
+            'Subcategory': chain.slice(1).join(' > '),
             'Image URL': (r as any).images?.[0]?.url || '',
           };
         });
