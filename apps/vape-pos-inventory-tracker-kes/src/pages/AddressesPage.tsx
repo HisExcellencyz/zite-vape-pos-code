@@ -187,8 +187,8 @@ export default function AddressesPage() {
   return (
     <div className="p-3 space-y-2">
       <Tabs value={tab} onValueChange={setTab}>
-        {/* Row 1: title (and add button). Row 2: the ribbon tabs, below the title */}
-        <div className="flex items-center justify-between gap-3">
+        {/* Row 1: title (and add button), frozen at the top. Row 2: the ribbon tabs, below the title */}
+        <div className="sticky top-0 z-20 -mx-3 -mt-3 px-3 pt-3 pb-2 bg-background border-b border-border flex items-center justify-between gap-3">
           <div className="flex items-baseline gap-3 flex-wrap">
             <h1 className="text-xl font-bold text-foreground leading-tight">Addresses</h1>
             <span className="text-xs text-muted-foreground">

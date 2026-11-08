@@ -10,10 +10,10 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@project/components/ui/select';
 import { Switch } from '@project/components/ui/switch';
 import { Textarea } from '@project/components/ui/textarea';
-import { Search, Plus, Pencil, Trash2, FolderTree, CheckSquare, FolderOpen, CornerDownRight } from 'lucide-react';
+import { Search, Plus, Pencil, Trash2, FolderTree, CheckSquare, FolderOpen, CornerDownRight, ArrowUp } from 'lucide-react';
 import { toast } from 'sonner';
 import ViewToggle, { useViewMode } from '../components/ViewToggle';
-import { buildCategoryTree } from '../components/CategoryRibbon';
+import { buildCategoryTree, flattenCategories } from '../components/CategoryRibbon';
 import { usePermissions } from '../hooks/usePermissions';
 import { Field, SubmitButton, DESTRUCTIVE } from '../components/DialogKit';
 import { SearchInput, matchesQuery } from '@project/components/search';
@@ -23,7 +23,7 @@ interface Category {
   categoryName?: string;
   description?: string;
   active?: boolean;
-  /** Set for sub-categories: the id of the category they sit under. */
+  /** Set for sub-categories (any depth): the id of the category they sit under. */
   parentId?: string | null;
 }
 
@@ -115,52 +115,40 @@ export default function CategoriesPage() {
   };
 
   /**
-   * One category per line. Write "Parent > Subcategory" for a subcategory, e.g.
+   * One category per line, with ">" between levels, e.g.
    *   E-Liquids
    *   E-Liquids > Salt Nic
-   * Names that already exist (under the same parent) are skipped.
+   *   E-Liquids > Salt Nic > 20mg
+   * Every level on the path is created when it does not exist yet; names that already exist (under the same parent) are skipped.
    */
   const handleBulkCreate = async () => {
     const lines = bulkText.split('\n').map(n => n.trim()).filter(Boolean);
     if (!lines.length) { toast.error('Enter at least one category name'); return; }
     const norm = (s: string) => s.trim().toLowerCase();
-    const topIds = new Map<string, string>(); // lower-case name -> id of a top-level category
-    tree.tops.forEach(t => topIds.set(norm(t.categoryName || ''), t.id));
-    const subKeys = new Set<string>(); // "parentId|name" of existing subcategories
-    tree.kids.forEach((list, pid) => list.forEach(k => subKeys.add(`${pid}|${norm(k.categoryName || '')}`)));
+    // "parentId|name" -> id for every existing category ("" as the parent of top-level ones)
+    const known = new Map<string, string>();
+    categories.forEach(c => known.set(`${tree.parentOf.get(c.id) || ''}|${norm(c.categoryName || '')}`, c.id));
 
     let created = 0, skipped = 0, failed = 0;
-    const ensureTop = async (n: string): Promise<string | null> => {
-      const hit = topIds.get(norm(n));
-      if (hit) return hit;
-      try {
-        const res = await saveCategory({ categoryName: n, active: true });
-        topIds.set(norm(n), res.category.id);
-        created++;
-        return res.category.id as string;
-      } catch { failed++; return null; }
-    };
-
-    // Top-level names first (explicit lines and the parents named in "Parent > Child" lines), so order in the box does not matter.
     for (const line of lines) {
       const parts = line.split('>').map(p => p.trim()).filter(Boolean);
-      if (parts.length === 1) {
-        if (topIds.has(norm(parts[0]))) skipped++; else await ensureTop(parts[0]);
+      let parent = '';
+      let madeAny = false;
+      for (const part of parts) {
+        const key = `${parent}|${norm(part)}`;
+        let id = known.get(key);
+        if (!id) {
+          try {
+            const res = await saveCategory({ categoryName: part, active: true, parentId: parent || null });
+            id = res.category.id as string;
+            known.set(key, id);
+            created++;
+            madeAny = true;
+          } catch { failed++; break; }
+        }
+        parent = id;
       }
-    }
-    for (const line of lines) {
-      const parts = line.split('>').map(p => p.trim()).filter(Boolean);
-      if (parts.length < 2) continue;
-      const pid = await ensureTop(parts[0]);
-      if (!pid) continue;
-      const sub = parts.slice(1).join(' > ');
-      const key = `${pid}|${norm(sub)}`;
-      if (subKeys.has(key)) { skipped++; continue; }
-      try {
-        await saveCategory({ categoryName: sub, active: true, parentId: pid });
-        subKeys.add(key);
-        created++;
-      } catch { failed++; }
+      if (!madeAny) skipped++;
     }
 
     toast.success(`Created ${created} categories${skipped ? `, ${skipped} already existed` : ''}${failed ? `, ${failed} failed` : ''}`);
@@ -169,12 +157,13 @@ export default function CategoriesPage() {
     load();
   };
 
-  // Only main categories are listed here. Subcategories live behind each category's "Subcategories" button.
-  // A search keeps a main category when its own name matches or when one of its subcategories matches.
+  // Only main categories are listed here. Subcategories (at any depth) live behind each category's "Subs" button.
+  // A search keeps a main category when its own name matches or when any category under it matches.
   const q = search.trim();
   const hit = (c: Category) => matchesQuery([c.categoryName], q);
-  const filtered: Category[] = tree.tops.filter(t => !q || hit(t) || kidsOf(t.id).some(hit));
-  const subMatchOnly = (t: Category) => !!q && !hit(t) && kidsOf(t.id).some(hit);
+  const deepHit = (id: string) => tree.descendantsOf(id).some(d => { const c = tree.byId.get(d); return !!c && hit(c); });
+  const filtered: Category[] = tree.tops.filter(t => !q || hit(t) || deepHit(t.id));
+  const subMatchOnly = (t: Category) => !!q && !hit(t) && deepHit(t.id);
 
   const toggleSelect = (id: string) => {
     const next = new Set(selectedIds);
@@ -216,7 +205,7 @@ export default function CategoriesPage() {
           <AlertDialogTitle>Delete {isSub ? 'subcategory' : 'category'}?</AlertDialogTitle>
           <AlertDialogDescription>
             This will remove "{c.categoryName}" permanently.
-            {!isSub && kidCount(c.id) > 0 && <> Its {kidCount(c.id)} subcategor{kidCount(c.id) === 1 ? 'y' : 'ies'} will be kept and shown as main categories.</>}
+            {kidCount(c.id) > 0 && <> Its {kidCount(c.id)} subcategor{kidCount(c.id) === 1 ? 'y' : 'ies'} (and everything under them) will be kept; the subcategories become main categories.</>}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction className={DESTRUCTIVE} onClick={() => handleDelete(c.id)}>Delete</AlertDialogAction></AlertDialogFooter>
@@ -242,14 +231,17 @@ export default function CategoriesPage() {
     </div>
   );
 
-  const editingHasKids = !!editing && kidCount(editing.id) > 0;
+  // A category can move under any other category except itself and the ones already under it (that would make a loop).
+  const parentChoices = flattenCategories(categories).filter(o =>
+    !editing || (o.id !== editing.id && !tree.descendantsOf(editing.id).includes(o.id)));
+  const subsPath = subsFor ? tree.ancestorsOf(subsFor.id) : [];
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div className="sticky top-0 z-20 -mx-6 -mt-6 px-6 pt-6 pb-4 bg-background border-b border-border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Categories</h1>
-          <p className="text-sm text-muted-foreground">{tree.tops.length} categories · subcategories are opened from each category's Subs button</p>
+          <p className="text-sm text-muted-foreground">{tree.tops.length} main categories · open a category's Subs to see the levels under it</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <ViewToggle value={viewMode} onChange={setViewMode} />
@@ -349,10 +341,19 @@ export default function CategoriesPage() {
         <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 break-words pr-6"><FolderOpen className="w-5 h-5 text-sky-400 shrink-0" /> Subcategories of {subsFor?.categoryName}</DialogTitle>
-            <DialogDescription>The categories listed under this main category.</DialogDescription>
+            <DialogDescription>
+              {subsPath.length > 0
+                ? <>Inside {subsPath.map(a => a.categoryName).join(' › ')}. Open a subcategory's Subs to go a level deeper.</>
+                : <>The categories directly under this main category. Open a subcategory's Subs to go a level deeper.</>}
+            </DialogDescription>
           </DialogHeader>
           {subsFor && (
             <div className="space-y-2">
+              {subsPath.length > 0 && (
+                <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setSubsForId(subsPath[subsPath.length - 1].id)}>
+                  <ArrowUp className="w-3.5 h-3.5 mr-1" /> Up to {subsPath[subsPath.length - 1].categoryName}
+                </Button>
+              )}
               {kidsOf(subsFor.id).length === 0 ? (
                 <p className="text-sm text-muted-foreground py-6 text-center">No subcategories yet.</p>
               ) : kidsOf(subsFor.id).map(k => (
@@ -361,6 +362,16 @@ export default function CategoriesPage() {
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-foreground break-words whitespace-normal">{k.categoryName}</p>
                     {(k as { description?: string }).description && <p className="text-xs text-muted-foreground break-words whitespace-normal">{(k as { description?: string }).description}</p>}
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      <Button variant="outline" size="sm" className="h-6 px-2 text-[11px] border-sky-500/70" title="Open the subcategories under this one" onClick={() => setSubsForId(k.id)}>
+                        <FolderOpen className="w-3 h-3 mr-1" /> Subs ({kidCount(k.id)})
+                      </Button>
+                      {can('categories', 'create') && (
+                        <Button variant="outline" size="sm" className="h-6 px-2 text-[11px] border-amber-400/70" title="Create a subcategory under this one" onClick={() => openNew(k.id)}>
+                          <Plus className="w-3 h-3 mr-1" /> Subcategory
+                        </Button>
+                      )}
+                    </div>
                   </div>
                   <Badge variant={k.active !== false ? 'default' : 'secondary'} className="shrink-0">{k.active !== false ? 'Active' : 'Inactive'}</Badge>
                   <div className="flex shrink-0">
@@ -385,19 +396,17 @@ export default function CategoriesPage() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{editing ? (editing.parentId ? 'Edit Subcategory' : 'Edit Category') : parentId !== NO_PARENT ? 'Add Subcategory' : 'Add Category'}</DialogTitle>
-            <DialogDescription>Categories group SKUs on the POS and in reports. A subcategory sits under one main category.</DialogDescription>
+            <DialogDescription>Categories group SKUs on the POS and in reports. A subcategory sits under another category, and can have subcategories of its own.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <Field label="Name" required><Input value={name} onChange={e => setName(e.target.value)} placeholder={parentId !== NO_PARENT ? 'e.g. Salt Nic' : 'e.g. E-Liquids'} /></Field>
-            <Field label="Parent category" hint={editingHasKids
-              ? 'This category has subcategories, so it stays a main category. Move or delete its subcategories first.'
-              : 'Pick a parent to make this a subcategory. Only two levels are allowed.'}>
-              <Select value={parentId} onValueChange={setParentId} disabled={editingHasKids}>
+            <Field label="Parent category" hint="Pick any category to put this one under it (any number of levels). Subcategories move along with it.">
+              <Select value={parentId} onValueChange={setParentId}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value={NO_PARENT}>None (main category)</SelectItem>
-                  {tree.tops.filter(t => t.id !== editing?.id).map(t => (
-                    <SelectItem key={t.id} value={t.id}>{t.categoryName}</SelectItem>
+                  {parentChoices.map(o => (
+                    <SelectItem key={o.id} value={o.id}>{o.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -421,12 +430,13 @@ export default function CategoriesPage() {
           <DialogHeader>
             <DialogTitle>Bulk Create Categories</DialogTitle>
             <DialogDescription>
-              Enter one category per line. For a subcategory write <span className="font-medium text-foreground">Category &gt; Subcategory</span>.
-              The main category is created automatically if it does not exist, and names that already exist are skipped.
+              Enter one category per line, with <span className="font-medium text-foreground">&gt;</span> between levels, e.g.
+              <span className="font-medium text-foreground"> E-Liquids &gt; Salt Nic &gt; 20mg</span>. Every level is created if it does not
+              exist yet, and names that already exist are skipped.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <Textarea value={bulkText} onChange={e => setBulkText(e.target.value)} placeholder={"E-Liquids\nE-Liquids > Salt Nic\nE-Liquids > Freebase\nDisposables\nAccessories > Coils"} rows={8} />
+            <Textarea value={bulkText} onChange={e => setBulkText(e.target.value)} placeholder={"E-Liquids\nE-Liquids > Salt Nic\nE-Liquids > Salt Nic > 20mg\nDisposables\nAccessories > Coils"} rows={8} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setBulkOpen(false)}>Cancel</Button>

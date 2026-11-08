@@ -243,7 +243,7 @@ export default function UsersPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
+      <div className="sticky top-0 z-20 -mx-6 -mt-6 px-6 pt-6 pb-4 bg-background border-b border-border flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Users & Roles</h1>
           <p className="text-sm text-muted-foreground">Invite team members, assign roles and control access</p>
