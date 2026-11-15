@@ -24,8 +24,9 @@ export default createEndpoint({
 
     switch (input.table) {
       case 'products': {
-        // Two-level categories: "Category" is the top-level one, "Subcategory" (optional) the one under it.
-        // Both are matched by name (ignoring capitals) and created when they do not exist yet.
+        // Multi-level categories: "Category" is the top-level one; "Subcategory" (optional) is the path under it,
+        // with ">" between levels (e.g. "Salt Nic > 20mg"). Each level is matched by name (ignoring capitals)
+        // under its parent and created when it does not exist yet.
         type CatRow = { id: string; categoryName?: string; parentId: string | null };
         const cats: CatRow[] = (await loadCategoryRows()) as CatRow[];
         const findCat = (name: string, parentId: string | null) =>
@@ -53,12 +54,15 @@ export default createEndpoint({
             let categoryId: string | undefined;
             const categoryName = (row['Category'] || row['category'] || '').trim();
             const subName = (row['Subcategory'] || row['subcategory'] || row['Sub Category'] || row['Sub-category'] || '').trim();
+            const subParts = subName.split('>').map(s => s.trim()).filter(Boolean);
             if (categoryName) {
-              const topId = await ensureCat(categoryName, null);
-              categoryId = subName ? await ensureCat(subName, topId) : topId;
-            } else if (subName) {
-              // Subcategory without a Category: only usable when exactly one existing sub-category has that name.
-              const hits = cats.filter(c => c.parentId && sameName(c.categoryName, subName));
+              let id = await ensureCat(categoryName, null);
+              for (const part of subParts) id = await ensureCat(part, id);
+              categoryId = id;
+            } else if (subParts.length) {
+              // Subcategory without a Category: only usable when exactly one existing sub-category has that (last) name.
+              const last = subParts[subParts.length - 1];
+              const hits = cats.filter(c => c.parentId && sameName(c.categoryName, last));
               if (hits.length === 1) categoryId = hits[0].id;
               else errors.push(`SKU ${sku}: Subcategory "${subName}" needs a Category in the same row, category left unchanged`);
             }

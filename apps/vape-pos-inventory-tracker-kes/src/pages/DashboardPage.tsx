@@ -186,7 +186,7 @@ export default function DashboardPage({ scope = 'outlet' }: { scope?: 'outlet' |
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div className="sticky top-0 z-20 -mx-6 -mt-6 px-6 pt-6 pb-4 bg-background border-b border-border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">{scope === 'business' ? 'Business Overview' : 'Dashboard'}</h1>
           <p className="text-sm text-muted-foreground flex items-center gap-1.5">

@@ -340,7 +340,7 @@ export default function StoragesPage() {
 
   return (
     <div className="p-6 space-y-5">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+      <div className="sticky top-0 z-20 -mx-6 -mt-6 px-6 pt-6 pb-4 bg-background border-b border-border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-foreground">Storages</h1>
         <div className="flex items-center gap-2 flex-wrap">
           <Button asChild variant="outline" size="sm"><Link to="/inventory"><ArrowLeft className="w-4 h-4 mr-1" /> Inventory</Link></Button>

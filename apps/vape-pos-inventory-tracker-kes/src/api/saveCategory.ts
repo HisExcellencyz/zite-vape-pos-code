@@ -4,7 +4,7 @@ import { zite } from 'zitejs/db';
 import { readCategoryParents, writeCategoryParent } from '../lib/categoryParents';
 
 export default createEndpoint({
-  description: 'Create or update a category. parentId makes it a sub-category of that category (two levels only); null or empty makes it top-level.',
+  description: 'Create or update a category. parentId puts it under that category (any number of levels); null or empty makes it top-level.',
   authenticated: true,
   inputSchema: z.object({
     id: z.string().optional(),
@@ -18,7 +18,7 @@ export default createEndpoint({
   execute: async ({ input }) => {
     const parents = await readCategoryParents();
 
-    // Validate the requested parent: it must exist, be top-level itself, and not be this category.
+    // Validate the requested parent: it must exist, and it cannot be this category or one under it (that would make a loop).
     let newParent: string | null | undefined = undefined;
     if (input.parentId !== undefined) {
       newParent = input.parentId || null;
@@ -26,9 +26,15 @@ export default createEndpoint({
         if (newParent === input.id) throw new Error('A category cannot be its own parent');
         const parent = await zite.categories.findOne({ id: newParent });
         if (!parent) throw new Error('The chosen parent category no longer exists');
-        if (parents[newParent]) throw new Error('Only two levels are allowed: a sub-category cannot have sub-categories');
-        if (input.id && Object.values(parents).includes(input.id)) {
-          throw new Error('This category already has sub-categories, so it cannot become a sub-category itself');
+        if (input.id) {
+          // Walk up from the new parent: reaching this category means the parent sits under it.
+          const seen = new Set<string>();
+          let cur: string | undefined = newParent;
+          while (cur && !seen.has(cur)) {
+            if (cur === input.id) throw new Error('A category cannot be moved under one of its own subcategories');
+            seen.add(cur);
+            cur = parents[cur];
+          }
         }
       }
     }

@@ -309,7 +309,7 @@ export default function SettingsPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
+      <div className="sticky top-0 z-20 -mx-6 -mt-6 px-6 pt-6 pb-4 bg-background border-b border-border flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Settings</h1>
           <p className="text-sm text-muted-foreground">Manage your outlets, business overview and delivery</p>

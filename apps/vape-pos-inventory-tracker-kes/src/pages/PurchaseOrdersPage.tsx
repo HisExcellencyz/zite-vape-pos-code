@@ -127,12 +127,13 @@ export default function PurchaseOrdersPage() {
   }, [supplierId]);
 
   // Products offered in the search dropdown: those the supplier supplies (directly, or through a ticked
-  // category and its subcategories). A supplier with nothing ticked yet offers the whole catalogue.
+  // category and everything under it, at any depth). A supplier with nothing ticked yet offers the whole catalogue.
   const supplierProducts = useMemo(() => {
     if (!supplies || (supplies.productIds.length === 0 && supplies.categoryIds.length === 0)) return products;
-    const { kids } = buildCategoryTree(categories);
+    // A ticked category covers every level under it.
+    const { descendantsOf } = buildCategoryTree(categories);
     const cats = new Set<string>();
-    supplies.categoryIds.forEach(cid => { cats.add(cid); (kids.get(cid) || []).forEach(k => cats.add(k.id)); });
+    supplies.categoryIds.forEach(cid => { cats.add(cid); descendantsOf(cid).forEach(id => cats.add(id)); });
     const direct = new Set(supplies.productIds);
     return products.filter(p => direct.has(p.id) || cats.has(productCategoryId(p)));
   }, [products, categories, supplies]);
@@ -285,7 +286,7 @@ export default function PurchaseOrdersPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div className="sticky top-0 z-20 -mx-6 -mt-6 px-6 pt-6 pb-4 bg-background border-b border-border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Purchase Orders</h1>
           <p className="text-sm text-muted-foreground">{orders.length} LPOs</p>

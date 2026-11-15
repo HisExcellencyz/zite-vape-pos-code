@@ -39,11 +39,11 @@ export default function SupplierSuppliesEditor({ supplierId, canEdit }: { suppli
 
   const catOptions = useMemo(() => flattenCategories(categories), [categories]);
 
-  // Product ids covered by a ticked category (including its subcategories).
+  // Category ids covered by a ticked category (itself and every level under it).
   const covered = useMemo(() => {
-    const { kids } = buildCategoryTree(categories);
+    const { descendantsOf } = buildCategoryTree(categories);
     const ids = new Set<string>();
-    catIds.forEach(cid => { ids.add(cid); (kids.get(cid) || []).forEach(k => ids.add(k.id)); });
+    catIds.forEach(cid => { ids.add(cid); descendantsOf(cid).forEach(id => ids.add(id)); });
     return ids;
   }, [categories, catIds]);
   const viaCategory = (p: Product) => covered.has(productCategoryId(p));
